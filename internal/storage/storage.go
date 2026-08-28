@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -62,10 +63,33 @@ type Store struct {
 	DB *sql.DB
 }
 
+// busyTimeoutMS bounds how long a writer that still contends retries
+// before failing with SQLITE_BUSY. 5s is a generous margin for this
+// single-process, low-request-volume tool's actual write durations
+// (single-row upserts/inserts); tune down if writes ever need to fail
+// fast instead of briefly blocking a request.
+const busyTimeoutMS = 5000
+
+// connPragmas configures every connection modernc.org/sqlite opens for
+// this DSN (see its DSN query-parameter handling) with WAL journal mode
+// (lets readers and a writer proceed concurrently, instead of the default
+// rollback journal's whole-file write lock) and busyTimeoutMS. Without
+// these, concurrent writers reliably produce SQLITE_BUSY errors (see
+// issue #23).
+var connPragmas = fmt.Sprintf("_journal_mode=WAL&_busy_timeout=%d", busyTimeoutMS)
+
 // Open opens (creating if necessary) the SQLite database at path. Callers
 // must call Bootstrap before relying on the schema, and Close when done.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// path (e.g. from EVE_TRADER_DB_PATH) is concatenated with "?" plus
+	// connPragmas to form the driver's DSN; a literal "?" in path would
+	// be parsed as the start of that query string instead, silently
+	// truncating the path modernc.org/sqlite actually opens.
+	if strings.Contains(path, "?") {
+		return nil, fmt.Errorf("open sqlite database: path %q must not contain '?'", path)
+	}
+
+	db, err := sql.Open("sqlite", path+"?"+connPragmas)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}

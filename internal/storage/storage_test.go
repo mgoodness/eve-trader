@@ -5,9 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestOpenRejectsPathContainingQuestionMark(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "eve-trader?.db")
+
+	if _, err := Open(path); err == nil {
+		t.Fatal("Open: want error for a path containing '?', got nil")
+	}
+}
 
 func TestBootstrapCreatesSchema(t *testing.T) {
 	ctx := context.Background()
@@ -48,6 +58,79 @@ func TestPing(t *testing.T) {
 
 	if err := store.Ping(ctx); err != nil {
 		t.Fatalf("Ping: %v", err)
+	}
+}
+
+func TestOpenEnablesWALJournalMode(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	var mode string
+	if err := store.DB.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Errorf("journal_mode = %q, want wal", mode)
+	}
+}
+
+func TestOpenConfiguresBusyTimeout(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	var timeoutMs int
+	if err := store.DB.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&timeoutMs); err != nil {
+		t.Fatalf("query busy_timeout: %v", err)
+	}
+	if timeoutMs != busyTimeoutMS {
+		t.Errorf("busy_timeout = %dms, want %dms", timeoutMs, busyTimeoutMS)
+	}
+}
+
+// TestConcurrentWritersDoNotProduceSQLiteBusy is the AC-mandated
+// regression test: many goroutines writing to the same temp-file
+// database concurrently must not surface SQLITE_BUSY ("database is
+// locked") errors, which they reliably did before WAL mode + busy_timeout
+// were configured (see issue #17's investigation and issue #23).
+func TestConcurrentWritersDoNotProduceSQLiteBusy(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	const concurrency = 20
+	now := time.Now()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, concurrency)
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := store.InsertAlertFeedEntry(ctx, AlertFeedEntry{
+				OrderID:    int64(i),
+				AlertType:  "undercut",
+				TypeID:     34,
+				LocationID: 60003760,
+				Detail:     fmt.Sprintf("entry-%d", i),
+				CreatedAt:  now.Add(time.Duration(i) * time.Millisecond),
+			})
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("InsertAlertFeedEntry: %v", err)
+	}
+
+	got, err := store.RecentAlertFeed(ctx, concurrency+10)
+	if err != nil {
+		t.Fatalf("RecentAlertFeed: %v", err)
+	}
+	if len(got) != concurrency {
+		t.Fatalf("feed entries = %d, want %d", len(got), concurrency)
 	}
 }
 
