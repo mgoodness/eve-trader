@@ -1,0 +1,372 @@
+<!--
+  PROTOTYPE — throwaway, not production code.
+  Question: what should the eve-trader dashboard look like and how should it behave?
+  Three variants of the dashboard (Open Orders + in-app Alerts + Opportunity Scanner
+  results), switchable via ?variant=A|B|C, on a new throwaway page — there's no
+  existing app yet to embed variants into (repo has no code, only docs/decisions so far).
+  Fake data only. No backend, no persistence, no real ESI calls.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE — eve-trader dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2129;
+    --border: #2a3038;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1, h2, h3 { font-weight: 600; margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--border); text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: var(--mono); }
+  .dim { color: var(--text-dim); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill-undercut { background: rgba(248,81,73,0.15); color: var(--red); }
+  .pill-expiring { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .pill-pricemoved { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .pill-clean { background: rgba(63,185,80,0.12); color: var(--green); }
+  .pill-buy { background: rgba(63,185,80,0.15); color: var(--green); }
+  .pill-sell { background: rgba(248,81,73,0.12); color: #ff7b72; }
+  .row-undercut { box-shadow: inset 3px 0 0 var(--red); }
+  .row-expiring { box-shadow: inset 3px 0 0 var(--yellow); }
+  .row-pricemoved { box-shadow: inset 3px 0 0 var(--blue); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .panel-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+  .margin-pos { color: var(--green); }
+
+  /* ---- Switcher ---- */
+  #switcher {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 999px;
+    padding: 6px 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    z-index: 1000;
+    font-family: -apple-system, sans-serif;
+  }
+  #switcher button {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #switcher button:hover { background: #30363d; }
+  #switcher .label {
+    padding: 0 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 220px;
+    text-align: center;
+  }
+  #switcher .label b { color: var(--text); }
+
+  .app { display: none; padding: 20px; max-width: 1400px; margin: 0 auto 80px; }
+  .app.active { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- VARIANT A — Split-panel command center                        -->
+<!-- Dense monitoring layout: sidebar of orders, main area split    -->
+<!-- into opportunity scanner (top) and chronological alert feed    -->
+<!-- (bottom). Alerts also badge directly onto order rows.          -->
+<!-- ============================================================ -->
+<div class="app" id="variant-A" style="display:grid; grid-template-columns: 340px 1fr; gap: 16px;">
+  <div style="grid-column: 1 / -1; margin-bottom: 4px;">
+    <h1 style="font-size:18px;">eve-trader — Variant A: Split-panel command center</h1>
+    <p class="dim" style="margin:4px 0 0;">Orders in a fixed sidebar, scanner + alert feed stacked in the main area. Optimized for glanceability while working.</p>
+  </div>
+
+  <!-- Orders sidebar -->
+  <div class="panel" style="align-self: start;">
+    <div class="panel-header"><h2>Open Orders (4)</h2></div>
+    <div>
+      <div class="panel-row row-undercut" style="padding:10px 12px; border-bottom:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between;"><b>PLEX</b><span class="pill pill-undercut">Undercut</span></div>
+        <div class="dim mono" style="font-size:12px;">Jita · Sell · 3,850,000</div>
+        <div class="dim" style="font-size:11px;">qty 2 · beaten by 3,845,000</div>
+      </div>
+      <div class="panel-row row-expiring" style="padding:10px 12px; border-bottom:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between;"><b>Tritanium</b><span class="pill pill-expiring">Expiring</span></div>
+        <div class="dim mono" style="font-size:12px;">Jita · Sell · 4.85 ISK</div>
+        <div class="dim" style="font-size:11px;">qty 500,000 · expires in 18h</div>
+      </div>
+      <div class="panel-row row-pricemoved" style="padding:10px 12px; border-bottom:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between;"><b>Republic Fleet Firetail</b><span class="pill pill-pricemoved">Price-Moved</span></div>
+        <div class="dim mono" style="font-size:12px;">Rens · Sell · 10,200,000</div>
+        <div class="dim" style="font-size:11px;">qty 3 · market drifted -6.1%</div>
+      </div>
+      <div class="panel-row" style="padding:10px 12px;">
+        <div style="display:flex; justify-content:space-between;"><b>Mexallon</b><span class="pill pill-clean">Clean</span></div>
+        <div class="dim mono" style="font-size:12px;">Rens · Buy · 62 ISK</div>
+        <div class="dim" style="font-size:11px;">qty 200,000 · expires in 12d</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; flex-direction:column; gap:16px;">
+    <!-- Opportunity scanner -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Opportunity Scanner</h2>
+        <div style="display:flex; gap:6px;">
+          <span class="pill" style="background:#21262d; color:var(--text);">Jita</span>
+          <span class="pill" style="background:transparent; color:var(--text-dim); border:1px solid var(--border);">Rens</span>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Item</th><th>Best Buy</th><th>Best Sell</th><th>Margin</th><th>Avg Daily Vol</th></tr></thead>
+        <tbody>
+          <tr><td>Antimatter Charge S</td><td class="mono dim">8.10</td><td class="mono dim">9.45</td><td class="mono margin-pos">12.4%</td><td class="mono">450,200</td></tr>
+          <tr><td>Pyerite</td><td class="mono dim">11.20</td><td class="mono dim">12.30</td><td class="mono margin-pos">8.2%</td><td class="mono">1,204,880</td></tr>
+          <tr><td>Veldspar</td><td class="mono dim">1.90</td><td class="mono dim">2.02</td><td class="mono margin-pos">5.1%</td><td class="mono">3,402,110</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Alert feed -->
+    <div class="panel">
+      <div class="panel-header"><h2>Alert Feed</h2></div>
+      <table>
+        <tbody>
+          <tr><td style="width:90px;" class="dim mono">2m ago</td><td><span class="pill pill-undercut">Undercut</span></td><td>PLEX sell order beaten in Jita by 5,000 ISK</td></tr>
+          <tr><td class="dim mono">41m ago</td><td><span class="pill pill-pricemoved">Price-Moved</span></td><td>Republic Fleet Firetail drifted -6.1% in Rens</td></tr>
+          <tr><td class="dim mono">3h ago</td><td><span class="pill pill-expiring">Expiring</span></td><td>Tritanium sell order expires in 18h (Jita)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT B — Tabbed single-focus                                -->
+<!-- One full-width view at a time: Orders / Opportunities / Alerts.-->
+<!-- Simplest information hierarchy, least overwhelming at a glance.-->
+<!-- ============================================================ -->
+<div class="app" id="variant-B">
+  <h1 style="font-size:18px;">eve-trader — Variant B: Tabbed single-focus</h1>
+  <p class="dim" style="margin:4px 0 16px;">One thing on screen at a time. Simpler, calmer, easy to scan top to bottom.</p>
+
+  <div style="display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border);">
+    <div id="tabB-orders" class="b-tab" style="padding:10px 16px; cursor:pointer; border-bottom:2px solid var(--accent); color:var(--text); font-weight:600;">Orders <span class="dim">4</span></div>
+    <div id="tabB-alerts" class="b-tab" style="padding:10px 16px; cursor:pointer; color:var(--text-dim);">Alerts <span class="pill pill-undercut">3</span></div>
+    <div id="tabB-opps" class="b-tab" style="padding:10px 16px; cursor:pointer; color:var(--text-dim);">Opportunities</div>
+  </div>
+
+  <div id="tabB-panel-orders" class="b-panel">
+    <div class="panel">
+      <table>
+        <thead><tr><th>Item</th><th>Hub</th><th>Side</th><th>Price</th><th>Qty</th><th>Expires</th><th>Alert</th></tr></thead>
+        <tbody>
+          <tr class="row-undercut"><td>PLEX</td><td>Jita</td><td><span class="pill pill-sell">Sell</span></td><td class="mono">3,850,000</td><td class="mono">2</td><td class="dim mono">6d 4h</td><td><span class="pill pill-undercut">Undercut</span></td></tr>
+          <tr class="row-expiring"><td>Tritanium</td><td>Jita</td><td><span class="pill pill-sell">Sell</span></td><td class="mono">4.85</td><td class="mono">500,000</td><td class="dim mono">18h</td><td><span class="pill pill-expiring">Expiring</span></td></tr>
+          <tr class="row-pricemoved"><td>Republic Fleet Firetail</td><td>Rens</td><td><span class="pill pill-sell">Sell</span></td><td class="mono">10,200,000</td><td class="mono">3</td><td class="dim mono">4d 2h</td><td><span class="pill pill-pricemoved">Price-Moved</span></td></tr>
+          <tr><td>Mexallon</td><td>Rens</td><td><span class="pill pill-buy">Buy</span></td><td class="mono">62</td><td class="mono">200,000</td><td class="dim mono">12d</td><td><span class="pill pill-clean">Clean</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tabB-panel-alerts" class="b-panel" style="display:none;">
+    <div class="panel">
+      <table>
+        <thead><tr><th>When</th><th>Type</th><th>Order</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td class="dim mono">2m ago</td><td><span class="pill pill-undercut">Undercut</span></td><td>PLEX · Jita</td><td>Beaten by 3,845,000 (-5,000)</td></tr>
+          <tr><td class="dim mono">41m ago</td><td><span class="pill pill-pricemoved">Price-Moved</span></td><td>Rep. Fleet Firetail · Rens</td><td>Market drifted -6.1% from placement</td></tr>
+          <tr><td class="dim mono">3h ago</td><td><span class="pill pill-expiring">Expiring</span></td><td>Tritanium · Jita</td><td>Expires in 18h</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tabB-panel-opps" class="b-panel" style="display:none;">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Ranked Opportunities</h2>
+        <div style="display:flex; gap:6px;">
+          <span class="pill" style="background:#21262d; color:var(--text);">Jita</span>
+          <span class="pill" style="background:transparent; color:var(--text-dim); border:1px solid var(--border);">Rens</span>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Item</th><th>Best Buy</th><th>Best Sell</th><th>Margin</th><th>Avg Daily Vol</th></tr></thead>
+        <tbody>
+          <tr><td class="dim">1</td><td>Antimatter Charge S</td><td class="mono dim">8.10</td><td class="mono dim">9.45</td><td class="mono margin-pos">12.4%</td><td class="mono">450,200</td></tr>
+          <tr><td class="dim">2</td><td>Pyerite</td><td class="mono dim">11.20</td><td class="mono dim">12.30</td><td class="mono margin-pos">8.2%</td><td class="mono">1,204,880</td></tr>
+          <tr><td class="dim">3</td><td>Veldspar</td><td class="mono dim">1.90</td><td class="mono dim">2.02</td><td class="mono margin-pos">5.1%</td><td class="mono">3,402,110</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT C — Alert-first triage board                           -->
+<!-- Alerts are the primary affordance: a kanban-style board of      -->
+<!-- Undercut / Price-Moved / Expiring cards up top. Orders and      -->
+<!-- Opportunities are secondary, side-by-side below.                -->
+<!-- ============================================================ -->
+<div class="app" id="variant-C">
+  <h1 style="font-size:18px;">eve-trader — Variant C: Alert-first triage board</h1>
+  <p class="dim" style="margin:4px 0 16px;">Treats alerts as the thing to act on, not a side note. Orders/opportunities are reference, below the fold.</p>
+
+  <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; margin-bottom:20px;">
+    <div class="panel">
+      <div class="panel-header" style="border-bottom-color: rgba(248,81,73,0.3);"><h2 style="color:var(--red);">Undercut · 1</h2></div>
+      <div style="padding:12px;">
+        <div style="background:var(--panel-2); border-radius:6px; padding:10px 12px; border-left:3px solid var(--red);">
+          <b>PLEX</b> <span class="dim">· Jita</span>
+          <div class="dim mono" style="font-size:12px; margin-top:4px;">Yours: 3,850,000 → Now: 3,845,000</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header" style="border-bottom-color: rgba(210,153,34,0.3);"><h2 style="color:var(--yellow);">Expiring · 1</h2></div>
+      <div style="padding:12px;">
+        <div style="background:var(--panel-2); border-radius:6px; padding:10px 12px; border-left:3px solid var(--yellow);">
+          <b>Tritanium</b> <span class="dim">· Jita</span>
+          <div class="dim mono" style="font-size:12px; margin-top:4px;">Expires in 18h · 500,000 units</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header" style="border-bottom-color: rgba(88,166,255,0.3);"><h2 style="color:var(--blue);">Price-Moved · 1</h2></div>
+      <div style="padding:12px;">
+        <div style="background:var(--panel-2); border-radius:6px; padding:10px 12px; border-left:3px solid var(--blue);">
+          <b>Republic Fleet Firetail</b> <span class="dim">· Rens</span>
+          <div class="dim mono" style="font-size:12px; margin-top:4px;">-6.1% since placement (10,200,000 → ~9,580,000)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+    <div class="panel">
+      <div class="panel-header"><h2>All Open Orders (4)</h2></div>
+      <table>
+        <thead><tr><th>Item</th><th>Hub</th><th>Price</th><th>Qty</th></tr></thead>
+        <tbody>
+          <tr><td>PLEX</td><td>Jita</td><td class="mono">3,850,000</td><td class="mono">2</td></tr>
+          <tr><td>Tritanium</td><td>Jita</td><td class="mono">4.85</td><td class="mono">500,000</td></tr>
+          <tr><td>Republic Fleet Firetail</td><td>Rens</td><td class="mono">10,200,000</td><td class="mono">3</td></tr>
+          <tr><td>Mexallon</td><td>Rens</td><td class="mono">62</td><td class="mono">200,000</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><h2>Top Opportunities</h2></div>
+      <table>
+        <thead><tr><th>Item</th><th>Hub</th><th>Margin</th></tr></thead>
+        <tbody>
+          <tr><td>Antimatter Charge S</td><td class="dim">Jita</td><td class="mono margin-pos">12.4%</td></tr>
+          <tr><td>Republic Fleet Firetail</td><td class="dim">Rens</td><td class="mono margin-pos">15.3%</td></tr>
+          <tr><td>Pyerite</td><td class="dim">Jita</td><td class="mono margin-pos">8.2%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Switcher (shared across variants)                              -->
+<!-- ============================================================ -->
+<div id="switcher">
+  <button id="prev" aria-label="Previous variant">&larr;</button>
+  <div class="label" id="switcher-label"><b>A</b> — Split-panel command center</div>
+  <button id="next" aria-label="Next variant">&rarr;</button>
+</div>
+
+<script>
+  const VARIANTS = {
+    A: "Split-panel command center",
+    B: "Tabbed single-focus",
+    C: "Alert-first triage board",
+  };
+  const keys = Object.keys(VARIANTS);
+
+  function currentVariant() {
+    const v = new URLSearchParams(location.search).get('variant');
+    return VARIANTS[v] ? v : 'A';
+  }
+
+  function render() {
+    const v = currentVariant();
+    keys.forEach(k => document.getElementById('variant-' + k).classList.toggle('active', k === v));
+    document.getElementById('switcher-label').innerHTML = '<b>' + v + '</b> — ' + VARIANTS[v];
+  }
+
+  function setVariant(v) {
+    const params = new URLSearchParams(location.search);
+    params.set('variant', v);
+    history.replaceState(null, '', '?' + params.toString());
+    render();
+  }
+
+  function cycle(delta) {
+    const i = keys.indexOf(currentVariant());
+    setVariant(keys[(i + delta + keys.length) % keys.length]);
+  }
+
+  document.getElementById('prev').addEventListener('click', () => cycle(-1));
+  document.getElementById('next').addEventListener('click', () => cycle(1));
+
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+    if (e.key === 'ArrowLeft') cycle(-1);
+    if (e.key === 'ArrowRight') cycle(1);
+  });
+
+  // Variant B tab wiring
+  const tabs = { orders: 'tabB-panel-orders', alerts: 'tabB-panel-alerts', opps: 'tabB-panel-opps' };
+  Object.keys(tabs).forEach(name => {
+    document.getElementById('tabB-' + name).addEventListener('click', () => {
+      Object.entries(tabs).forEach(([n, panelId]) => {
+        document.getElementById(panelId).style.display = n === name ? '' : 'none';
+        const tabEl = document.getElementById('tabB-' + n);
+        tabEl.style.color = n === name ? 'var(--text)' : 'var(--text-dim)';
+        tabEl.style.fontWeight = n === name ? '600' : 'normal';
+        tabEl.style.borderBottom = n === name ? '2px solid var(--accent)' : 'none';
+      });
+    });
+  });
+
+  render();
+</script>
+</body>
+</html>
