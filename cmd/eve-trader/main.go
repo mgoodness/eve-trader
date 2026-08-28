@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -21,6 +22,17 @@ func main() {
 func run() error {
 	addr := envOr("EVE_TRADER_ADDR", ":8080")
 	dbPath := envOr("EVE_TRADER_DB_PATH", "eve-trader.db")
+	callbackURL := envOr("EVE_TRADER_CALLBACK_URL", "https://eve-trader.opsgoodness.net/auth/callback")
+
+	// ESI Client ID/Secret are static secrets: passed in as real
+	// environment variables via `docker run --env-file` against a
+	// restricted-permission file on the host, never hardcoded or
+	// committed here.
+	clientID := os.Getenv("EVE_TRADER_ESI_CLIENT_ID")
+	clientSecret := os.Getenv("EVE_TRADER_ESI_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		return fmt.Errorf("EVE_TRADER_ESI_CLIENT_ID and EVE_TRADER_ESI_CLIENT_SECRET must be set")
+	}
 
 	store, err := storage.Open(dbPath)
 	if err != nil {
@@ -32,10 +44,8 @@ func run() error {
 		return err
 	}
 
-	// The real ESIClient (OAuth exchange/refresh and live ESI calls) lands
-	// in #15; until then the fake keeps the HTTP -> ESIClient -> storage
-	// path exercised end-to-end.
-	srv := web.NewServer(esi.NewFakeClient(), store)
+	esiClient := esi.NewRealClient(clientID, clientSecret)
+	srv := web.NewServer(esiClient, store, clientID, callbackURL)
 
 	log.Printf("listening on %s", addr)
 	return http.ListenAndServe(addr, srv)

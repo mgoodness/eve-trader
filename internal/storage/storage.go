@@ -5,7 +5,9 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -24,6 +26,19 @@ CREATE TABLE IF NOT EXISTS oauth_token (
 	expires_at    TIMESTAMP NOT NULL
 );
 `
+
+// ErrNoToken is returned by LoadToken when no OAuth token has been saved
+// yet (i.e. the app hasn't completed a login).
+var ErrNoToken = errors.New("storage: no oauth token saved")
+
+// Token is the OAuth token persisted in the single-row oauth_token table.
+// The refresh token rotates on every use (see ADR-0003), so SaveToken
+// always overwrites the stored value with the newest one.
+type Token struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+}
 
 // Store wraps a SQLite-backed *sql.DB.
 type Store struct {
@@ -46,6 +61,38 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		return fmt.Errorf("bootstrap schema: %w", err)
 	}
 	return nil
+}
+
+// SaveToken persists t as the app's single OAuth token, overwriting
+// whatever was previously stored.
+func (s *Store) SaveToken(ctx context.Context, t Token) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO oauth_token (id, access_token, refresh_token, expires_at)
+		VALUES (1, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			access_token  = excluded.access_token,
+			refresh_token = excluded.refresh_token,
+			expires_at    = excluded.expires_at
+	`, t.AccessToken, t.RefreshToken, t.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("save oauth token: %w", err)
+	}
+	return nil
+}
+
+// LoadToken returns the app's stored OAuth token, or ErrNoToken if none has
+// been saved yet.
+func (s *Store) LoadToken(ctx context.Context) (Token, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT access_token, refresh_token, expires_at FROM oauth_token WHERE id = 1`)
+
+	var t Token
+	if err := row.Scan(&t.AccessToken, &t.RefreshToken, &t.ExpiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Token{}, ErrNoToken
+		}
+		return Token{}, fmt.Errorf("load oauth token: %w", err)
+	}
+	return t, nil
 }
 
 // Ping verifies the database connection is alive.
