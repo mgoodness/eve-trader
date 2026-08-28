@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -111,12 +112,15 @@ func TestRunFiresOnNewDetectionThenSuppressesRepeats(t *testing.T) {
 		{OrderID: 1, TypeID: order.TypeID, LocationID: order.LocationID, IsBuyOrder: false, Price: 5.40},
 	}
 	cycle1 := time.Now()
-	results, err := Run(ctx, fake, store, orders, cycle1)
+	results, fired, err := Run(ctx, fake, store, orders, cycle1)
 	if err != nil {
 		t.Fatalf("Run (cycle 1): %v", err)
 	}
 	if !has(results[0].Alerts, Undercut) {
 		t.Fatalf("cycle 1: Undercut not active, got %+v", results[0].Alerts)
+	}
+	if len(fired) != 1 || fired[0].Alert.Type != Undercut {
+		t.Fatalf("cycle 1: fired = %+v, want exactly one Undercut (new detection)", fired)
 	}
 	feed, err := store.RecentAlertFeed(ctx, 10)
 	if err != nil {
@@ -128,14 +132,17 @@ func TestRunFiresOnNewDetectionThenSuppressesRepeats(t *testing.T) {
 
 	// Cycle 2: condition still true, well within the 4h throttle window --
 	// should still report as active (for the badge) but NOT add a new feed
-	// entry.
+	// entry, and NOT appear in fired (no repeat Discord notification).
 	cycle2 := cycle1.Add(1 * time.Hour)
-	results, err = Run(ctx, fake, store, orders, cycle2)
+	results, fired, err = Run(ctx, fake, store, orders, cycle2)
 	if err != nil {
 		t.Fatalf("Run (cycle 2): %v", err)
 	}
 	if !has(results[0].Alerts, Undercut) {
 		t.Fatalf("cycle 2: Undercut not active, got %+v", results[0].Alerts)
+	}
+	if len(fired) != 0 {
+		t.Fatalf("cycle 2: fired = %+v, want none (suppressed)", fired)
 	}
 	feed, err = store.RecentAlertFeed(ctx, 10)
 	if err != nil {
@@ -149,12 +156,15 @@ func TestRunFiresOnNewDetectionThenSuppressesRepeats(t *testing.T) {
 	// should drop it, and its throttle state should clear.
 	fake.MarketOrdersResp = nil
 	cycle3 := cycle2.Add(1 * time.Hour)
-	results, err = Run(ctx, fake, store, orders, cycle3)
+	results, fired, err = Run(ctx, fake, store, orders, cycle3)
 	if err != nil {
 		t.Fatalf("Run (cycle 3): %v", err)
 	}
 	if has(results[0].Alerts, Undercut) {
 		t.Fatalf("cycle 3: Undercut still active after condition resolved, got %+v", results[0].Alerts)
+	}
+	if len(fired) != 0 {
+		t.Fatalf("cycle 3: fired = %+v, want none (a resolved condition is not a firing)", fired)
 	}
 	if _, exists, err := store.GetOrderAlertState(ctx, order.OrderID, string(Undercut)); err != nil {
 		t.Fatalf("GetOrderAlertState: %v", err)
@@ -169,12 +179,15 @@ func TestRunFiresOnNewDetectionThenSuppressesRepeats(t *testing.T) {
 		{OrderID: 1, TypeID: order.TypeID, LocationID: order.LocationID, IsBuyOrder: false, Price: 5.40},
 	}
 	cycle4 := cycle3.Add(1 * time.Minute)
-	results, err = Run(ctx, fake, store, orders, cycle4)
+	results, fired, err = Run(ctx, fake, store, orders, cycle4)
 	if err != nil {
 		t.Fatalf("Run (cycle 4): %v", err)
 	}
 	if !has(results[0].Alerts, Undercut) {
 		t.Fatalf("cycle 4: Undercut not active, got %+v", results[0].Alerts)
+	}
+	if len(fired) != 1 || fired[0].Alert.Type != Undercut {
+		t.Fatalf("cycle 4: fired = %+v, want exactly one Undercut (resolved-then-recurred is a new firing)", fired)
 	}
 	feed, err = store.RecentAlertFeed(ctx, 10)
 	if err != nil {
@@ -203,14 +216,18 @@ func TestRunFiresAgainAfterThrottleWindowElapses(t *testing.T) {
 	}
 
 	cycle1 := time.Now()
-	if _, err := Run(ctx, fake, store, orders, cycle1); err != nil {
+	if _, fired, err := Run(ctx, fake, store, orders, cycle1); err != nil {
 		t.Fatalf("Run (cycle 1): %v", err)
+	} else if len(fired) != 1 {
+		t.Fatalf("cycle 1: fired = %+v, want exactly one", fired)
 	}
 
-	// Just under 4h: still suppressed.
+	// Just under 4h: still suppressed, nothing fired.
 	cycle2 := cycle1.Add(3*time.Hour + 59*time.Minute)
-	if _, err := Run(ctx, fake, store, orders, cycle2); err != nil {
+	if _, fired, err := Run(ctx, fake, store, orders, cycle2); err != nil {
 		t.Fatalf("Run (cycle 2): %v", err)
+	} else if len(fired) != 0 {
+		t.Fatalf("cycle 2: fired = %+v, want none (just under the throttle window)", fired)
 	}
 	feed, err := store.RecentAlertFeed(ctx, 10)
 	if err != nil {
@@ -222,8 +239,10 @@ func TestRunFiresAgainAfterThrottleWindowElapses(t *testing.T) {
 
 	// At/past 4h since the last firing: fires again.
 	cycle3 := cycle1.Add(4 * time.Hour)
-	if _, err := Run(ctx, fake, store, orders, cycle3); err != nil {
+	if _, fired, err := Run(ctx, fake, store, orders, cycle3); err != nil {
 		t.Fatalf("Run (cycle 3): %v", err)
+	} else if len(fired) != 1 {
+		t.Fatalf("cycle 3: fired = %+v, want exactly one (throttle window elapsed)", fired)
 	}
 	feed, err = store.RecentAlertFeed(ctx, 10)
 	if err != nil {
@@ -251,8 +270,12 @@ func TestRunThrottlesAlertTypesIndependently(t *testing.T) {
 		{OrderID: 1, TypeID: order.TypeID, LocationID: order.LocationID, IsBuyOrder: false, Price: 90}, // undercut + price-moved
 	}
 
-	if _, err := Run(ctx, fake, store, orders, now); err != nil {
+	_, fired, err := Run(ctx, fake, store, orders, now)
+	if err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+	if len(fired) != 3 {
+		t.Fatalf("fired = %+v, want 3 (one per alert type)", fired)
 	}
 
 	for _, at := range []AlertType{Undercut, PriceMoved, Expiring} {
@@ -295,14 +318,18 @@ func TestConcurrentRunDoesNotDoubleFire(t *testing.T) {
 	now := time.Now()
 
 	var wg sync.WaitGroup
+	var totalFired int32
 	errs := make(chan error, concurrency)
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := Run(ctx, fake, store, orders, now); err != nil {
+			_, fired, err := Run(ctx, fake, store, orders, now)
+			if err != nil {
 				errs <- err
+				return
 			}
+			atomic.AddInt32(&totalFired, int32(len(fired)))
 		}()
 	}
 	wg.Wait()
@@ -310,6 +337,10 @@ func TestConcurrentRunDoesNotDoubleFire(t *testing.T) {
 
 	for err := range errs {
 		t.Errorf("Run: %v", err)
+	}
+
+	if totalFired != 1 {
+		t.Errorf("total fired across %d concurrent Run calls = %d, want 1 (a new detection must fire exactly once)", concurrency, totalFired)
 	}
 
 	feed, err := store.RecentAlertFeed(ctx, 100)

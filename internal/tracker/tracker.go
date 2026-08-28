@@ -65,9 +65,16 @@ type MarketSnapshot struct {
 
 // EvaluatedAlert is one Alert condition found true for an Order, with a
 // human-readable Detail for the Alert Feed.
+//
+// OrderPrice and CompetingPrice are only meaningful when HasCompetingPrice
+// is true (Undercut and Price-Moved); Expiring has no price to compare,
+// so a renderer should fall back to Detail alone for that type.
 type EvaluatedAlert struct {
-	Type   AlertType
-	Detail string
+	Type              AlertType
+	Detail            string
+	OrderPrice        float64
+	CompetingPrice    float64
+	HasCompetingPrice bool
 }
 
 // Evaluate returns every Alert condition currently true for order, given
@@ -103,8 +110,11 @@ func evaluateUndercut(order esi.Order, snap MarketSnapshot) (EvaluatedAlert, boo
 	}
 
 	return EvaluatedAlert{
-		Type:   Undercut,
-		Detail: fmt.Sprintf("beaten: competing price %.2f vs your %.2f", snap.BestCompetingPrice, order.Price),
+		Type:              Undercut,
+		Detail:            fmt.Sprintf("beaten: competing price %.2f vs your %.2f", snap.BestCompetingPrice, order.Price),
+		OrderPrice:        order.Price,
+		CompetingPrice:    snap.BestCompetingPrice,
+		HasCompetingPrice: true,
 	}, true
 }
 
@@ -119,8 +129,11 @@ func evaluatePriceMoved(order esi.Order, snap MarketSnapshot) (EvaluatedAlert, b
 	}
 
 	return EvaluatedAlert{
-		Type:   PriceMoved,
-		Detail: fmt.Sprintf("market drifted %.1f%% since placement (%.2f -> %.2f)", drift*100, order.Price, snap.BestCompetingPrice),
+		Type:              PriceMoved,
+		Detail:            fmt.Sprintf("market drifted %.1f%% since placement (%.2f -> %.2f)", drift*100, order.Price, snap.BestCompetingPrice),
+		OrderPrice:        order.Price,
+		CompetingPrice:    snap.BestCompetingPrice,
+		HasCompetingPrice: true,
 	}, true
 }
 
@@ -188,17 +201,29 @@ type OrderEvaluation struct {
 // though Evaluate no longer reports it.
 var allAlertTypes = []AlertType{Undercut, PriceMoved, Expiring}
 
+// FiredAlert is an Alert that actually fired this cycle -- a new
+// detection, or a repeat after the throttle window elapsed -- as opposed
+// to one that's merely still active but suppressed. This is the set a
+// Notifier should send to Discord: sending on every active Alert would
+// re-notify on every suppressed evaluation cycle too.
+type FiredAlert struct {
+	Order esi.Order
+	Alert EvaluatedAlert
+}
+
 // Run evaluates every Order's live conditions, applies the per-Order
 // throttling rule (recording a new Alert Feed entry only on new
 // detection or after the throttle window elapses), and returns each
-// Order's currently-active Alerts for badge rendering.
-func Run(ctx context.Context, client esi.Client, store *storage.Store, orders []esi.Order, now time.Time) ([]OrderEvaluation, error) {
+// Order's currently-active Alerts for badge rendering, plus the Alerts
+// that actually fired this cycle (for Discord delivery).
+func Run(ctx context.Context, client esi.Client, store *storage.Store, orders []esi.Order, now time.Time) ([]OrderEvaluation, []FiredAlert, error) {
 	results := make([]OrderEvaluation, len(orders))
+	var fired []FiredAlert
 
 	for i, order := range orders {
 		snap, err := FetchSnapshot(ctx, client, order)
 		if err != nil {
-			return nil, fmt.Errorf("order %d: %w", order.OrderID, err)
+			return nil, nil, fmt.Errorf("order %d: %w", order.OrderID, err)
 		}
 
 		active := Evaluate(order, snap, now)
@@ -211,13 +236,17 @@ func Run(ctx context.Context, client esi.Client, store *storage.Store, orders []
 
 		for _, t := range allAlertTypes {
 			a, isActive := activeByType[t]
-			if err := applyThrottle(ctx, store, order, t, isActive, a.Detail, now); err != nil {
-				return nil, fmt.Errorf("order %d, alert %s: %w", order.OrderID, t, err)
+			didFire, err := applyThrottle(ctx, store, order, t, isActive, a.Detail, now)
+			if err != nil {
+				return nil, nil, fmt.Errorf("order %d, alert %s: %w", order.OrderID, t, err)
+			}
+			if didFire {
+				fired = append(fired, FiredAlert{Order: order, Alert: a})
 			}
 		}
 	}
 
-	return results, nil
+	return results, fired, nil
 }
 
 // throttleMu serializes applyThrottle's read-then-write against
@@ -228,39 +257,46 @@ func Run(ctx context.Context, client esi.Client, store *storage.Store, orders []
 // firing -- this makes that read-decide-write sequence atomic instead.
 var throttleMu sync.Mutex
 
-// applyThrottle records a new Alert Feed entry only when isActive is a
-// new detection or the throttle window has elapsed since the last
-// firing; clears state entirely once the condition resolves, so its next
-// occurrence is treated as new rather than a suppressed repeat.
-func applyThrottle(ctx context.Context, store *storage.Store, order esi.Order, alertType AlertType, isActive bool, detail string, now time.Time) error {
+// applyThrottle records a new Alert Feed entry -- and reports fired=true
+// -- only when isActive is a new detection or the throttle window has
+// elapsed since the last firing; clears state entirely once the
+// condition resolves, so its next occurrence is treated as new rather
+// than a suppressed repeat.
+func applyThrottle(ctx context.Context, store *storage.Store, order esi.Order, alertType AlertType, isActive bool, detail string, now time.Time) (fired bool, err error) {
 	throttleMu.Lock()
 	defer throttleMu.Unlock()
 
 	lastFiredAt, exists, err := store.GetOrderAlertState(ctx, order.OrderID, string(alertType))
 	if err != nil {
-		return fmt.Errorf("load alert state: %w", err)
+		return false, fmt.Errorf("load alert state: %w", err)
 	}
 
 	if !isActive {
 		if !exists {
-			return nil
+			return false, nil
 		}
-		return store.ClearOrderAlertState(ctx, order.OrderID, string(alertType))
+		if err := store.ClearOrderAlertState(ctx, order.OrderID, string(alertType)); err != nil {
+			return false, fmt.Errorf("clear alert state: %w", err)
+		}
+		return false, nil
 	}
 
 	if exists && now.Sub(lastFiredAt) < throttleWindow {
-		return nil
+		return false, nil
 	}
 
 	if err := store.UpsertOrderAlertState(ctx, order.OrderID, string(alertType), now); err != nil {
-		return fmt.Errorf("update alert state: %w", err)
+		return false, fmt.Errorf("update alert state: %w", err)
 	}
-	return store.InsertAlertFeedEntry(ctx, storage.AlertFeedEntry{
+	if err := store.InsertAlertFeedEntry(ctx, storage.AlertFeedEntry{
 		OrderID:    order.OrderID,
 		AlertType:  string(alertType),
 		TypeID:     order.TypeID,
 		LocationID: order.LocationID,
 		Detail:     detail,
 		CreatedAt:  now,
-	})
+	}); err != nil {
+		return false, fmt.Errorf("insert alert feed entry: %w", err)
+	}
+	return true, nil
 }

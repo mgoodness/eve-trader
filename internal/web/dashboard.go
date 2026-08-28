@@ -3,9 +3,11 @@ package web
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/notify"
 	"github.com/mgoodness/eve-trader/internal/storage"
 	"github.com/mgoodness/eve-trader/internal/tracker"
 )
@@ -56,15 +58,15 @@ type dashboardView struct {
 
 // buildDashboardView fetches the character's open orders, runs the
 // OrderTracker's evaluation cycle against them (updating Alert throttle
-// state and the Alert Feed as a side effect), and assembles the
-// dashboard's view model.
-func buildDashboardView(ctx context.Context, client esi.Client, store *storage.Store, characterID int32, now time.Time) (dashboardView, error) {
+// state and the Alert Feed as a side effect), sends a Discord embed for
+// each newly-fired Alert, and assembles the dashboard's view model.
+func buildDashboardView(ctx context.Context, client esi.Client, store *storage.Store, notifier *notify.Notifier, characterID int32, now time.Time) (dashboardView, error) {
 	orders, err := client.CharacterOrders(ctx, characterID)
 	if err != nil {
 		return dashboardView{}, fmt.Errorf("fetch character orders: %w", err)
 	}
 
-	results, err := tracker.Run(ctx, client, store, orders, now)
+	results, fired, err := tracker.Run(ctx, client, store, orders, now)
 	if err != nil {
 		return dashboardView{}, fmt.Errorf("evaluate alerts: %w", err)
 	}
@@ -79,11 +81,34 @@ func buildDashboardView(ctx context.Context, client esi.Client, store *storage.S
 		return dashboardView{}, fmt.Errorf("resolve item names: %w", err)
 	}
 
+	// A Discord hiccup shouldn't break the dashboard the trader is
+	// actually looking at -- log and move on rather than failing the
+	// request.
+	for _, f := range fired {
+		if err := notifier.Notify(ctx, alertNotification(f, names)); err != nil {
+			log.Printf("discord notify: %v", err)
+		}
+	}
+
 	return dashboardView{
 		Authenticated: true,
 		Orders:        buildOrderRows(orders, results, names, now),
 		AlertFeed:     buildAlertFeedRows(feedEntries, names, now),
 	}, nil
+}
+
+// alertNotification resolves a fired Alert's display data (item name,
+// Hub) for Discord delivery.
+func alertNotification(f tracker.FiredAlert, names map[int32]string) notify.AlertNotification {
+	return notify.AlertNotification{
+		AlertType:         f.Alert.Type,
+		Item:              itemName(names, f.Order.TypeID),
+		Hub:               hubName(f.Order.LocationID),
+		Detail:            f.Alert.Detail,
+		OrderPrice:        f.Alert.OrderPrice,
+		CompetingPrice:    f.Alert.CompetingPrice,
+		HasCompetingPrice: f.Alert.HasCompetingPrice,
+	}
 }
 
 // resolveNamesFor resolves the item names needed by both the Orders

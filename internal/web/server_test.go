@@ -47,7 +47,7 @@ func newTestServer(t *testing.T, esiClient esi.Client) *Server {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 
-	return NewServer(esiClient, store, testClientID, testCallbackURL)
+	return NewServer(esiClient, store, noopNotifier(), testClientID, testCallbackURL)
 }
 
 func TestHealthCheck(t *testing.T) {

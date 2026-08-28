@@ -13,6 +13,7 @@ import (
 
 	"github.com/mgoodness/eve-trader/internal/auth"
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/notify"
 	"github.com/mgoodness/eve-trader/internal/storage"
 )
 
@@ -25,6 +26,7 @@ var dashboardTemplate = template.Must(template.ParseFS(templateFS, "templates/da
 type Server struct {
 	esi         esi.Client
 	store       *storage.Store
+	notifier    *notify.Notifier
 	clientID    string
 	callbackURL string
 	mux         *http.ServeMux
@@ -33,13 +35,16 @@ type Server struct {
 	pendingState string
 }
 
-// NewServer builds a Server wired to the given ESIClient and Store. Login
-// uses the EVE SSO application identified by clientID, redirecting back to
-// callbackURL on completion (see internal/auth).
-func NewServer(esiClient esi.Client, store *storage.Store, clientID, callbackURL string) *Server {
+// NewServer builds a Server wired to the given ESIClient, Store, and
+// Notifier (for Discord Alert delivery -- pass one with an empty
+// WebhookURL to disable it). Login uses the EVE SSO application
+// identified by clientID, redirecting back to callbackURL on completion
+// (see internal/auth).
+func NewServer(esiClient esi.Client, store *storage.Store, notifier *notify.Notifier, clientID, callbackURL string) *Server {
 	s := &Server{
 		esi:         esiClient,
 		store:       store,
+		notifier:    notifier,
 		clientID:    clientID,
 		callbackURL: callbackURL,
 		mux:         http.NewServeMux(),
@@ -127,9 +132,10 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDashboard renders the split-panel dashboard: a fixed Orders
-// sidebar with the authenticated character's real open orders, and
-// placeholder panels for the Opportunity Scanner and Alert Feed (#17,
-// #19). If nobody's logged in yet, it renders a login prompt instead.
+// sidebar with the authenticated character's real open orders and Alert
+// badges, a real Alert Feed panel, and a placeholder Opportunity Scanner
+// panel (#19). If nobody's logged in yet, it renders a login prompt
+// instead.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -147,7 +153,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := buildDashboardView(ctx, s.esi, s.store, characterID, time.Now())
+	view, err := buildDashboardView(ctx, s.esi, s.store, s.notifier, characterID, time.Now())
 	if err != nil {
 		log.Printf("dashboard: %v", err)
 		http.Error(w, "failed to build dashboard", http.StatusBadGateway)
