@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
+	"github.com/mgoodness/eve-trader/internal/scanner"
 	"github.com/mgoodness/eve-trader/internal/storage"
 	"github.com/mgoodness/eve-trader/internal/tracker"
 )
@@ -227,7 +229,7 @@ func TestBuildDashboardViewIncludesAlertsFromTracker(t *testing.T) {
 		{OrderID: 999, TypeID: 34, LocationID: 60003760, IsBuyOrder: false, Price: 5.40},
 	}
 
-	view, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 95465499, time.Now())
+	view, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 95465499, hub.Jita, scanner.Filter{}, time.Now())
 	if err != nil {
 		t.Fatalf("buildDashboardView: %v", err)
 	}
@@ -252,7 +254,7 @@ func TestBuildDashboardViewPropagatesESIError(t *testing.T) {
 	fake := esi.NewFakeClient()
 	fake.OrdersErr = context.DeadlineExceeded
 
-	if _, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 1, time.Now()); err == nil {
+	if _, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 1, hub.Jita, scanner.Filter{}, time.Now()); err == nil {
 		t.Fatal("buildDashboardView: want error when CharacterOrders fails, got nil")
 	}
 }

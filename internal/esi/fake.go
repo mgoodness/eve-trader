@@ -109,12 +109,15 @@ func NewFakeClient() *FakeClient {
 		SkillsResp: Skills{
 			TotalSP: 50_000_000,
 			Skills: []Skill{
-				{SkillID: 3446, ActiveSkillLevel: 5, TrainedSkillLevel: 5}, // Accounting
-				{SkillID: 3447, ActiveSkillLevel: 4, TrainedSkillLevel: 4}, // Broker Relations
+				{SkillID: 16622, ActiveSkillLevel: 5, TrainedSkillLevel: 5}, // Accounting
+				{SkillID: 3446, ActiveSkillLevel: 4, TrainedSkillLevel: 4},  // Broker Relations
 			},
 		},
 		StandingsResp: []Standing{
-			{FromID: 1000035, FromType: "npc_corp", Standing: 5.0}, // Caldari Navy
+			{FromID: 1000035, FromType: "npc_corp", Standing: 5.0}, // Caldari Navy (Jita's station owner)
+			{FromID: 500001, FromType: "faction", Standing: 2.0},   // Caldari State (Jita's owning faction)
+			{FromID: 1000049, FromType: "npc_corp", Standing: 3.0}, // Brutor Tribe (Rens's station owner)
+			{FromID: 500002, FromType: "faction", Standing: 1.0},   // Minmatar Republic (Rens's owning faction)
 		},
 		Names: map[int32]string{
 			34: "Tritanium",

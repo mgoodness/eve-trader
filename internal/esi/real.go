@@ -3,7 +3,6 @@ package esi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,14 +24,8 @@ const (
 // refreshing it first if necessary (see internal/auth.NewTokenSource).
 type TokenSource func(ctx context.Context) (string, error)
 
-// ErrNotImplemented is returned by RealClient methods that don't talk to
-// ESI yet -- those endpoints (character orders/history, market orders/
-// history, skills, standings) land in later tickets (#16 dashboard, #19
-// scanner) rather than this OAuth-focused one.
-var ErrNotImplemented = errors.New("esi: not implemented")
-
-// RealClient talks to login.eveonline.com (OAuth) and, once later tickets
-// fill in the remaining methods, esi.evetech.net (ESI data).
+// RealClient talks to login.eveonline.com (OAuth) and esi.evetech.net
+// (ESI data).
 type RealClient struct {
 	HTTPClient   *http.Client
 	ClientID     string
@@ -233,20 +226,160 @@ func (c *RealClient) doJSON(req *http.Request, out any) error {
 	return nil
 }
 
+// marketOrderDTO mirrors ESI's public regional order-book JSON shape.
+type marketOrderDTO struct {
+	OrderID      int64     `json:"order_id"`
+	TypeID       int32     `json:"type_id"`
+	LocationID   int64     `json:"location_id"`
+	SystemID     int32     `json:"system_id"`
+	IsBuyOrder   bool      `json:"is_buy_order"`
+	Price        float64   `json:"price"`
+	VolumeTotal  int32     `json:"volume_total"`
+	VolumeRemain int32     `json:"volume_remain"`
+	MinVolume    int32     `json:"min_volume"`
+	Duration     int32     `json:"duration"`
+	Issued       time.Time `json:"issued"`
+	Range        string    `json:"range"`
+}
+
+// MarketOrders lists orders in a region (public endpoint, no auth
+// required), one page at a time.
 func (c *RealClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, page int32) ([]MarketOrder, error) {
-	return nil, ErrNotImplemented
+	var dtos []marketOrderDTO
+	path := fmt.Sprintf("/markets/%d/orders/", regionID)
+	query := url.Values{
+		"order_type": {string(orderType)},
+		"page":       {fmt.Sprintf("%d", page)},
+	}
+	if err := c.get(ctx, path, query, &dtos); err != nil {
+		return nil, fmt.Errorf("market orders: %w", err)
+	}
+
+	orders := make([]MarketOrder, len(dtos))
+	for i, d := range dtos {
+		orders[i] = MarketOrder{
+			OrderID:      d.OrderID,
+			TypeID:       d.TypeID,
+			LocationID:   d.LocationID,
+			SystemID:     d.SystemID,
+			IsBuyOrder:   d.IsBuyOrder,
+			Price:        d.Price,
+			VolumeTotal:  d.VolumeTotal,
+			VolumeRemain: d.VolumeRemain,
+			MinVolume:    d.MinVolume,
+			Duration:     d.Duration,
+			Issued:       d.Issued,
+			Range:        d.Range,
+		}
+	}
+	return orders, nil
 }
 
+// marketHistoryDTO mirrors ESI's public regional market-history JSON
+// shape.
+type marketHistoryDTO struct {
+	Date       string  `json:"date"`
+	OrderCount int64   `json:"order_count"`
+	Volume     int64   `json:"volume"`
+	Highest    float64 `json:"highest"`
+	Lowest     float64 `json:"lowest"`
+	Average    float64 `json:"average"`
+}
+
+// MarketHistory returns daily market statistics for one item type in a
+// region (public endpoint, no auth required).
 func (c *RealClient) MarketHistory(ctx context.Context, regionID int32, typeID int32) ([]MarketHistoryEntry, error) {
-	return nil, ErrNotImplemented
+	var dtos []marketHistoryDTO
+	path := fmt.Sprintf("/markets/%d/history/", regionID)
+	query := url.Values{"type_id": {fmt.Sprintf("%d", typeID)}}
+	if err := c.get(ctx, path, query, &dtos); err != nil {
+		return nil, fmt.Errorf("market history: %w", err)
+	}
+
+	entries := make([]MarketHistoryEntry, len(dtos))
+	for i, d := range dtos {
+		date, err := time.Parse("2006-01-02", d.Date)
+		if err != nil {
+			return nil, fmt.Errorf("market history: parse date %q: %w", d.Date, err)
+		}
+		entries[i] = MarketHistoryEntry{
+			Date:       date,
+			OrderCount: d.OrderCount,
+			Volume:     d.Volume,
+			Highest:    d.Highest,
+			Lowest:     d.Lowest,
+			Average:    d.Average,
+		}
+	}
+	return entries, nil
 }
 
+// get performs an unauthenticated GET against the ESI data API,
+// decoding a JSON response into out.
+func (c *RealClient) get(ctx context.Context, path string, query url.Values, out any) error {
+	reqURL := c.DataBaseURL + path
+	if len(query) > 0 {
+		reqURL += "?" + query.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+
+	return c.doJSON(req, out)
+}
+
+// skillsDTO mirrors ESI's character-skills JSON shape.
+type skillsDTO struct {
+	TotalSP int64 `json:"total_sp"`
+	Skills  []struct {
+		SkillID           int32 `json:"skill_id"`
+		ActiveSkillLevel  int32 `json:"active_skill_level"`
+		TrainedSkillLevel int32 `json:"trained_skill_level"`
+	} `json:"skills"`
+}
+
+// CharacterSkills lists a character's trained skills.
 func (c *RealClient) CharacterSkills(ctx context.Context, characterID int32) (Skills, error) {
-	return Skills{}, ErrNotImplemented
+	var dto skillsDTO
+	path := fmt.Sprintf("/characters/%d/skills/", characterID)
+	if err := c.authenticatedGet(ctx, path, nil, &dto); err != nil {
+		return Skills{}, fmt.Errorf("character skills: %w", err)
+	}
+
+	skills := Skills{TotalSP: dto.TotalSP, Skills: make([]Skill, len(dto.Skills))}
+	for i, s := range dto.Skills {
+		skills.Skills[i] = Skill{
+			SkillID:           s.SkillID,
+			ActiveSkillLevel:  s.ActiveSkillLevel,
+			TrainedSkillLevel: s.TrainedSkillLevel,
+		}
+	}
+	return skills, nil
 }
 
+// standingDTO mirrors one entry of ESI's character-standings JSON shape.
+type standingDTO struct {
+	FromID   int32   `json:"from_id"`
+	FromType string  `json:"from_type"`
+	Standing float64 `json:"standing"`
+}
+
+// CharacterStandings lists a character's NPC agent/corp/faction
+// standings.
 func (c *RealClient) CharacterStandings(ctx context.Context, characterID int32) ([]Standing, error) {
-	return nil, ErrNotImplemented
+	var dtos []standingDTO
+	path := fmt.Sprintf("/characters/%d/standings/", characterID)
+	if err := c.authenticatedGet(ctx, path, nil, &dtos); err != nil {
+		return nil, fmt.Errorf("character standings: %w", err)
+	}
+
+	standings := make([]Standing, len(dtos))
+	for i, d := range dtos {
+		standings[i] = Standing{FromID: d.FromID, FromType: d.FromType, Standing: d.Standing}
+	}
+	return standings, nil
 }
 
 // nameDTO mirrors one entry of ESI's universe/names response.

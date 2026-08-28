@@ -4,22 +4,23 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
+	"github.com/mgoodness/eve-trader/internal/scanner"
 	"github.com/mgoodness/eve-trader/internal/storage"
 	"github.com/mgoodness/eve-trader/internal/tracker"
 )
 
-// Station IDs for the two Hubs this tool trades at (see CONTEXT.md).
-const (
-	jitaStationID = 60003760
-	rensStationID = 60004588
-)
-
 // alertFeedLimit bounds how many Alert Feed entries the dashboard shows.
 const alertFeedLimit = 20
+
+// opportunityLimit is the top end of the AC's "top 20-50 ranked results".
+const opportunityLimit = 50
 
 // orderRow is one row of the dashboard's Orders sidebar.
 type orderRow struct {
@@ -48,19 +49,42 @@ type alertFeedRow struct {
 	Detail string
 }
 
+// opportunityRow is one row of the dashboard's Opportunity Scanner panel.
+type opportunityRow struct {
+	Item     string
+	BestBuy  string
+	BestSell string
+	Margin   string
+	Volume   string
+}
+
+// hubTab is one Hub tab in the Opportunity Scanner panel's header.
+type hubTab struct {
+	Name   string
+	URL    string
+	Active bool
+}
+
 // dashboardView is the data passed to the dashboard template.
 type dashboardView struct {
 	Authenticated bool
 	LoginURL      string
 	Orders        []orderRow
 	AlertFeed     []alertFeedRow
+
+	HubTabs         []hubTab
+	SelectedHubName string
+	MinVolume       float64
+	MinMargin       float64
+	Opportunities   []opportunityRow
 }
 
 // buildDashboardView fetches the character's open orders, runs the
 // OrderTracker's evaluation cycle against them (updating Alert throttle
 // state and the Alert Feed as a side effect), sends a Discord embed for
-// each newly-fired Alert, and assembles the dashboard's view model.
-func buildDashboardView(ctx context.Context, client esi.Client, store *storage.Store, notifier *notify.Notifier, characterID int32, now time.Time) (dashboardView, error) {
+// each newly-fired Alert, runs the Opportunity Scanner for selectedHub,
+// and assembles the dashboard's view model.
+func buildDashboardView(ctx context.Context, client esi.Client, store *storage.Store, notifier *notify.Notifier, characterID int32, selectedHub hub.Hub, filter scanner.Filter, now time.Time) (dashboardView, error) {
 	orders, err := client.CharacterOrders(ctx, characterID)
 	if err != nil {
 		return dashboardView{}, fmt.Errorf("fetch character orders: %w", err)
@@ -90,10 +114,26 @@ func buildDashboardView(ctx context.Context, client esi.Client, store *storage.S
 		}
 	}
 
+	opportunities, err := scanner.Scan(ctx, client, store, selectedHub, characterID, now)
+	if err != nil {
+		return dashboardView{}, fmt.Errorf("scan opportunities: %w", err)
+	}
+	ranked := scanner.Rank(opportunities, filter, opportunityLimit)
+
+	oppNames, err := client.ResolveNames(ctx, opportunityTypeIDs(ranked))
+	if err != nil {
+		return dashboardView{}, fmt.Errorf("resolve opportunity item names: %w", err)
+	}
+
 	return dashboardView{
-		Authenticated: true,
-		Orders:        buildOrderRows(orders, results, names, now),
-		AlertFeed:     buildAlertFeedRows(feedEntries, names, now),
+		Authenticated:   true,
+		Orders:          buildOrderRows(orders, results, names, now),
+		AlertFeed:       buildAlertFeedRows(feedEntries, names, now),
+		HubTabs:         buildHubTabs(selectedHub, filter),
+		SelectedHubName: selectedHub.Name,
+		MinVolume:       filter.MinVolume,
+		MinMargin:       filter.MinMargin,
+		Opportunities:   buildOpportunityRows(ranked, oppNames),
 	}, nil
 }
 
@@ -175,6 +215,49 @@ func buildAlertFeedRows(entries []storage.AlertFeedEntry, names map[int32]string
 	return rows
 }
 
+// opportunityTypeIDs collects the distinct item type IDs across ranked
+// Opportunities, for a single ResolveNames call.
+func opportunityTypeIDs(opportunities []scanner.Opportunity) []int32 {
+	ids := make([]int32, len(opportunities))
+	for i, o := range opportunities {
+		ids[i] = o.TypeID
+	}
+	return ids
+}
+
+// buildOpportunityRows resolves each ranked Opportunity into a
+// dashboard-ready row (Rank has already sorted/filtered/truncated).
+func buildOpportunityRows(opportunities []scanner.Opportunity, names map[int32]string) []opportunityRow {
+	rows := make([]opportunityRow, len(opportunities))
+	for i, o := range opportunities {
+		rows[i] = opportunityRow{
+			Item:     itemName(names, o.TypeID),
+			BestBuy:  fmt.Sprintf("%.2f", o.BestBuy),
+			BestSell: fmt.Sprintf("%.2f", o.BestSell),
+			Margin:   fmt.Sprintf("%.2f", o.Margin),
+			Volume:   fmt.Sprintf("%.0f", o.AvgDailyVolume),
+		}
+	}
+	return rows
+}
+
+// buildHubTabs builds the Opportunity panel's Hub tab links, preserving
+// the current filter's query parameters when switching Hubs.
+func buildHubTabs(selected hub.Hub, filter scanner.Filter) []hubTab {
+	tabs := make([]hubTab, len(hub.All))
+	for i, h := range hub.All {
+		q := url.Values{"hub": {h.Name}}
+		if filter.MinVolume > 0 {
+			q.Set("minVolume", strconv.FormatFloat(filter.MinVolume, 'f', -1, 64))
+		}
+		if filter.MinMargin > 0 {
+			q.Set("minMargin", strconv.FormatFloat(filter.MinMargin, 'f', -1, 64))
+		}
+		tabs[i] = hubTab{Name: h.Name, URL: "/?" + q.Encode(), Active: h.Name == selected.Name}
+	}
+	return tabs
+}
+
 func alertBadges(alerts []tracker.EvaluatedAlert) []alertBadge {
 	badges := make([]alertBadge, len(alerts))
 	for i, a := range alerts {
@@ -213,14 +296,10 @@ func itemName(names map[int32]string, typeID int32) string {
 }
 
 func hubName(locationID int64) string {
-	switch locationID {
-	case jitaStationID:
-		return "Jita"
-	case rensStationID:
-		return "Rens"
-	default:
-		return fmt.Sprintf("Station %d", locationID)
+	if h, ok := hub.ByStationID(locationID); ok {
+		return h.Name
 	}
+	return fmt.Sprintf("Station %d", locationID)
 }
 
 func sideName(isBuyOrder bool) string {

@@ -8,12 +8,15 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/auth"
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
+	"github.com/mgoodness/eve-trader/internal/scanner"
 	"github.com/mgoodness/eve-trader/internal/storage"
 )
 
@@ -133,9 +136,9 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 // handleDashboard renders the split-panel dashboard: a fixed Orders
 // sidebar with the authenticated character's real open orders and Alert
-// badges, a real Alert Feed panel, and a placeholder Opportunity Scanner
-// panel (#19). If nobody's logged in yet, it renders a login prompt
-// instead.
+// badges, a real Alert Feed panel, and a hub-tabbed, filterable
+// Opportunity Scanner panel. If nobody's logged in yet, it renders a
+// login prompt instead.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -153,7 +156,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := buildDashboardView(ctx, s.esi, s.store, s.notifier, characterID, time.Now())
+	selectedHub := parseHubParam(r)
+	filter := parseFilterParams(r)
+
+	view, err := buildDashboardView(ctx, s.esi, s.store, s.notifier, characterID, selectedHub, filter, time.Now())
 	if err != nil {
 		log.Printf("dashboard: %v", err)
 		http.Error(w, "failed to build dashboard", http.StatusBadGateway)
@@ -161,6 +167,32 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderDashboard(w, view)
+}
+
+// parseHubParam reads the ?hub= query parameter (default Jita, falling
+// back to Jita for an unrecognized value).
+func parseHubParam(r *http.Request) hub.Hub {
+	if h, ok := hub.ByName(r.URL.Query().Get("hub")); ok {
+		return h
+	}
+	return hub.Jita
+}
+
+// parseFilterParams reads the Opportunity panel's configurable
+// ?minVolume=/?minMargin= query parameters (default 0: no filtering).
+func parseFilterParams(r *http.Request) scanner.Filter {
+	return scanner.Filter{
+		MinVolume: parseFloatParam(r, "minVolume"),
+		MinMargin: parseFloatParam(r, "minMargin"),
+	}
+}
+
+func parseFloatParam(r *http.Request, name string) float64 {
+	v, err := strconv.ParseFloat(r.URL.Query().Get(name), 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func (s *Server) renderDashboard(w http.ResponseWriter, view dashboardView) {

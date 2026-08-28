@@ -307,6 +307,154 @@ func TestResolveNamesChunksOverESILimit(t *testing.T) {
 	}
 }
 
+func TestMarketOrdersReal(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"order_id":      int64(100),
+				"type_id":       int32(34),
+				"location_id":   int64(60003760),
+				"system_id":     int32(30000142),
+				"is_buy_order":  false,
+				"price":         5.5,
+				"volume_total":  int32(50000),
+				"volume_remain": int32(40000),
+				"min_volume":    int32(1),
+				"duration":      int32(90),
+				"issued":        "2026-08-20T12:00:00Z",
+				"range":         "region",
+			},
+		})
+	})
+
+	orders, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 2)
+	if err != nil {
+		t.Fatalf("MarketOrders: %v", err)
+	}
+
+	if gotPath != "/markets/10000002/orders/" {
+		t.Errorf("path = %q, want /markets/10000002/orders/", gotPath)
+	}
+	if gotQuery.Get("order_type") != "all" {
+		t.Errorf("order_type = %q, want all", gotQuery.Get("order_type"))
+	}
+	if gotQuery.Get("page") != "2" {
+		t.Errorf("page = %q, want 2", gotQuery.Get("page"))
+	}
+	if len(orders) != 1 || orders[0].TypeID != 34 || orders[0].LocationID != 60003760 {
+		t.Errorf("orders = %+v, unexpected", orders)
+	}
+}
+
+func TestMarketOrdersRealDoesNotRequireAuth(t *testing.T) {
+	var gotAuth string
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode([]map[string]any{})
+	})
+	client.Tokens = nil // must not be called for a public endpoint
+
+	if _, err := client.MarketOrders(context.Background(), 10000002, OrderTypeSell, 1); err != nil {
+		t.Fatalf("MarketOrders: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization header = %q, want empty (public endpoint)", gotAuth)
+	}
+}
+
+func TestMarketHistoryReal(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"date": "2026-08-20", "order_count": int64(120), "volume": int64(1_000_000), "highest": 5.6, "lowest": 5.3, "average": 5.45},
+		})
+	})
+
+	history, err := client.MarketHistory(context.Background(), 10000002, 34)
+	if err != nil {
+		t.Fatalf("MarketHistory: %v", err)
+	}
+
+	if gotPath != "/markets/10000002/history/" {
+		t.Errorf("path = %q, want /markets/10000002/history/", gotPath)
+	}
+	if gotQuery.Get("type_id") != "34" {
+		t.Errorf("type_id = %q, want 34", gotQuery.Get("type_id"))
+	}
+	if len(history) != 1 || history[0].Volume != 1_000_000 {
+		t.Errorf("history = %+v, unexpected", history)
+	}
+	wantDate := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	if !history[0].Date.Equal(wantDate) {
+		t.Errorf("Date = %v, want %v", history[0].Date, wantDate)
+	}
+}
+
+func TestCharacterSkillsReal(t *testing.T) {
+	var gotPath, gotAuth string
+
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_sp": int64(50_000_000),
+			"skills": []map[string]any{
+				{"skill_id": int32(16622), "active_skill_level": int32(5), "trained_skill_level": int32(5), "skillpoints_in_skill": int64(1_280_000)},
+			},
+		})
+	})
+
+	skills, err := client.CharacterSkills(context.Background(), 95465499)
+	if err != nil {
+		t.Fatalf("CharacterSkills: %v", err)
+	}
+
+	if gotPath != "/characters/95465499/skills/" {
+		t.Errorf("path = %q, want /characters/95465499/skills/", gotPath)
+	}
+	if gotAuth != "Bearer the-access-token" {
+		t.Errorf("Authorization = %q, want Bearer the-access-token", gotAuth)
+	}
+	if skills.TotalSP != 50_000_000 {
+		t.Errorf("TotalSP = %d, want 50000000", skills.TotalSP)
+	}
+	if len(skills.Skills) != 1 || skills.Skills[0].SkillID != 16622 || skills.Skills[0].ActiveSkillLevel != 5 {
+		t.Errorf("Skills = %+v, unexpected", skills.Skills)
+	}
+}
+
+func TestCharacterStandingsReal(t *testing.T) {
+	var gotPath string
+
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"from_id": int32(1000035), "from_type": "npc_corp", "standing": 5.0},
+		})
+	})
+
+	standings, err := client.CharacterStandings(context.Background(), 95465499)
+	if err != nil {
+		t.Fatalf("CharacterStandings: %v", err)
+	}
+
+	if gotPath != "/characters/95465499/standings/" {
+		t.Errorf("path = %q, want /characters/95465499/standings/", gotPath)
+	}
+	if len(standings) != 1 || standings[0].FromID != 1000035 || standings[0].FromType != "npc_corp" {
+		t.Errorf("standings = %+v, unexpected", standings)
+	}
+}
+
 func TestTokenRequestErrorStatus(t *testing.T) {
 	client := newTestRealClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

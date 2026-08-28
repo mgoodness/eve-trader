@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
+	"github.com/mgoodness/eve-trader/internal/scanner"
 )
 
 // discordEmbedPayload mirrors just enough of Discord's webhook payload
@@ -56,7 +58,7 @@ func TestDashboardNotifiesDiscordOnceThenSuppressesDuringThrottleWindow(t *testi
 
 	// Cycle 1: new detection -- Discord should receive exactly one embed.
 	cycle1 := time.Now()
-	if _, err := buildDashboardView(context.Background(), fake, store, notifier, 95465499, cycle1); err != nil {
+	if _, err := buildDashboardView(context.Background(), fake, store, notifier, 95465499, hub.Jita, scanner.Filter{}, cycle1); err != nil {
 		t.Fatalf("buildDashboardView (cycle 1): %v", err)
 	}
 	if got := atomic.LoadInt32(&postCount); got != 1 {
@@ -97,7 +99,7 @@ func TestDashboardNotifiesDiscordOnceThenSuppressesDuringThrottleWindow(t *testi
 	// Cycle 2: condition still true, well within the 4h throttle window --
 	// Discord must NOT receive a duplicate.
 	cycle2 := cycle1.Add(1 * time.Hour)
-	if _, err := buildDashboardView(context.Background(), fake, store, notifier, 95465499, cycle2); err != nil {
+	if _, err := buildDashboardView(context.Background(), fake, store, notifier, 95465499, hub.Jita, scanner.Filter{}, cycle2); err != nil {
 		t.Fatalf("buildDashboardView (cycle 2): %v", err)
 	}
 	if got := atomic.LoadInt32(&postCount); got != 1 {
@@ -114,7 +116,7 @@ func TestDashboardSkipsDiscordWhenWebhookNotConfigured(t *testing.T) {
 
 	// noopNotifier has an empty WebhookURL: the dashboard must still build
 	// successfully (in-app Alerts keep working) without attempting delivery.
-	view, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 95465499, time.Now())
+	view, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 95465499, hub.Jita, scanner.Filter{}, time.Now())
 	if err != nil {
 		t.Fatalf("buildDashboardView: %v", err)
 	}

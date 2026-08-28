@@ -43,6 +43,33 @@ CREATE TABLE IF NOT EXISTS alert_feed (
 	detail      TEXT NOT NULL,
 	created_at  TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS character_skill_cache (
+	skill_id   INTEGER PRIMARY KEY,
+	level      INTEGER NOT NULL,
+	fetched_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS character_standing_cache (
+	from_id    INTEGER PRIMARY KEY,
+	standing   REAL NOT NULL,
+	fetched_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_cache (
+	hub        TEXT    NOT NULL,
+	type_id    INTEGER NOT NULL,
+	best_buy   REAL,
+	best_sell  REAL,
+	avg_volume REAL,
+	PRIMARY KEY (hub, type_id)
+);
+
+CREATE TABLE IF NOT EXISTS scan_cache_meta (
+	hub               TEXT PRIMARY KEY,
+	orders_fetched_at TIMESTAMP,
+	volume_fetched_at TIMESTAMP
+);
 `
 
 // ErrNoToken is returned by LoadToken when no OAuth token has been saved
