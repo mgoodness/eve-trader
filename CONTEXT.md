@@ -31,3 +31,24 @@ _Avoid_: Volume period, lookback.
 **Scan Cycle**:
 One full recomputation of a Hub's ranked Opportunity list.
 _Avoid_: Refresh, poll, tick.
+
+### Order tracking
+
+Distinct from the scanner vocabulary above: these terms come from the character's own placed orders (ESI's character-orders endpoint), not the public market-order-book the scanner reads.
+
+**Order**:
+One of the character's own live buy or sell orders at a Hub. Not an Opportunity — an Opportunity is a scanner-derived candidate nobody has acted on yet; an Order is something the character actually placed.
+_Avoid_: Listing, position.
+
+**Alert**:
+A per-Order notification — one of Undercut, Price-Moved, or Expiring — delivered both in-app and via Discord webhook. Fires once on new detection, then suppresses repeats for that Order and alert type for 4 hours or until the condition resolves, whichever comes first.
+_Avoid_: Notification (too generic — always name the specific Undercut/Price-Moved/Expiring type once one applies).
+
+**Undercut**:
+The Alert condition where a competing order now beats the character's Order by any amount, down to the 0.01 ISK minimum increment, at the same Hub and item.
+
+**Price-Moved**:
+The Alert condition where the prevailing market price (the best order on the character's side) has drifted more than 5% from the price the character's Order was originally placed at. Distinct from Undercut: Price-Moved can fire even when the Order hasn't technically been beaten yet.
+
+**Expiring**:
+The Alert condition where the character's Order is within 24 hours of its expiration.
