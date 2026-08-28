@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/mgoodness/eve-trader/internal/auth"
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/storage"
 	"github.com/mgoodness/eve-trader/internal/web"
@@ -45,6 +46,7 @@ func run() error {
 	}
 
 	esiClient := esi.NewRealClient(clientID, clientSecret)
+	esiClient.Tokens = auth.NewTokenSource(esiClient, store)
 	srv := web.NewServer(esiClient, store, clientID, callbackURL)
 
 	log.Printf("listening on %s", addr)

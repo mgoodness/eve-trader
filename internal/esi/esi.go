@@ -40,6 +40,11 @@ type Client interface {
 	// CharacterStandings lists a character's NPC corp/faction standings,
 	// also used to compute broker-fee/sales-tax rates (see ADR-0001).
 	CharacterStandings(ctx context.Context, characterID int32) ([]Standing, error)
+
+	// ResolveNames resolves universe IDs (item type IDs, station IDs, etc.)
+	// to their display names via ESI's bulk universe/names endpoint. IDs
+	// with no match in the response are simply absent from the result.
+	ResolveNames(ctx context.Context, ids []int32) (map[int32]string, error)
 }
 
 // Token is the response shape from both the authorization-code exchange and

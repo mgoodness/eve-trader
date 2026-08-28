@@ -2,17 +2,32 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/storage"
 )
+
+// fakeCharacterAccessToken builds a JWT-shaped string whose `sub` claim
+// encodes characterID, the format auth.CharacterIDFromAccessToken expects.
+func fakeCharacterAccessToken(t *testing.T, characterID int32) string {
+	t.Helper()
+
+	payload, err := json.Marshal(map[string]string{"sub": fmt.Sprintf("CHARACTER:EVE:%d", characterID)})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+}
 
 const (
 	testClientID    = "test-client-id"
@@ -44,37 +59,6 @@ func TestHealthCheck(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-}
-
-// TestCharacterOrders drives the full handler stack -- HTTP routing, the
-// fake ESIClient, and a real temp-file SQLite store -- to prove the
-// ESIClient seam works end-to-end.
-func TestCharacterOrders(t *testing.T) {
-	fake := esi.NewFakeClient()
-	srv := newTestServer(t, fake)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/characters/12345/orders", nil)
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-
-	var got []esi.Order
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	if len(got) != len(fake.Orders) {
-		t.Fatalf("len(orders) = %d, want %d", len(got), len(fake.Orders))
-	}
-	if got[0].OrderID != fake.Orders[0].OrderID {
-		t.Errorf("orders[0].OrderID = %d, want %d", got[0].OrderID, fake.Orders[0].OrderID)
-	}
-	if got[0].TypeID != fake.Orders[0].TypeID {
-		t.Errorf("orders[0].TypeID = %d, want %d", got[0].TypeID, fake.Orders[0].TypeID)
 	}
 }
 
@@ -236,14 +220,79 @@ func TestAuthCallbackDoesNotClearANewerPendingState(t *testing.T) {
 	}
 }
 
-func TestCharacterOrdersInvalidID(t *testing.T) {
+// authenticate drives a full login -> callback round trip against srv so a
+// test can exercise handlers that require a stored token.
+func authenticate(t *testing.T, srv *Server) {
+	t.Helper()
+
+	state := loginState(t, srv)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=auth-code&state="+state, nil)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("callback status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestDashboardShowsLoginPromptWhenNotAuthenticated(t *testing.T) {
 	srv := newTestServer(t, esi.NewFakeClient())
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/characters/not-a-number/orders", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `href="/auth/login"`) {
+		t.Errorf("body missing login link:\n%s", rec.Body.String())
+	}
+}
+
+// TestDashboardRendersOrdersFromFakeESIClient is the AC-mandated test: a
+// handler test, driven by a fake ESIClient, proving the Orders list
+// renders correctly from canned data.
+func TestDashboardRendersOrdersFromFakeESIClient(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.TokenResp.AccessToken = fakeCharacterAccessToken(t, 95465499)
+	srv := newTestServer(t, fake)
+
+	authenticate(t, srv)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		"Tritanium", // resolved item name for fake.Orders[0].TypeID == 34
+		"Jita",      // hub for LocationID 60003760
+		"Sell",      // fake.Orders[0].IsBuyOrder == false
+		"8000",      // VolumeRemain
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestDashboardPropagatesESIErrorAsBadGateway(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.TokenResp.AccessToken = fakeCharacterAccessToken(t, 95465499)
+	fake.OrdersErr = context.DeadlineExceeded
+	srv := newTestServer(t, fake)
+
+	authenticate(t, srv)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
 	}
 }

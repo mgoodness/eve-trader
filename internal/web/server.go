@@ -3,16 +3,22 @@
 package web
 
 import (
-	"encoding/json"
+	"embed"
+	"errors"
+	"html/template"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 
 	"github.com/mgoodness/eve-trader/internal/auth"
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/storage"
 )
+
+//go:embed templates/dashboard.html
+var templateFS embed.FS
+
+var dashboardTemplate = template.Must(template.ParseFS(templateFS, "templates/dashboard.html"))
 
 // Server holds the app's dependencies and routes requests to handlers.
 type Server struct {
@@ -45,7 +51,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /auth/login", s.handleLogin)
 	s.mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
-	s.mux.HandleFunc("GET /api/characters/{id}/orders", s.handleCharacterOrders)
+	s.mux.HandleFunc("GET /{$}", s.handleDashboard)
 }
 
 // ServeHTTP implements http.Handler.
@@ -119,23 +125,43 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleCharacterOrders exercises the ESIClient seam end-to-end: it fetches
-// a character's open orders via esi.Client and renders them as JSON.
-func (s *Server) handleCharacterOrders(w http.ResponseWriter, r *http.Request) {
-	characterID, err := strconv.ParseInt(r.PathValue("id"), 10, 32)
+// handleDashboard renders the split-panel dashboard: a fixed Orders
+// sidebar with the authenticated character's real open orders, and
+// placeholder panels for the Opportunity Scanner and Alert Feed (#17,
+// #19). If nobody's logged in yet, it renders a login prompt instead.
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	characterID, err := auth.CurrentCharacterID(ctx, s.store)
+	if errors.Is(err, storage.ErrNoToken) {
+		s.renderDashboard(w, dashboardView{
+			Authenticated: false,
+			LoginURL:      "/auth/login",
+		})
+		return
+	}
 	if err != nil {
-		http.Error(w, "invalid character id", http.StatusBadRequest)
+		log.Printf("dashboard: %v", err)
+		http.Error(w, "failed to determine authenticated character", http.StatusInternalServerError)
 		return
 	}
 
-	orders, err := s.esi.CharacterOrders(r.Context(), int32(characterID))
+	orders, err := buildOrderRows(ctx, s.esi, characterID)
 	if err != nil {
+		log.Printf("dashboard: %v", err)
 		http.Error(w, "failed to fetch orders", http.StatusBadGateway)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(orders); err != nil {
-		log.Printf("encode orders response: %v", err)
+	s.renderDashboard(w, dashboardView{
+		Authenticated: true,
+		Orders:        orders,
+	})
+}
+
+func (s *Server) renderDashboard(w http.ResponseWriter, view dashboardView) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := dashboardTemplate.Execute(w, view); err != nil {
+		log.Printf("render dashboard: %v", err)
 	}
 }

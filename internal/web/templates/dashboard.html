@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>eve-trader</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #2a3038;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1, h2 { font-weight: 600; margin: 0; }
+  .dim { color: var(--text-dim); }
+  .mono { font-family: var(--mono); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill-buy { background: rgba(63,185,80,0.15); color: var(--green); }
+  .pill-sell { background: rgba(248,81,73,0.12); color: #ff7b72; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .panel-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+  .panel-empty { padding: 24px 14px; color: var(--text-dim); text-align: center; }
+  .order-row { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .order-row:last-child { border-bottom: none; }
+  .order-row .top { display: flex; justify-content: space-between; }
+  .app { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .app > .header { grid-column: 1 / -1; margin-bottom: 4px; }
+  .main { display: flex; flex-direction: column; gap: 16px; }
+</style>
+</head>
+<body>
+
+{{if not .Authenticated}}
+<div style="max-width: 480px; margin: 80px auto; text-align: center;">
+  <h1 style="font-size:18px;">eve-trader</h1>
+  <p class="dim">Not logged in.</p>
+  <p><a href="{{.LoginURL}}" style="color: var(--text);">Log in with EVE Online</a></p>
+</div>
+{{else}}
+<div class="app">
+  <div class="header">
+    <h1 style="font-size:18px;">eve-trader</h1>
+    <p class="dim" style="margin:4px 0 0;">Orders in a fixed sidebar, scanner + alert feed stacked in the main area.</p>
+  </div>
+
+  <div class="panel" style="align-self: start;">
+    <div class="panel-header"><h2>Open Orders ({{len .Orders}})</h2></div>
+    <div>
+      {{if .Orders}}
+        {{range .Orders}}
+        <div class="order-row">
+          <div class="top">
+            <b>{{.Item}}</b>
+            {{if eq .Side "Buy"}}<span class="pill pill-buy">Buy</span>{{else}}<span class="pill pill-sell">Sell</span>{{end}}
+          </div>
+          <div class="dim mono" style="font-size:12px;">{{.Hub}} &middot; {{.Price}} ISK</div>
+          <div class="dim" style="font-size:11px;">qty {{.VolumeRemain}} &middot; expires in {{.TimeRemaining}}</div>
+        </div>
+        {{end}}
+      {{else}}
+        <div class="panel-empty">No open orders.</div>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="panel">
+      <div class="panel-header"><h2>Opportunity Scanner</h2></div>
+      <div class="panel-empty">Coming soon.</div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><h2>Alert Feed</h2></div>
+      <div class="panel-empty">Coming soon.</div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+</body>
+</html>

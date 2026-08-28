@@ -29,6 +29,9 @@ type FakeClient struct {
 
 	StandingsResp []Standing
 	StandingsErr  error
+
+	Names    map[int32]string
+	NamesErr error
 }
 
 var _ Client = (*FakeClient)(nil)
@@ -113,6 +116,10 @@ func NewFakeClient() *FakeClient {
 		StandingsResp: []Standing{
 			{FromID: 1000035, FromType: "npc_corp", Standing: 5.0}, // Caldari Navy
 		},
+		Names: map[int32]string{
+			34: "Tritanium",
+			35: "Pyerite",
+		},
 	}
 }
 
@@ -152,4 +159,17 @@ func (f *FakeClient) CharacterSkills(ctx context.Context, characterID int32) (Sk
 
 func (f *FakeClient) CharacterStandings(ctx context.Context, characterID int32) ([]Standing, error) {
 	return f.StandingsResp, f.StandingsErr
+}
+
+func (f *FakeClient) ResolveNames(ctx context.Context, ids []int32) (map[int32]string, error) {
+	if f.NamesErr != nil {
+		return nil, f.NamesErr
+	}
+	result := make(map[int32]string, len(ids))
+	for _, id := range ids {
+		if name, ok := f.Names[id]; ok {
+			result[id] = name
+		}
+	}
+	return result, nil
 }
