@@ -1,0 +1,3 @@
+# Use modernc.org/sqlite instead of mattn/go-sqlite3
+
+The app needs a SQLite driver for its `database/sql` usage. `mattn/go-sqlite3` is the more popular, more battle-tested, more feature-complete choice, but it's cgo-based — a C toolchain would be needed in the Docker multi-stage build image, and cross-compilation gets more involved. We chose `modernc.org/sqlite` (a pure-Go SQLite implementation) instead: it keeps the build simple (no C toolchain, straightforward static binary) for an always-on single-container deployment, at the cost of the extra maturity and feature surface `mattn/go-sqlite3` has. This app's SQLite usage — a handful of tables, no exotic extensions — doesn't need anything the pure-Go driver lacks.
