@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -116,6 +117,173 @@ func TestSaveTokenOverwritesPreviousToken(t *testing.T) {
 	}
 	if rowCount != 1 {
 		t.Errorf("oauth_token row count = %d, want 1 (single-row table)", rowCount)
+	}
+}
+
+func TestGetOrderAlertStateWhenNoneExists(t *testing.T) {
+	store := openBootstrapped(t)
+
+	_, exists, err := store.GetOrderAlertState(context.Background(), 1, "undercut")
+	if err != nil {
+		t.Fatalf("GetOrderAlertState: %v", err)
+	}
+	if exists {
+		t.Error("exists = true, want false")
+	}
+}
+
+func TestUpsertThenGetOrderAlertState(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	firedAt := time.Now().UTC().Truncate(time.Second)
+	if err := store.UpsertOrderAlertState(ctx, 1, "undercut", firedAt); err != nil {
+		t.Fatalf("UpsertOrderAlertState: %v", err)
+	}
+
+	got, exists, err := store.GetOrderAlertState(ctx, 1, "undercut")
+	if err != nil {
+		t.Fatalf("GetOrderAlertState: %v", err)
+	}
+	if !exists {
+		t.Fatal("exists = false, want true")
+	}
+	if !got.Equal(firedAt) {
+		t.Errorf("LastFiredAt = %v, want %v", got, firedAt)
+	}
+}
+
+func TestUpsertOrderAlertStateOverwritesLastFiredAt(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	first := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	second := time.Now().UTC().Truncate(time.Second)
+
+	if err := store.UpsertOrderAlertState(ctx, 1, "undercut", first); err != nil {
+		t.Fatalf("UpsertOrderAlertState(first): %v", err)
+	}
+	if err := store.UpsertOrderAlertState(ctx, 1, "undercut", second); err != nil {
+		t.Fatalf("UpsertOrderAlertState(second): %v", err)
+	}
+
+	got, exists, err := store.GetOrderAlertState(ctx, 1, "undercut")
+	if err != nil {
+		t.Fatalf("GetOrderAlertState: %v", err)
+	}
+	if !exists {
+		t.Fatal("exists = false, want true")
+	}
+	if !got.Equal(second) {
+		t.Errorf("LastFiredAt = %v, want %v (the newer value)", got, second)
+	}
+}
+
+func TestOrderAlertStateIsScopedPerOrderAndType(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	firedAt := time.Now().UTC().Truncate(time.Second)
+	if err := store.UpsertOrderAlertState(ctx, 1, "undercut", firedAt); err != nil {
+		t.Fatalf("UpsertOrderAlertState: %v", err)
+	}
+
+	if _, exists, err := store.GetOrderAlertState(ctx, 2, "undercut"); err != nil {
+		t.Fatalf("GetOrderAlertState(other order): %v", err)
+	} else if exists {
+		t.Error("state leaked to a different order ID")
+	}
+	if _, exists, err := store.GetOrderAlertState(ctx, 1, "expiring"); err != nil {
+		t.Fatalf("GetOrderAlertState(other type): %v", err)
+	} else if exists {
+		t.Error("state leaked to a different alert type")
+	}
+}
+
+func TestClearOrderAlertState(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	if err := store.UpsertOrderAlertState(ctx, 1, "undercut", time.Now()); err != nil {
+		t.Fatalf("UpsertOrderAlertState: %v", err)
+	}
+	if err := store.ClearOrderAlertState(ctx, 1, "undercut"); err != nil {
+		t.Fatalf("ClearOrderAlertState: %v", err)
+	}
+
+	_, exists, err := store.GetOrderAlertState(ctx, 1, "undercut")
+	if err != nil {
+		t.Fatalf("GetOrderAlertState: %v", err)
+	}
+	if exists {
+		t.Error("exists = true after ClearOrderAlertState, want false")
+	}
+}
+
+func TestClearOrderAlertStateWhenNoneExistsIsANoop(t *testing.T) {
+	store := openBootstrapped(t)
+
+	if err := store.ClearOrderAlertState(context.Background(), 1, "undercut"); err != nil {
+		t.Fatalf("ClearOrderAlertState: %v", err)
+	}
+}
+
+func TestInsertAndListRecentAlertFeed(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	base := time.Now().UTC().Truncate(time.Second)
+	entries := []AlertFeedEntry{
+		{OrderID: 1, AlertType: "undercut", TypeID: 34, LocationID: 60003760, Detail: "oldest", CreatedAt: base.Add(-2 * time.Hour)},
+		{OrderID: 2, AlertType: "expiring", TypeID: 35, LocationID: 60003760, Detail: "middle", CreatedAt: base.Add(-1 * time.Hour)},
+		{OrderID: 3, AlertType: "price_moved", TypeID: 36, LocationID: 60004588, Detail: "newest", CreatedAt: base},
+	}
+	for _, e := range entries {
+		if err := store.InsertAlertFeedEntry(ctx, e); err != nil {
+			t.Fatalf("InsertAlertFeedEntry: %v", err)
+		}
+	}
+
+	got, err := store.RecentAlertFeed(ctx, 10)
+	if err != nil {
+		t.Fatalf("RecentAlertFeed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3", len(got))
+	}
+	// Most recent first.
+	if got[0].Detail != "newest" || got[1].Detail != "middle" || got[2].Detail != "oldest" {
+		t.Errorf("order = [%s %s %s], want [newest middle oldest]", got[0].Detail, got[1].Detail, got[2].Detail)
+	}
+	if got[0].OrderID != 3 || got[0].AlertType != "price_moved" || got[0].TypeID != 36 || got[0].LocationID != 60004588 {
+		t.Errorf("got[0] = %+v, unexpected fields", got[0])
+	}
+}
+
+func TestRecentAlertFeedRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	base := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < 5; i++ {
+		err := store.InsertAlertFeedEntry(ctx, AlertFeedEntry{
+			OrderID: int64(i), AlertType: "undercut", TypeID: 34, LocationID: 60003760,
+			Detail: fmt.Sprintf("entry-%d", i), CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		})
+		if err != nil {
+			t.Fatalf("InsertAlertFeedEntry: %v", err)
+		}
+	}
+
+	got, err := store.RecentAlertFeed(ctx, 2)
+	if err != nil {
+		t.Fatalf("RecentAlertFeed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].Detail != "entry-4" || got[1].Detail != "entry-3" {
+		t.Errorf("got = [%s %s], want [entry-4 entry-3]", got[0].Detail, got[1].Detail)
 	}
 }
 

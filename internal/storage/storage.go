@@ -25,6 +25,23 @@ CREATE TABLE IF NOT EXISTS oauth_token (
 	refresh_token TEXT NOT NULL,
 	expires_at    TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS order_alert_state (
+	order_id      INTEGER NOT NULL,
+	alert_type    TEXT NOT NULL,
+	last_fired_at TIMESTAMP NOT NULL,
+	PRIMARY KEY (order_id, alert_type)
+);
+
+CREATE TABLE IF NOT EXISTS alert_feed (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	order_id    INTEGER NOT NULL,
+	alert_type  TEXT NOT NULL,
+	type_id     INTEGER NOT NULL,
+	location_id INTEGER NOT NULL,
+	detail      TEXT NOT NULL,
+	created_at  TIMESTAMP NOT NULL
+);
 `
 
 // ErrNoToken is returned by LoadToken when no OAuth token has been saved
@@ -93,6 +110,100 @@ func (s *Store) LoadToken(ctx context.Context) (Token, error) {
 		return Token{}, fmt.Errorf("load oauth token: %w", err)
 	}
 	return t, nil
+}
+
+// AlertFeedEntry is one historical record in the Alert Feed: a moment an
+// Alert actually fired (as opposed to being suppressed by throttling).
+type AlertFeedEntry struct {
+	ID         int64
+	OrderID    int64
+	AlertType  string
+	TypeID     int32
+	LocationID int64
+	Detail     string
+	CreatedAt  time.Time
+}
+
+// GetOrderAlertState returns the last time the given Order+Alert-type
+// fired, and whether that Alert is currently considered active (a row
+// exists) at all. See ClearOrderAlertState for how a resolved condition
+// stops being active.
+func (s *Store) GetOrderAlertState(ctx context.Context, orderID int64, alertType string) (lastFiredAt time.Time, exists bool, err error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT last_fired_at FROM order_alert_state WHERE order_id = ? AND alert_type = ?`, orderID, alertType)
+
+	if err := row.Scan(&lastFiredAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, false, nil
+		}
+		return time.Time{}, false, fmt.Errorf("get order alert state: %w", err)
+	}
+	return lastFiredAt, true, nil
+}
+
+// UpsertOrderAlertState marks an Order+Alert-type as currently active,
+// recording firedAt as its most recent firing (for the 4-hour throttle
+// window).
+func (s *Store) UpsertOrderAlertState(ctx context.Context, orderID int64, alertType string, firedAt time.Time) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO order_alert_state (order_id, alert_type, last_fired_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT (order_id, alert_type) DO UPDATE SET last_fired_at = excluded.last_fired_at
+	`, orderID, alertType, firedAt)
+	if err != nil {
+		return fmt.Errorf("upsert order alert state: %w", err)
+	}
+	return nil
+}
+
+// ClearOrderAlertState marks an Order+Alert-type as no longer active
+// (the underlying condition resolved). The next time it becomes true
+// again, it's treated as a new detection rather than a suppressed repeat.
+func (s *Store) ClearOrderAlertState(ctx context.Context, orderID int64, alertType string) error {
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM order_alert_state WHERE order_id = ? AND alert_type = ?`, orderID, alertType); err != nil {
+		return fmt.Errorf("clear order alert state: %w", err)
+	}
+	return nil
+}
+
+// InsertAlertFeedEntry records a fired Alert in the chronological Alert
+// Feed.
+func (s *Store) InsertAlertFeedEntry(ctx context.Context, e AlertFeedEntry) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO alert_feed (order_id, alert_type, type_id, location_id, detail, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, e.OrderID, e.AlertType, e.TypeID, e.LocationID, e.Detail, e.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert alert feed entry: %w", err)
+	}
+	return nil
+}
+
+// RecentAlertFeed returns up to limit Alert Feed entries, most recent
+// first.
+func (s *Store) RecentAlertFeed(ctx context.Context, limit int) ([]AlertFeedEntry, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT id, order_id, alert_type, type_id, location_id, detail, created_at
+		FROM alert_feed
+		ORDER BY created_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query alert feed: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []AlertFeedEntry
+	for rows.Next() {
+		var e AlertFeedEntry
+		if err := rows.Scan(&e.ID, &e.OrderID, &e.AlertType, &e.TypeID, &e.LocationID, &e.Detail, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan alert feed entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate alert feed: %w", err)
+	}
+	return entries, nil
 }
 
 // Ping verifies the database connection is alive.

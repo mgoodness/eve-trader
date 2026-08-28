@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/mgoodness/eve-trader/internal/auth"
 	"github.com/mgoodness/eve-trader/internal/esi"
@@ -146,17 +147,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orders, err := buildOrderRows(ctx, s.esi, characterID)
+	view, err := buildDashboardView(ctx, s.esi, s.store, characterID, time.Now())
 	if err != nil {
 		log.Printf("dashboard: %v", err)
-		http.Error(w, "failed to fetch orders", http.StatusBadGateway)
+		http.Error(w, "failed to build dashboard", http.StatusBadGateway)
 		return
 	}
 
-	s.renderDashboard(w, dashboardView{
-		Authenticated: true,
-		Orders:        orders,
-	})
+	s.renderDashboard(w, view)
 }
 
 func (s *Server) renderDashboard(w http.ResponseWriter, view dashboardView) {

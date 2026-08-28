@@ -12,6 +12,8 @@
     --text-dim: #8b949e;
     --green: #3fb950;
     --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
     --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
   }
   * { box-sizing: border-box; }
@@ -25,9 +27,16 @@
   h1, h2 { font-weight: 600; margin: 0; }
   .dim { color: var(--text-dim); }
   .mono { font-family: var(--mono); }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 4px; }
   .pill-buy { background: rgba(63,185,80,0.15); color: var(--green); }
   .pill-sell { background: rgba(248,81,73,0.12); color: #ff7b72; }
+  .pill-undercut { background: rgba(248,81,73,0.15); color: var(--red); }
+  .pill-expiring { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .pill-pricemoved { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .badges { display: flex; gap: 4px; }
+  .feed-row { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: baseline; }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-when { width: 64px; flex-shrink: 0; }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .panel-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
@@ -63,7 +72,10 @@
         <div class="order-row">
           <div class="top">
             <b>{{.Item}}</b>
-            {{if eq .Side "Buy"}}<span class="pill pill-buy">Buy</span>{{else}}<span class="pill pill-sell">Sell</span>{{end}}
+            <span class="badges">
+              {{if eq .Side "Buy"}}<span class="pill pill-buy">Buy</span>{{else}}<span class="pill pill-sell">Sell</span>{{end}}
+              {{range .Alerts}}<span class="pill {{.Class}}">{{.Label}}</span>{{end}}
+            </span>
           </div>
           <div class="dim mono" style="font-size:12px;">{{.Hub}} &middot; {{.Price}} ISK</div>
           <div class="dim" style="font-size:11px;">qty {{.VolumeRemain}} &middot; expires in {{.TimeRemaining}}</div>
@@ -82,7 +94,19 @@
     </div>
     <div class="panel">
       <div class="panel-header"><h2>Alert Feed</h2></div>
-      <div class="panel-empty">Coming soon.</div>
+      <div>
+        {{if .AlertFeed}}
+          {{range .AlertFeed}}
+          <div class="feed-row">
+            <span class="dim mono feed-when">{{.When}}</span>
+            <span class="pill {{.Class}}">{{.Label}}</span>
+            <span>{{.Item}} &middot; {{.Hub}} <span class="dim">&mdash; {{.Detail}}</span></span>
+          </div>
+          {{end}}
+        {{else}}
+          <div class="panel-empty">No alerts yet.</div>
+        {{end}}
+      </div>
     </div>
   </div>
 </div>
