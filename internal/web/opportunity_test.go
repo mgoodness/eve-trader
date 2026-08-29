@@ -72,7 +72,7 @@ func TestDashboardRendersOpportunityPanel(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	for _, want := range []string{"Tritanium", "5.40", "4.50", "500000"} {
+	for _, want := range []string{"Tritanium", "5.40", "4.50", "500,000"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
 		}

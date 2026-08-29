@@ -114,8 +114,8 @@ func TestBuildOrderRows(t *testing.T) {
 	if rows[0].Price != "5.50" {
 		t.Errorf("rows[0].Price = %q, want 5.50", rows[0].Price)
 	}
-	if rows[0].VolumeRemain != 8000 {
-		t.Errorf("rows[0].VolumeRemain = %d, want 8000", rows[0].VolumeRemain)
+	if rows[0].VolumeRemain != "8,000" {
+		t.Errorf("rows[0].VolumeRemain = %q, want 8,000", rows[0].VolumeRemain)
 	}
 	if rows[0].TimeRemaining == "expired" || rows[0].TimeRemaining == "" {
 		t.Errorf("rows[0].TimeRemaining = %q, want a non-expired duration", rows[0].TimeRemaining)
@@ -137,6 +137,37 @@ func TestBuildOrderRows(t *testing.T) {
 	}
 	if len(rows[1].Alerts) != 0 {
 		t.Errorf("rows[1].Alerts = %+v, want none", rows[1].Alerts)
+	}
+}
+
+func TestBuildOpportunityRows(t *testing.T) {
+	opportunities := []scanner.Opportunity{
+		{TypeID: 34, BestBuy: 15000000, BestSell: 15500000.5, Margin: -1234.56, AvgDailyVolume: 2541345125},
+	}
+	names := map[int32]string{34: "Tritanium"}
+
+	rows := buildOpportunityRows(opportunities, names)
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+
+	row := rows[0]
+	if row.Item != "Tritanium" {
+		t.Errorf("row.Item = %q, want Tritanium", row.Item)
+	}
+	if row.BestBuy != "15,000,000.00" {
+		t.Errorf("row.BestBuy = %q, want 15,000,000.00", row.BestBuy)
+	}
+	if row.BestSell != "15,500,000.50" {
+		t.Errorf("row.BestSell = %q, want 15,500,000.50", row.BestSell)
+	}
+	// A negative margin (fees can exceed spread) must still format
+	// correctly, e.g. "-1,234.56", not "-1,234.-56".
+	if row.Margin != "-1,234.56" {
+		t.Errorf("row.Margin = %q, want -1,234.56", row.Margin)
+	}
+	if row.Volume != "2,541,345,125" {
+		t.Errorf("row.Volume = %q, want 2,541,345,125", row.Volume)
 	}
 }
 
