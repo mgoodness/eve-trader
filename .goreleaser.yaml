@@ -14,6 +14,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      # Same commit the Docker image tags below already use -- see
+      # internal/build and ADR-0008 (no semver, just the commit).
+      - -X github.com/mgoodness/eve-trader/internal/build.Commit={{ .ShortCommit }}
     goos:
       - linux
     goarch:
