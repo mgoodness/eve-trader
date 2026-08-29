@@ -12,6 +12,10 @@ _Avoid_: Trade hub, station, region (a Hub identifies a specific station, not th
 The net profit a station trade would yield at a Hub for one item: `(best sell order − best buy order) − fees`. Always net of fees — a figure that hasn't had fees subtracted is not yet a Margin.
 _Avoid_: Spread (the pre-fee sell-minus-buy figure, a distinct intermediate value), profit.
 
+**Margin Percentage**:
+An Opportunity's Margin expressed as a fraction of its best buy order price: `Margin / best buy order price`. A return-on-capital view, distinct from the absolute-ISK Margin — the two are filtered independently, and an Opportunity must clear both configured floors (where each is non-zero) to be kept.
+_Avoid_: Margin %, ROI, return (use Margin Percentage to keep it distinct from the absolute-ISK Margin).
+
 **Fees**:
 The broker fee (paid twice per round-trip station trade — once placing the buy order, once placing the sell order) and sales tax (paid once, on the sale) that reduce a trade's proceeds. Both are specific to the character's own skills and standings, not a fixed game-wide rate.
 _Avoid_: Tax (ambiguous between broker fee and sales tax — name the specific one).
