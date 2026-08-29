@@ -1,12 +1,17 @@
-name: Release
+name: Deploy
 
+# Every push to main builds and pushes ghcr.io/mgoodness/eve-trader:stable
+# -- no version tags, no gated release PR (see ADR-0008: release-please's
+# batched-release-PR model was pure friction for a single-user app where
+# every merge is fine to ship). Watchtower on the host polls :stable and
+# redeploys automatically.
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 jobs:
@@ -15,9 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # GoReleaser generates the changelog from git history, which
-          # needs more than the default shallow clone.
-          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -28,7 +30,7 @@ jobs:
           check-latest: true
           cache: false
 
-      - name: Run tests before releasing
+      - name: Run tests before deploying
         run: go test -race ./...
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -39,10 +41,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # --skip=validate skips the "HEAD must be exactly tagged" check
+      # (this pipeline runs on every push to main, not just tags -- it
+      # falls back to the nearest reachable tag for template values like
+      # .Version, unused here since the Docker tags below don't
+      # reference it) while still publishing (pushing Docker images).
+      # --skip=announce is just "nothing configured to announce to".
+      # See .goreleaser.yaml: release.disable is on, since this pipeline
+      # only wants the Docker push, not a GitHub Release/tag artifact.
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --skip=validate,announce --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

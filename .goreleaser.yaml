@@ -36,32 +36,22 @@ dockers_v2:
     images:
       - "ghcr.io/mgoodness/eve-trader"
     tags:
-      # vX.Y.Z: immutable, one per release. stable: floating, the tag
-      # Watchtower on the VM polls for redeploys. .Tag (not .Version,
-      # which strips the "v") so this is exactly the triggering git tag.
-      - "{{ .Tag }}"
+      # stable: floating, the tag Watchtower on the VM polls for
+      # redeploys, updated on every push to main (see ADR-0008 --
+      # no version tags/gated releases). ShortCommit: immutable, for
+      # pinning/rollback -- .Tag isn't used since there's no git tag
+      # in this nightly-build pipeline.
       - "stable"
+      - "{{ .ShortCommit }}"
     platforms:
       - linux/amd64
     labels:
       "org.opencontainers.image.source": "https://github.com/mgoodness/eve-trader"
-      "org.opencontainers.image.version": "{{ .Version }}"
       "org.opencontainers.image.revision": "{{ .FullCommit }}"
 
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-
+# No version tags and no GitHub Release in this pipeline (see ADR-0008) --
+# just build + push the Docker image on every push to main. disable: true
+# suppresses release creation regardless of the --nightly flag deploy.yml
+# invokes GoReleaser with.
 release:
-  github:
-    owner: mgoodness
-    name: eve-trader
-  # release-please creates the GitHub Release (with its own changelog
-  # notes) before this runs; keep-existing means GoReleaser only adds
-  # build artifacts to it rather than overwriting those notes with its
-  # own git-log-derived changelog.
-  mode: keep-existing
+  disable: true
