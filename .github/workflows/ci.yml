@@ -10,13 +10,6 @@ permissions:
 
 jobs:
   test:
-    # release-please's own PR (release-please--branches--main) only ever
-    # touches version metadata/CHANGELOG.md, never app code -- skip it so
-    # every commit to main doesn't trigger two redundant full CI runs (one
-    # for the push, one for release-please re-pushing its PR branch).
-    # `branches-ignore` under `pull_request` filters by base branch, not
-    # head, so this has to be a job-level condition instead.
-    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
