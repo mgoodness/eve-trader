@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/mgoodness/eve-trader/compare/v1.0.1...v1.0.2) (2026-08-29)
+
+
+### Bug Fixes
+
+* redirect to the dashboard after completing ESI login ([#30](https://github.com/mgoodness/eve-trader/issues/30)) ([7af4ff6](https://github.com/mgoodness/eve-trader/commit/7af4ff653d4a8c0d4cfb82665c738249473c90be))
+* skip CI on release-please's own PR branch ([02d5d49](https://github.com/mgoodness/eve-trader/commit/02d5d4912e2b864c1c4626ebda173fa3869ec086))
+
 ## [1.0.1](https://github.com/mgoodness/eve-trader/compare/v1.0.0...v1.0.1) (2026-08-29)
 
 
