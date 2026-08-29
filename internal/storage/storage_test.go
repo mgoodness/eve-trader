@@ -343,6 +343,70 @@ func TestInsertAndListRecentAlertFeed(t *testing.T) {
 	}
 }
 
+// TestRecentAlertFeedCollapsesRepeatedOrderAlertTypeToLatest is the
+// AC-mandated test: an Order+Alert-type that fired repeatedly (e.g. a
+// still-active condition re-firing every 4h past its throttle window)
+// shows only its single most recent firing in the displayed feed, not
+// every historical entry.
+func TestRecentAlertFeedCollapsesRepeatedOrderAlertTypeToLatest(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	base := time.Now().UTC().Truncate(time.Second)
+	entries := []AlertFeedEntry{
+		{OrderID: 1, AlertType: "undercut", TypeID: 34, LocationID: 60003760, Detail: "first firing", CreatedAt: base.Add(-8 * time.Hour)},
+		{OrderID: 1, AlertType: "undercut", TypeID: 34, LocationID: 60003760, Detail: "second firing", CreatedAt: base.Add(-4 * time.Hour)},
+		{OrderID: 1, AlertType: "undercut", TypeID: 34, LocationID: 60003760, Detail: "third firing", CreatedAt: base},
+	}
+	for _, e := range entries {
+		if err := store.InsertAlertFeedEntry(ctx, e); err != nil {
+			t.Fatalf("InsertAlertFeedEntry: %v", err)
+		}
+	}
+
+	got, err := store.RecentAlertFeed(ctx, 10)
+	if err != nil {
+		t.Fatalf("RecentAlertFeed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (repeated Order+Alert-type firings collapse to the latest)", len(got))
+	}
+	if got[0].Detail != "third firing" {
+		t.Errorf("got[0].Detail = %q, want %q (the most recent firing)", got[0].Detail, "third firing")
+	}
+}
+
+// TestRecentAlertFeedKeepsDifferentAlertTypesForSameOrderIndependent
+// proves deduplication is scoped to (Order, Alert type), not to the
+// Order alone -- an Order with two distinct active conditions still
+// shows both.
+func TestRecentAlertFeedKeepsDifferentAlertTypesForSameOrderIndependent(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	base := time.Now().UTC().Truncate(time.Second)
+	entries := []AlertFeedEntry{
+		{OrderID: 1, AlertType: "undercut", TypeID: 34, LocationID: 60003760, Detail: "undercut firing", CreatedAt: base.Add(-1 * time.Hour)},
+		{OrderID: 1, AlertType: "price_moved", TypeID: 34, LocationID: 60003760, Detail: "price-moved firing", CreatedAt: base},
+	}
+	for _, e := range entries {
+		if err := store.InsertAlertFeedEntry(ctx, e); err != nil {
+			t.Fatalf("InsertAlertFeedEntry: %v", err)
+		}
+	}
+
+	got, err := store.RecentAlertFeed(ctx, 10)
+	if err != nil {
+		t.Fatalf("RecentAlertFeed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2 (different Alert types on the same Order must stay independent)", len(got))
+	}
+	if got[0].Detail != "price-moved firing" || got[1].Detail != "undercut firing" {
+		t.Errorf("got = [%s %s], want [price-moved firing, undercut firing] (most recent first)", got[0].Detail, got[1].Detail)
+	}
+}
+
 func TestRecentAlertFeedRespectsLimit(t *testing.T) {
 	ctx := context.Background()
 	store := openBootstrapped(t)
