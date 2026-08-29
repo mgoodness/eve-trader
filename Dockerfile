@@ -9,7 +9,11 @@
 # static, distroless base is enough -- no libc, no shared libraries.
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY eve-trader /eve-trader
+# dockers_v2 stages each platform's binary under a $TARGETPLATFORM-named
+# directory in the build context (e.g. linux/amd64/eve-trader), not at the
+# context root, so the copy source must use that buildx-provided arg.
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/eve-trader /eve-trader
 
 EXPOSE 8080
 
