@@ -45,6 +45,20 @@ type FakeClient struct {
 	// because concurrent test callers (see TestConcurrentRunDoesNotDoubleFire)
 	// call MarketOrders from multiple goroutines at once.
 	MarketOrdersCalls atomic.Int32
+
+	// MarketOrdersDelay, if set, makes MarketOrders sleep this long
+	// before returning -- widens the window in which concurrent calls
+	// actually overlap, so a test can reliably observe real parallelism
+	// via MarketOrdersPeakInFlight rather than relying on timing luck.
+	MarketOrdersDelay time.Duration
+
+	// MarketOrdersInFlight/MarketOrdersPeakInFlight track how many
+	// MarketOrders calls are concurrently in progress and the high-water
+	// mark ever reached, so a test can prove a caller actually fetches
+	// items in parallel rather than merely not regressing the sequential
+	// result.
+	MarketOrdersInFlight     atomic.Int32
+	MarketOrdersPeakInFlight atomic.Int32
 }
 
 var _ Client = (*FakeClient)(nil)
@@ -160,6 +174,19 @@ func (f *FakeClient) CharacterOrderHistory(ctx context.Context, characterID int3
 
 func (f *FakeClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, typeID int32, page int32) ([]MarketOrder, error) {
 	f.MarketOrdersCalls.Add(1)
+
+	n := f.MarketOrdersInFlight.Add(1)
+	defer f.MarketOrdersInFlight.Add(-1)
+	for {
+		peak := f.MarketOrdersPeakInFlight.Load()
+		if n <= peak || f.MarketOrdersPeakInFlight.CompareAndSwap(peak, n) {
+			break
+		}
+	}
+	if f.MarketOrdersDelay > 0 {
+		time.Sleep(f.MarketOrdersDelay)
+	}
+
 	if page > 1 {
 		return nil, f.MarketOrdersErr
 	}
