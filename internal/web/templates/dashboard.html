@@ -12,9 +12,26 @@
     --text-dim: #8b949e;
     --green: #3fb950;
     --red: #f85149;
+    --red-alt: #ff7b72;
     --yellow: #d29922;
     --blue: #58a6ff;
+    --surface-raised: #21262d;
     --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff;
+      --panel: #f6f8fa;
+      --border: #d0d7de;
+      --text: #1f2328;
+      --text-dim: #59636e;
+      --green: #1a7f37;
+      --red: #cf222e;
+      --red-alt: #c2412d;
+      --yellow: #9a6700;
+      --blue: #0969da;
+      --surface-raised: #eaeef2;
+    }
   }
   * { box-sizing: border-box; }
   body {
@@ -29,7 +46,7 @@
   .mono { font-family: var(--mono); }
   .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 4px; }
   .pill-buy { background: rgba(63,185,80,0.15); color: var(--green); }
-  .pill-sell { background: rgba(248,81,73,0.12); color: #ff7b72; }
+  .pill-sell { background: rgba(248,81,73,0.12); color: var(--red-alt); }
   .pill-undercut { background: rgba(248,81,73,0.15); color: var(--red); }
   .pill-expiring { background: rgba(210,153,34,0.15); color: var(--yellow); }
   .pill-pricemoved { background: rgba(88,166,255,0.15); color: var(--blue); }
@@ -40,10 +57,10 @@
   tr:last-child td { border-bottom: none; }
   .margin-pos { color: var(--green); }
   .hub-tab { text-decoration: none; background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
-  .hub-tab.active { background: #21262d; color: var(--text); border-color: transparent; }
+  .hub-tab.active { background: var(--surface-raised); color: var(--text); border-color: transparent; }
   .filter-form { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
   .filter-form input[type=number] { width: 90px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 6px; }
-  .filter-form button { background: #21262d; border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  .filter-form button { background: var(--surface-raised); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
   .feed-row { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: baseline; }
   .feed-row:last-child { border-bottom: none; }
   .feed-when { width: 64px; flex-shrink: 0; }
