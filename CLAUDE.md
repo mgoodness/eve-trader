@@ -11,3 +11,7 @@ Uses the default label vocabulary — each canonical role's label string equals 
 ### Domain docs
 
 Single-context layout — `CONTEXT.md` + `docs/adr/` at the repo root (created lazily as concepts are resolved). See `docs/agents/domain.md`.
+
+### Branch protection
+
+`main` is protected: direct pushes are rejected (`enforce_admins: true`), and merging requires the `test` status check (CI) to pass. No approving review is required (solo project), but the merge itself must go through a pull request. This means the implement → commit → push-to-main flow no longer works — instead: branch, push the branch, `gh pr create`, wait for CI, then `gh pr merge` (squash or merge, your call) once it's green.
