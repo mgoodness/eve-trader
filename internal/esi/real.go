@@ -3,6 +3,7 @@ package esi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,12 @@ import (
 	"strings"
 	"time"
 )
+
+// errNotFound signals a 404 response, distinct from doJSON's generic
+// "unexpected status" error so a caller like MarketOrders can tell "past
+// the last page" (ESI's actual behavior -- confirmed live) apart from a
+// real failure.
+var errNotFound = errors.New("not found")
 
 const (
 	defaultTokenURL    = "https://login.eveonline.com/v2/oauth/token"
@@ -215,6 +222,9 @@ func (c *RealClient) doJSON(req *http.Request, out any) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return errNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("unexpected status %s: %s", resp.Status, detail)
@@ -252,6 +262,9 @@ func (c *RealClient) MarketOrders(ctx context.Context, regionID int32, orderType
 		"page":       {fmt.Sprintf("%d", page)},
 	}
 	if err := c.get(ctx, path, query, &dtos); err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("market orders: %w", err)
 	}
 
