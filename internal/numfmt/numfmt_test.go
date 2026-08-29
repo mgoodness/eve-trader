@@ -1,4 +1,4 @@
-package web
+package numfmt
 
 import "testing"
 
@@ -19,8 +19,8 @@ func TestFormatFloat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := formatFloat(c.f, c.decimals); got != c.want {
-				t.Errorf("formatFloat(%v, %d) = %q, want %q", c.f, c.decimals, got, c.want)
+			if got := FormatFloat(c.f, c.decimals); got != c.want {
+				t.Errorf("FormatFloat(%v, %d) = %q, want %q", c.f, c.decimals, got, c.want)
 			}
 		})
 	}
@@ -42,8 +42,8 @@ func TestFormatInt(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := formatInt(c.n); got != c.want {
-				t.Errorf("formatInt(%d) = %q, want %q", c.n, got, c.want)
+			if got := FormatInt(c.n); got != c.want {
+				t.Errorf("FormatInt(%d) = %q, want %q", c.n, got, c.want)
 			}
 		})
 	}
