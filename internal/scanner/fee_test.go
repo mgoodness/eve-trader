@@ -116,6 +116,24 @@ func TestMarginHigherFeesReduceMargin(t *testing.T) {
 	}
 }
 
+func TestMarkup(t *testing.T) {
+	// Margin=15, best buy=100: Markup = 15/100 = 0.15 (a fraction --
+	// CONTEXT.md's Markup definition, not a percentage).
+	got := Markup(15, 100)
+	if !almostEqual(got, 0.15) {
+		t.Errorf("Markup(15, 100) = %v, want 0.15", got)
+	}
+}
+
+func TestMarkupNegativeMargin(t *testing.T) {
+	// Fees can exceed spread, producing a negative Margin -- Markup
+	// must stay negative too, not clamp to zero.
+	got := Markup(-10, 100)
+	if !almostEqual(got, -0.1) {
+		t.Errorf("Markup(-10, 100) = %v, want -0.1", got)
+	}
+}
+
 func almostEqual(a, b float64) bool {
 	const epsilon = 1e-9
 	d := a - b

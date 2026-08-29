@@ -64,6 +64,41 @@ func TestRankFiltersByMinVolumeAndMinMargin(t *testing.T) {
 	}
 }
 
+// TestRankFiltersByMinMarkup proves Markup and Margin filter
+// independently: an Opportunity must clear both floors to be kept, and
+// clearing only one is not enough.
+func TestRankFiltersByMinMarkup(t *testing.T) {
+	opps := []Opportunity{
+		{TypeID: 1, Margin: 20, BestBuy: 100, AvgDailyVolume: 1000},  // Markup 0.20: clears both
+		{TypeID: 2, Margin: 20, BestBuy: 1000, AvgDailyVolume: 1000}, // Markup 0.02: clears Margin, not Markup
+		{TypeID: 3, Margin: 5, BestBuy: 100, AvgDailyVolume: 1000},   // Markup 0.05: clears Markup, not Margin
+	}
+
+	got := Rank(opps, Filter{MinMargin: 10, MinMarkup: 0.10}, 50)
+
+	if len(got) != 1 || got[0].TypeID != 1 {
+		t.Errorf("got = %+v, want only TypeID 1 (must clear both Margin and Markup floors)", got)
+	}
+}
+
+// TestRankMinMarkupZeroDoesNotFilter proves the AC: leaving MinMarkup at
+// its zero value has no effect beyond what MinMargin/MinVolume already
+// decide -- an Opportunity that would have passed before this filter
+// existed (Margin already non-negative, so Markup is too) still passes
+// with MinMarkup left unset.
+func TestRankMinMarkupZeroDoesNotFilter(t *testing.T) {
+	opps := []Opportunity{
+		{TypeID: 1, Margin: 10, BestBuy: 100, AvgDailyVolume: 1000},
+		{TypeID: 2, Margin: 0.5, BestBuy: 1000, AvgDailyVolume: 1000}, // small but non-negative Markup
+	}
+
+	got := Rank(opps, Filter{}, 50)
+
+	if len(got) != 2 {
+		t.Errorf("len(got) = %d, want 2 (MinMarkup unset must not filter beyond what MinMargin/MinVolume already decide)", len(got))
+	}
+}
+
 func TestRankOrdersByDescendingMargin(t *testing.T) {
 	opps := []Opportunity{
 		{TypeID: 1, Margin: 5},

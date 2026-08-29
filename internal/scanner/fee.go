@@ -81,3 +81,11 @@ func Margin(bestBuy, bestSell, brokerFeePct, salesTaxPct float64) float64 {
 	salesTax := (salesTaxPct / 100) * bestSell
 	return spread - brokerFees - salesTax
 }
+
+// Markup is an Opportunity's Margin expressed as a fraction of its best
+// buy order price (see CONTEXT.md's Markup definition): a
+// return-on-capital view, distinct from the absolute-ISK Margin. A
+// fraction, not a percentage -- e.g. 0.15 for "15%".
+func Markup(margin, bestBuy float64) float64 {
+	return margin / bestBuy
+}

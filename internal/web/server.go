@@ -176,11 +176,17 @@ func parseHubParam(r *http.Request) hub.Hub {
 }
 
 // parseFilterParams reads the Opportunity panel's configurable
-// ?minVolume=/?minMargin= query parameters (default 0: no filtering).
+// ?minVolume=/?minMargin=/?minMarkup= query parameters (default 0: no
+// filtering). minMarkup is typed and displayed as a percentage (e.g. 15
+// for "15%") but scanner.Filter.MinMarkup is a fraction, matching
+// CONTEXT.md's Markup definition -- converted here, at the display/URL
+// boundary, the same way tracker's Price-Moved drift is a fraction
+// internally and only becomes a percentage at display time.
 func parseFilterParams(r *http.Request) scanner.Filter {
 	return scanner.Filter{
 		MinVolume: parseFloatParam(r, "minVolume"),
 		MinMargin: parseFloatParam(r, "minMargin"),
+		MinMarkup: parseFloatParam(r, "minMarkup") / 100,
 	}
 }
 

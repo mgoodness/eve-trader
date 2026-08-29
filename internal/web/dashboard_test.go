@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,6 +170,34 @@ func TestBuildOpportunityRows(t *testing.T) {
 	}
 	if row.Volume != "2,541,345,125" {
 		t.Errorf("row.Volume = %q, want 2,541,345,125", row.Volume)
+	}
+}
+
+// TestBuildHubTabsPreservesMinMarkupAsPercentage proves the Markup
+// filter's URL round-trip: scanner.Filter.MinMarkup is a fraction
+// internally, but the query param (like the input box) is a percentage
+// -- switching Hub tabs must preserve it in the same percentage units a
+// user typed, not leak the internal fraction into the URL.
+func TestBuildHubTabsPreservesMinMarkupAsPercentage(t *testing.T) {
+	tabs := buildHubTabs(hub.Jita, scanner.Filter{MinMarkup: 0.15})
+
+	for _, tab := range tabs {
+		if !strings.Contains(tab.URL, "minMarkup=15") {
+			t.Errorf("tab %q URL = %q, want it to contain minMarkup=15 (0.15 as a percentage)", tab.Name, tab.URL)
+		}
+	}
+}
+
+// TestBuildHubTabsOmitsMinMarkupWhenUnset proves the existing
+// "unset means no query param" convention (matching minVolume/minMargin)
+// extends to minMarkup.
+func TestBuildHubTabsOmitsMinMarkupWhenUnset(t *testing.T) {
+	tabs := buildHubTabs(hub.Jita, scanner.Filter{})
+
+	for _, tab := range tabs {
+		if strings.Contains(tab.URL, "minMarkup") {
+			t.Errorf("tab %q URL = %q, want no minMarkup param when unset", tab.Name, tab.URL)
+		}
 	}
 }
 

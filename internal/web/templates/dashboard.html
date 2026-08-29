@@ -125,7 +125,8 @@
       <form method="GET" action="/" class="filter-form">
         <input type="hidden" name="hub" value="{{.SelectedHubName}}">
         <label>Min Volume <input type="number" name="minVolume" value="{{.MinVolume}}" step="any" min="0"></label>
-        <label>Min Margin <input type="number" name="minMargin" value="{{.MinMargin}}" step="any" min="0"></label>
+        <label>Min Margin (ISK) <input type="number" name="minMargin" value="{{.MinMargin}}" step="any" min="0"></label>
+        <label>Min Markup (%) <input type="number" name="minMarkup" value="{{.MinMarkup}}" step="any" min="0"></label>
         <button type="submit">Apply</button>
       </form>
       {{if .Opportunities}}
