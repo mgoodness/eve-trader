@@ -1,20 +1,24 @@
-package web
+// Package numfmt renders numbers with thousands-separator grouping.
+// Shared by every surface that displays an ISK price or a volume/count
+// -- the dashboard, tracker Alert text, and Discord notifications --
+// rather than each formatting independently.
+package numfmt
 
 import (
 	"strconv"
 	"strings"
 )
 
-// formatFloat renders f with thousands-separator grouping and exactly
+// FormatFloat renders f with thousands-separator grouping and exactly
 // decimals digits after the decimal point, e.g.
-// formatFloat(15000000, 2) == "15,000,000.00".
-func formatFloat(f float64, decimals int) string {
+// FormatFloat(15000000, 2) == "15,000,000.00".
+func FormatFloat(f float64, decimals int) string {
 	return groupThousands(strconv.FormatFloat(f, 'f', decimals, 64))
 }
 
-// formatInt renders n with thousands-separator grouping, e.g.
-// formatInt(2541345125) == "2,541,345,125".
-func formatInt(n int64) string {
+// FormatInt renders n with thousands-separator grouping, e.g.
+// FormatInt(2541345125) == "2,541,345,125".
+func FormatInt(n int64) string {
 	return groupThousands(strconv.FormatInt(n, 10))
 }
 

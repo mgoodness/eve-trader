@@ -12,6 +12,7 @@ import (
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
+	"github.com/mgoodness/eve-trader/internal/numfmt"
 	"github.com/mgoodness/eve-trader/internal/scanner"
 	"github.com/mgoodness/eve-trader/internal/storage"
 	"github.com/mgoodness/eve-trader/internal/tracker"
@@ -193,8 +194,8 @@ func buildOrderRows(orders []esi.Order, results []tracker.OrderEvaluation, names
 			Item:          itemName(names, o.TypeID),
 			Hub:           hubName(o.LocationID),
 			Side:          sideName(o.IsBuyOrder),
-			Price:         formatFloat(o.Price, 2),
-			VolumeRemain:  formatInt(int64(o.VolumeRemain)),
+			Price:         numfmt.FormatFloat(o.Price, 2),
+			VolumeRemain:  numfmt.FormatInt(int64(o.VolumeRemain)),
 			TimeRemaining: formatTimeRemaining(expiresAt.Sub(now)),
 			Alerts:        alertBadges(alertsByOrder[o.OrderID]),
 		}
@@ -238,10 +239,10 @@ func buildOpportunityRows(opportunities []scanner.Opportunity, names map[int32]s
 	for i, o := range opportunities {
 		rows[i] = opportunityRow{
 			Item:     itemName(names, o.TypeID),
-			BestBuy:  formatFloat(o.BestBuy, 2),
-			BestSell: formatFloat(o.BestSell, 2),
-			Margin:   formatFloat(o.Margin, 2),
-			Volume:   formatFloat(o.AvgDailyVolume, 0),
+			BestBuy:  numfmt.FormatFloat(o.BestBuy, 2),
+			BestSell: numfmt.FormatFloat(o.BestSell, 2),
+			Margin:   numfmt.FormatFloat(o.Margin, 2),
+			Volume:   numfmt.FormatFloat(o.AvgDailyVolume, 0),
 		}
 	}
 	return rows

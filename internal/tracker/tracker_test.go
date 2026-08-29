@@ -169,6 +169,40 @@ func TestPriceMovedDistinctFromUndercut(t *testing.T) {
 	}
 }
 
+// TestUndercutDetailUsesThousandsSeparators proves Undercut's Detail
+// text (shown in the in-app Alert Feed and sent to Discord) groups
+// large ISK prices with commas, not raw digit runs -- e.g. a PLEX-scale
+// price should read "3,395,000.00", not "3395000.00".
+func TestUndercutDetailUsesThousandsSeparators(t *testing.T) {
+	now := time.Now()
+	order := sellOrder(3410000, now.AddDate(0, 0, -1), 90)
+	snap := MarketSnapshot{HasCompetition: true, BestCompetingPrice: 3395000}
+
+	a, ok := evaluateUndercut(order, snap)
+	if !ok {
+		t.Fatal("evaluateUndercut: want fired, got not fired")
+	}
+	if want := "beaten: competing price 3,395,000.00 vs your 3,410,000.00"; a.Detail != want {
+		t.Errorf("Detail = %q, want %q", a.Detail, want)
+	}
+}
+
+// TestPriceMovedDetailUsesThousandsSeparators is TestUndercutDetail...'s
+// counterpart for Price-Moved's Detail text.
+func TestPriceMovedDetailUsesThousandsSeparators(t *testing.T) {
+	now := time.Now()
+	order := sellOrder(1000000, now.AddDate(0, 0, -1), 90)
+	snap := MarketSnapshot{HasCompetition: true, BestCompetingPrice: 1200000}
+
+	a, ok := evaluatePriceMoved(order, snap)
+	if !ok {
+		t.Fatal("evaluatePriceMoved: want fired, got not fired")
+	}
+	if want := "market drifted 20.0% since placement (1,000,000.00 -> 1,200,000.00)"; a.Detail != want {
+		t.Errorf("Detail = %q, want %q", a.Detail, want)
+	}
+}
+
 func TestEvaluateExpiring(t *testing.T) {
 	now := time.Now()
 

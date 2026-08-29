@@ -85,6 +85,49 @@ func TestNotifySendsExpectedPayloadShape(t *testing.T) {
 	}
 }
 
+// TestNotifyPriceFieldsUseThousandsSeparators proves the "Your Price"/
+// "Competing Price" Discord embed fields group large ISK prices with
+// commas -- e.g. a PLEX-scale price should read "3,410,000.00", not
+// "3410000.00".
+func TestNotifyPriceFieldsUseThousandsSeparators(t *testing.T) {
+	var gotPayload embedPayload
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	n := New(srv.URL, "https://eve-trader.example/")
+	err := n.Notify(context.Background(), AlertNotification{
+		AlertType:         tracker.Undercut,
+		Item:              "PLEX",
+		Hub:               "Jita",
+		Detail:            "beaten: competing price 3,395,000.00 vs your 3,410,000.00",
+		OrderPrice:        3410000,
+		CompetingPrice:    3395000,
+		HasCompetingPrice: true,
+	})
+	if err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	fieldValue := func(name string) (string, bool) {
+		for _, f := range gotPayload.Embeds[0].Fields {
+			if f.Name == name {
+				return f.Value, true
+			}
+		}
+		return "", false
+	}
+	if v, ok := fieldValue("Your Price"); !ok || v != "3,410,000.00" {
+		t.Errorf("Your Price field = %q (found=%v), want 3,410,000.00", v, ok)
+	}
+	if v, ok := fieldValue("Competing Price"); !ok || v != "3,395,000.00" {
+		t.Errorf("Competing Price field = %q (found=%v), want 3,395,000.00", v, ok)
+	}
+}
+
 func TestNotifyOmitsPriceFieldsWhenNotApplicable(t *testing.T) {
 	var gotPayload embedPayload
 

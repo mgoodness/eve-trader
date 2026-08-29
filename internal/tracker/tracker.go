@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
+	"github.com/mgoodness/eve-trader/internal/numfmt"
 	"github.com/mgoodness/eve-trader/internal/storage"
 )
 
@@ -118,7 +119,7 @@ func evaluateUndercut(order esi.Order, snap MarketSnapshot) (EvaluatedAlert, boo
 
 	return EvaluatedAlert{
 		Type:              Undercut,
-		Detail:            fmt.Sprintf("beaten: competing price %.2f vs your %.2f", snap.BestCompetingPrice, order.Price),
+		Detail:            fmt.Sprintf("beaten: competing price %s vs your %s", numfmt.FormatFloat(snap.BestCompetingPrice, 2), numfmt.FormatFloat(order.Price, 2)),
 		OrderPrice:        order.Price,
 		CompetingPrice:    snap.BestCompetingPrice,
 		HasCompetingPrice: true,
@@ -137,7 +138,7 @@ func evaluatePriceMoved(order esi.Order, snap MarketSnapshot) (EvaluatedAlert, b
 
 	return EvaluatedAlert{
 		Type:              PriceMoved,
-		Detail:            fmt.Sprintf("market drifted %.1f%% since placement (%.2f -> %.2f)", drift*100, order.Price, snap.BestCompetingPrice),
+		Detail:            fmt.Sprintf("market drifted %.1f%% since placement (%s -> %s)", drift*100, numfmt.FormatFloat(order.Price, 2), numfmt.FormatFloat(snap.BestCompetingPrice, 2)),
 		OrderPrice:        order.Price,
 		CompetingPrice:    snap.BestCompetingPrice,
 		HasCompetingPrice: true,

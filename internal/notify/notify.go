@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mgoodness/eve-trader/internal/numfmt"
 	"github.com/mgoodness/eve-trader/internal/tracker"
 )
 
@@ -99,8 +100,8 @@ func (nf *Notifier) Notify(ctx context.Context, n AlertNotification) error {
 	}
 	if n.HasCompetingPrice {
 		fields = append(fields,
-			embedField{Name: "Your Price", Value: fmt.Sprintf("%.2f", n.OrderPrice), Inline: true},
-			embedField{Name: "Competing Price", Value: fmt.Sprintf("%.2f", n.CompetingPrice), Inline: true},
+			embedField{Name: "Your Price", Value: numfmt.FormatFloat(n.OrderPrice, 2), Inline: true},
+			embedField{Name: "Competing Price", Value: numfmt.FormatFloat(n.CompetingPrice, 2), Inline: true},
 		)
 	}
 
