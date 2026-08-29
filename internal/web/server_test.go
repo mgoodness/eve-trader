@@ -119,8 +119,11 @@ func TestAuthCallbackCompletesExchangeAndPersistsToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=auth-code&state="+state, nil)
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusFound, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Errorf("Location = %q, want %q", loc, "/")
 	}
 
 	got, err := srv.store.LoadToken(context.Background())
@@ -207,16 +210,16 @@ func TestAuthCallbackDoesNotClearANewerPendingState(t *testing.T) {
 
 	close(client.proceed) // let the first callback's Exchange complete
 
-	if code := <-done; code != http.StatusOK {
-		t.Fatalf("first callback status = %d, want %d", code, http.StatusOK)
+	if code := <-done; code != http.StatusFound {
+		t.Fatalf("first callback status = %d, want %d", code, http.StatusFound)
 	}
 
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "/auth/callback?code=code-2&state="+state2, nil)
 	srv.ServeHTTP(rec2, req2)
 
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("second callback status = %d, want %d (state2 must survive the first callback's completion)", rec2.Code, http.StatusOK)
+	if rec2.Code != http.StatusFound {
+		t.Fatalf("second callback status = %d, want %d (state2 must survive the first callback's completion)", rec2.Code, http.StatusFound)
 	}
 }
 
@@ -229,8 +232,8 @@ func authenticate(t *testing.T, srv *Server) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=auth-code&state="+state, nil)
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("callback status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want %d, body = %s", rec.Code, http.StatusFound, rec.Body.String())
 	}
 }
 
