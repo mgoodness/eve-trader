@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/mgoodness/eve-trader/compare/v1.0.2...v1.0.3) (2026-08-29)
+
+
+### Bug Fixes
+
+* treat a 404 page as end of pagination for ESI market orders ([#31](https://github.com/mgoodness/eve-trader/issues/31)) ([808f28a](https://github.com/mgoodness/eve-trader/commit/808f28a4644ae313f8e3b7ef93254d32b7b9023c))
+
 ## [1.0.2](https://github.com/mgoodness/eve-trader/compare/v1.0.1...v1.0.2) (2026-08-29)
 
 
