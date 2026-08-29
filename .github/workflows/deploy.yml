@@ -61,3 +61,20 @@ jobs:
           args: release --skip=validate,announce --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Watchtower already polls :stable on an interval, so this is a
+      # best-effort nudge for an instant redeploy, not the only path to
+      # one -- a failure to reach it (host down, token rotated, etc.)
+      # must not fail an otherwise-successful image push. Runs on
+      # workflow_dispatch too: those runs push a fresh :stable image
+      # just like a push to main does, so they deserve the same
+      # instant-redeploy nudge.
+      - name: Trigger instant redeploy via Watchtower
+        continue-on-error: true
+        env:
+          WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_WEBHOOK_TOKEN }}
+          WATCHTOWER_URL: ${{ vars.WATCHTOWER_WEBHOOK_URL }}
+        run: |
+          curl -sS -f --max-time 10 -X POST \
+            -H "Authorization: Bearer ${WATCHTOWER_TOKEN}" \
+            "${WATCHTOWER_URL}"
