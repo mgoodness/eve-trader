@@ -28,7 +28,7 @@ type orderRow struct {
 	Hub           string
 	Side          string
 	Price         string
-	VolumeRemain  int32
+	VolumeRemain  string
 	TimeRemaining string
 	Alerts        []alertBadge
 }
@@ -187,8 +187,8 @@ func buildOrderRows(orders []esi.Order, results []tracker.OrderEvaluation, names
 			Item:          itemName(names, o.TypeID),
 			Hub:           hubName(o.LocationID),
 			Side:          sideName(o.IsBuyOrder),
-			Price:         fmt.Sprintf("%.2f", o.Price),
-			VolumeRemain:  o.VolumeRemain,
+			Price:         formatFloat(o.Price, 2),
+			VolumeRemain:  formatInt(int64(o.VolumeRemain)),
 			TimeRemaining: formatTimeRemaining(expiresAt.Sub(now)),
 			Alerts:        alertBadges(alertsByOrder[o.OrderID]),
 		}
@@ -232,10 +232,10 @@ func buildOpportunityRows(opportunities []scanner.Opportunity, names map[int32]s
 	for i, o := range opportunities {
 		rows[i] = opportunityRow{
 			Item:     itemName(names, o.TypeID),
-			BestBuy:  fmt.Sprintf("%.2f", o.BestBuy),
-			BestSell: fmt.Sprintf("%.2f", o.BestSell),
-			Margin:   fmt.Sprintf("%.2f", o.Margin),
-			Volume:   fmt.Sprintf("%.0f", o.AvgDailyVolume),
+			BestBuy:  formatFloat(o.BestBuy, 2),
+			BestSell: formatFloat(o.BestSell, 2),
+			Margin:   formatFloat(o.Margin, 2),
+			Volume:   formatFloat(o.AvgDailyVolume, 0),
 		}
 	}
 	return rows

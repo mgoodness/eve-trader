@@ -275,7 +275,7 @@ func TestDashboardRendersOrdersFromFakeESIClient(t *testing.T) {
 		"Tritanium", // resolved item name for fake.Orders[0].TypeID == 34
 		"Jita",      // hub for LocationID 60003760
 		"Sell",      // fake.Orders[0].IsBuyOrder == false
-		"8000",      // VolumeRemain
+		"8,000",     // VolumeRemain
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard body missing %q:\n%s", want, body)
