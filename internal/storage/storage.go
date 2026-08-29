@@ -236,11 +236,24 @@ func (s *Store) InsertAlertFeedEntry(ctx context.Context, e AlertFeedEntry) erro
 }
 
 // RecentAlertFeed returns up to limit Alert Feed entries, most recent
-// first.
+// first, collapsed to at most one entry per (order_id, alert_type) --
+// its most recent firing -- so an Order+Alert-type that's re-fired many
+// times past its throttle window doesn't crowd out other Orders'
+// entries within the fixed display size. The full firing history stays
+// persisted in alert_feed regardless; this only affects what's selected
+// for display.
 func (s *Store) RecentAlertFeed(ctx context.Context, limit int) ([]AlertFeedEntry, error) {
+	// MAX(id) stands in for "most recent by created_at" -- correct
+	// because InsertAlertFeedEntry is the only writer and always inserts
+	// in real time (id order and created_at order agree), and unlike
+	// MAX(created_at), id is a unique key so this can never ambiguously
+	// match more than one row per group.
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, order_id, alert_type, type_id, location_id, detail, created_at
 		FROM alert_feed
+		WHERE id IN (
+			SELECT MAX(id) FROM alert_feed GROUP BY order_id, alert_type
+		)
 		ORDER BY created_at DESC
 		LIMIT ?
 	`, limit)

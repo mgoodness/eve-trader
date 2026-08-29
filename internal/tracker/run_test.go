@@ -313,12 +313,20 @@ func TestRunFiresOnNewDetectionThenSuppressesRepeats(t *testing.T) {
 	if len(fired) != 1 || fired[0].Alert.Type != Undercut {
 		t.Fatalf("cycle 4: fired = %+v, want exactly one Undercut (resolved-then-recurred is a new firing)", fired)
 	}
+	// The displayed feed collapses to one entry per Order+Alert-type
+	// (see #61): cycle 1's and cycle 4's Undercut firings are the same
+	// pair, so only the latest (cycle 4's) shows -- the full history of
+	// both firings still exists in the underlying log, just not both
+	// surfaced here.
 	feed, err = store.RecentAlertFeed(ctx, 10)
 	if err != nil {
 		t.Fatalf("RecentAlertFeed: %v", err)
 	}
-	if len(feed) != 2 {
-		t.Fatalf("feed entries after cycle 4 = %d, want 2 (resolved-then-recurred fires again)", len(feed))
+	if len(feed) != 1 {
+		t.Fatalf("feed entries after cycle 4 = %d, want 1 (collapsed to the latest Undercut firing)", len(feed))
+	}
+	if feed[0].CreatedAt.Sub(cycle4) > time.Second || cycle4.Sub(feed[0].CreatedAt) > time.Second {
+		t.Errorf("feed[0].CreatedAt = %v, want cycle 4's firing (%v), not cycle 1's", feed[0].CreatedAt, cycle4)
 	}
 }
 
@@ -368,12 +376,18 @@ func TestRunFiresAgainAfterThrottleWindowElapses(t *testing.T) {
 	} else if len(fired) != 1 {
 		t.Fatalf("cycle 3: fired = %+v, want exactly one (throttle window elapsed)", fired)
 	}
+	// Same collapse as TestRunFiresOnNewDetectionThenSuppressesRepeats
+	// (see #61): cycle 1's and cycle 3's firings are the same
+	// Order+Alert-type, so only the latest shows in the displayed feed.
 	feed, err = store.RecentAlertFeed(ctx, 10)
 	if err != nil {
 		t.Fatalf("RecentAlertFeed: %v", err)
 	}
-	if len(feed) != 2 {
-		t.Fatalf("feed entries at 4h = %d, want 2 (throttle window elapsed)", len(feed))
+	if len(feed) != 1 {
+		t.Fatalf("feed entries at 4h = %d, want 1 (collapsed to the latest firing)", len(feed))
+	}
+	if feed[0].CreatedAt.Sub(cycle3) > time.Second || cycle3.Sub(feed[0].CreatedAt) > time.Second {
+		t.Errorf("feed[0].CreatedAt = %v, want cycle 3's firing (%v), not cycle 1's", feed[0].CreatedAt, cycle3)
 	}
 }
 
