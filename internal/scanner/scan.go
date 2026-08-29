@@ -105,18 +105,12 @@ func refreshStaleCache(ctx context.Context, client esi.Client, store *storage.St
 	}
 
 	if needVolume {
-		volumes := make(map[int32]float64, len(ItemUniverse))
-		for _, typeID := range ItemUniverse {
-			history, err := client.MarketHistory(ctx, h.RegionID, typeID)
-			if err != nil {
-				return fmt.Errorf("fetch market history for type %d: %w", typeID, err)
-			}
-			volumes[typeID] = VolumeWindow(history)
-		}
-		if err := store.SaveOpportunityVolumes(ctx, h.Name, volumes); err != nil {
-			return fmt.Errorf("save opportunity volumes: %w", err)
+		if err := refreshVolumes(ctx, client, store, h, ItemUniverse); err != nil {
+			return err
 		}
 		meta.VolumeFetchedAt = now
+	} else if err := backfillMissingVolumes(ctx, client, store, h); err != nil {
+		return err
 	}
 
 	if needOrders || needVolume {
@@ -125,6 +119,61 @@ func refreshStaleCache(ctx context.Context, client esi.Client, store *storage.St
 		}
 	}
 	return nil
+}
+
+// backfillMissingVolumes fetches and caches volume for any ItemUniverse
+// item at h that has never had its volume fetched, independent of
+// whether h's volume cache is otherwise fresh. Without this, an item
+// added to ItemUniverse mid-cycle (see ADR-0007: expected to grow over
+// time) would show a misleading 0 volume -- its cache row's AvgVolume
+// is SQL NULL, which Scan treats identically to a real zero -- until
+// h's next full 24h refresh (see #55). Deliberately doesn't touch
+// meta.VolumeFetchedAt: this is a targeted backfill, not a hub-wide
+// refresh, so already-cached items' 24h window must stay untouched.
+func backfillMissingVolumes(ctx context.Context, client esi.Client, store *storage.Store, h hub.Hub) error {
+	missing, err := missingVolumeItems(ctx, store, h.Name, ItemUniverse)
+	if err != nil {
+		return fmt.Errorf("find items missing cached volume: %w", err)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return refreshVolumes(ctx, client, store, h, missing)
+}
+
+// refreshVolumes fetches and caches each item in items' market-history-
+// derived Volume Window at h.
+func refreshVolumes(ctx context.Context, client esi.Client, store *storage.Store, h hub.Hub, items []int32) error {
+	volumes := make(map[int32]float64, len(items))
+	for _, typeID := range items {
+		history, err := client.MarketHistory(ctx, h.RegionID, typeID)
+		if err != nil {
+			return fmt.Errorf("fetch market history for type %d: %w", typeID, err)
+		}
+		volumes[typeID] = VolumeWindow(history)
+	}
+	if err := store.SaveOpportunityVolumes(ctx, h.Name, volumes); err != nil {
+		return fmt.Errorf("save opportunity volumes: %w", err)
+	}
+	return nil
+}
+
+// missingVolumeItems returns the subset of items that have no cached
+// average daily volume at hubName yet -- no cache row at all, or a row
+// whose AvgVolume hasn't been populated (see #55).
+func missingVolumeItems(ctx context.Context, store *storage.Store, hubName string, items []int32) ([]int32, error) {
+	cached, err := store.LoadOpportunityCache(ctx, hubName)
+	if err != nil {
+		return nil, fmt.Errorf("load opportunity cache: %w", err)
+	}
+
+	var missing []int32
+	for _, typeID := range items {
+		if entry, ok := cached[typeID]; !ok || entry.AvgVolume == nil {
+			missing = append(missing, typeID)
+		}
+	}
+	return missing, nil
 }
 
 // feeRates returns the character's current broker-fee and sales-tax
