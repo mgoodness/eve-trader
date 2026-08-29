@@ -5,3 +5,4 @@
 /eve-trader
 /dist/
 /.env
+/deploy/*.env
