@@ -70,6 +70,12 @@ CREATE TABLE IF NOT EXISTS scan_cache_meta (
 	orders_fetched_at TIMESTAMP,
 	volume_fetched_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS order_snapshot_cache (
+	order_id             INTEGER PRIMARY KEY,
+	best_competing_price REAL,
+	fetched_at           TIMESTAMP NOT NULL
+);
 `
 
 // ErrNoToken is returned by LoadToken when no OAuth token has been saved

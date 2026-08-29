@@ -232,6 +232,99 @@ func TestSavePricesDoesNotClobberVolume(t *testing.T) {
 	}
 }
 
+func TestOrderSnapshotCacheRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	_, _, ok, err := store.LoadOrderSnapshot(ctx, 42)
+	if err != nil {
+		t.Fatalf("LoadOrderSnapshot (before save): %v", err)
+	}
+	if ok {
+		t.Fatal("ok = true before any save, want false")
+	}
+
+	fetchedAt := time.Now().UTC().Truncate(time.Second)
+	if err := store.SaveOrderSnapshot(ctx, 42, f64ptr(5.45), fetchedAt); err != nil {
+		t.Fatalf("SaveOrderSnapshot: %v", err)
+	}
+
+	price, got, ok, err := store.LoadOrderSnapshot(ctx, 42)
+	if err != nil {
+		t.Fatalf("LoadOrderSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if price == nil || *price != 5.45 {
+		t.Errorf("price = %v, want 5.45", price)
+	}
+	if !got.Equal(fetchedAt) {
+		t.Errorf("fetchedAt = %v, want %v", got, fetchedAt)
+	}
+}
+
+func TestOrderSnapshotCacheStoresNoCompetitionAsNilPrice(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	fetchedAt := time.Now().UTC().Truncate(time.Second)
+	if err := store.SaveOrderSnapshot(ctx, 7, nil, fetchedAt); err != nil {
+		t.Fatalf("SaveOrderSnapshot: %v", err)
+	}
+
+	price, _, ok, err := store.LoadOrderSnapshot(ctx, 7)
+	if err != nil {
+		t.Fatalf("LoadOrderSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if price != nil {
+		t.Errorf("price = %v, want nil (no competing order)", *price)
+	}
+}
+
+func TestOrderSnapshotCacheOverwritesOnResave(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	if err := store.SaveOrderSnapshot(ctx, 1, f64ptr(1.0), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("SaveOrderSnapshot(first): %v", err)
+	}
+	second := time.Now().UTC().Truncate(time.Second)
+	if err := store.SaveOrderSnapshot(ctx, 1, f64ptr(2.0), second); err != nil {
+		t.Fatalf("SaveOrderSnapshot(second): %v", err)
+	}
+
+	price, got, _, err := store.LoadOrderSnapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("LoadOrderSnapshot: %v", err)
+	}
+	if price == nil || *price != 2.0 {
+		t.Errorf("price = %v, want 2.0 (overwritten)", price)
+	}
+	if !got.Equal(second) {
+		t.Errorf("fetchedAt = %v, want %v (overwritten)", got, second)
+	}
+}
+
+// A different Order's cached snapshot must be independent.
+func TestOrderSnapshotCacheIsScopedPerOrder(t *testing.T) {
+	ctx := context.Background()
+	store := openBootstrapped(t)
+
+	if err := store.SaveOrderSnapshot(ctx, 1, f64ptr(1.0), time.Now()); err != nil {
+		t.Fatalf("SaveOrderSnapshot: %v", err)
+	}
+
+	if _, _, ok, err := store.LoadOrderSnapshot(ctx, 2); err != nil {
+		t.Fatalf("LoadOrderSnapshot(2): %v", err)
+	} else if ok {
+		t.Error("order 2's snapshot exists after only saving order 1's")
+	}
+}
+
 func TestOpportunityCacheIsScopedPerHub(t *testing.T) {
 	ctx := context.Background()
 	store := openBootstrapped(t)

@@ -46,6 +46,13 @@ const (
 	// docs/research/esi-market-endpoints.md), so a malformed response
 	// can't spin forever.
 	maxMarketPages = 500
+
+	// snapshotCacheTTL bounds how long a cached MarketSnapshot is served
+	// instead of hitting ESI live. It matches scanner's orderCacheTTL:
+	// ESI's own order-book cache window (the domain's Scan Cycle, per
+	// CONTEXT.md), so a cached snapshot is never staler than a fresh
+	// fetch would have been anyway -- Alerts stay just as current.
+	snapshotCacheTTL = 5 * time.Minute
 )
 
 // MarketSnapshot is the best competing price at an Order's Hub+item, on
@@ -191,6 +198,41 @@ func FetchSnapshot(ctx context.Context, client esi.Client, order esi.Order) (Mar
 	return snap, nil
 }
 
+// fetchCachedSnapshot returns order's competing-price snapshot from
+// store's cache when it's still within snapshotCacheTTL, re-fetching
+// from ESI via FetchSnapshot and refreshing the cache otherwise --
+// mirroring scanner.refreshStaleCache's now.Sub(fetchedAt) >= ttl check.
+func fetchCachedSnapshot(ctx context.Context, client esi.Client, store *storage.Store, order esi.Order, now time.Time) (MarketSnapshot, error) {
+	price, fetchedAt, ok, err := store.LoadOrderSnapshot(ctx, order.OrderID)
+	if err != nil {
+		return MarketSnapshot{}, fmt.Errorf("load order snapshot cache: %w", err)
+	}
+
+	stale := !ok || now.Sub(fetchedAt) >= snapshotCacheTTL
+	if !stale {
+		snap := MarketSnapshot{HasCompetition: price != nil}
+		if price != nil {
+			snap.BestCompetingPrice = *price
+		}
+		return snap, nil
+	}
+
+	snap, err := FetchSnapshot(ctx, client, order)
+	if err != nil {
+		return MarketSnapshot{}, err
+	}
+
+	var toSave *float64
+	if snap.HasCompetition {
+		p := snap.BestCompetingPrice
+		toSave = &p
+	}
+	if err := store.SaveOrderSnapshot(ctx, order.OrderID, toSave, now); err != nil {
+		return MarketSnapshot{}, fmt.Errorf("save order snapshot cache: %w", err)
+	}
+	return snap, nil
+}
+
 // OrderEvaluation is the outcome of evaluating one Order: its
 // currently-active Alerts (for badge rendering -- live, not throttled).
 type OrderEvaluation struct {
@@ -223,7 +265,7 @@ func Run(ctx context.Context, client esi.Client, store *storage.Store, orders []
 	var fired []FiredAlert
 
 	for i, order := range orders {
-		snap, err := FetchSnapshot(ctx, client, order)
+		snap, err := fetchCachedSnapshot(ctx, client, store, order, now)
 		if err != nil {
 			return nil, nil, fmt.Errorf("order %d: %w", order.OrderID, err)
 		}

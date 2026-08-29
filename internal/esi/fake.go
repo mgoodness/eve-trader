@@ -2,6 +2,7 @@ package esi
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,6 +39,12 @@ type FakeClient struct {
 
 	Names    map[int32]string
 	NamesErr error
+
+	// MarketOrdersCalls counts MarketOrders invocations, for tests
+	// asserting a cache prevented (or required) a live ESI call. atomic
+	// because concurrent test callers (see TestConcurrentRunDoesNotDoubleFire)
+	// call MarketOrders from multiple goroutines at once.
+	MarketOrdersCalls atomic.Int32
 }
 
 var _ Client = (*FakeClient)(nil)
@@ -152,6 +159,7 @@ func (f *FakeClient) CharacterOrderHistory(ctx context.Context, characterID int3
 }
 
 func (f *FakeClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, typeID int32, page int32) ([]MarketOrder, error) {
+	f.MarketOrdersCalls.Add(1)
 	if page > 1 {
 		return nil, f.MarketOrdersErr
 	}
