@@ -253,13 +253,20 @@ type marketOrderDTO struct {
 }
 
 // MarketOrders lists orders in a region (public endpoint, no auth
-// required), one page at a time.
-func (c *RealClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, page int32) ([]MarketOrder, error) {
+// required), one page at a time. A nonzero typeID scopes the request to
+// that item type server-side, via ESI's documented type_id query
+// parameter -- confirmed against ESI's live OpenAPI spec, since fetching
+// a whole region unfiltered (Jita/The Forge alone runs 400+ pages) is
+// too slow to do synchronously per request.
+func (c *RealClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, typeID int32, page int32) ([]MarketOrder, error) {
 	var dtos []marketOrderDTO
 	path := fmt.Sprintf("/markets/%d/orders/", regionID)
 	query := url.Values{
 		"order_type": {string(orderType)},
 		"page":       {fmt.Sprintf("%d", page)},
+	}
+	if typeID != 0 {
+		query.Set("type_id", fmt.Sprintf("%d", typeID))
 	}
 	if err := c.get(ctx, path, query, &dtos); err != nil {
 		if errors.Is(err, errNotFound) {
