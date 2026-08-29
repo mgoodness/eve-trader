@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgoodness/eve-trader/internal/build"
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
@@ -233,6 +234,17 @@ func TestBuildAlertFeedRows(t *testing.T) {
 	}
 }
 
+// withCommit temporarily overrides build.Commit for the duration of t,
+// restoring its original value on cleanup -- shared by tests in both
+// dashboard_test.go and server_test.go that simulate an -ldflags -X
+// injected value (or the un-injected "dev" default).
+func withCommit(t *testing.T, commit string) {
+	t.Helper()
+	original := build.Commit
+	build.Commit = commit
+	t.Cleanup(func() { build.Commit = original })
+}
+
 func openDashboardStore(t *testing.T) *storage.Store {
 	t.Helper()
 
@@ -246,6 +258,35 @@ func openDashboardStore(t *testing.T) *storage.Store {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 	return store
+}
+
+// TestBuildDashboardViewIncludesCommit proves the view model carries
+// build.Commit through -- both the injected-value path (an overridden
+// value simulating -ldflags -X) and the default placeholder path.
+func TestBuildDashboardViewIncludesCommit(t *testing.T) {
+	cases := []struct {
+		name   string
+		commit string
+	}{
+		{"injected value", "abc1234"},
+		{"default placeholder", "dev"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			withCommit(t, c.commit)
+
+			store := openDashboardStore(t)
+			fake := esi.NewFakeClient()
+
+			view, err := buildDashboardView(context.Background(), fake, store, noopNotifier(), 95465499, hub.Jita, scanner.Filter{}, time.Now())
+			if err != nil {
+				t.Fatalf("buildDashboardView: %v", err)
+			}
+			if view.Commit != c.commit {
+				t.Errorf("view.Commit = %q, want %q", view.Commit, c.commit)
+			}
+		})
+	}
 }
 
 // TestBuildDashboardViewIncludesAlertsFromTracker is an integration test

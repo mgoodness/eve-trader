@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mgoodness/eve-trader/internal/build"
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/hub"
 	"github.com/mgoodness/eve-trader/internal/notify"
@@ -69,8 +70,12 @@ type hubTab struct {
 type dashboardView struct {
 	Authenticated bool
 	LoginURL      string
-	Orders        []orderRow
-	AlertFeed     []alertFeedRow
+	// Commit is the currently-deployed build's short git commit SHA (see
+	// internal/build), shown on the authenticated view so the maintainer
+	// can tell which commit is live.
+	Commit    string
+	Orders    []orderRow
+	AlertFeed []alertFeedRow
 
 	HubTabs         []hubTab
 	SelectedHubName string
@@ -127,6 +132,7 @@ func buildDashboardView(ctx context.Context, client esi.Client, store *storage.S
 
 	return dashboardView{
 		Authenticated:   true,
+		Commit:          build.Commit,
 		Orders:          buildOrderRows(orders, results, names, now),
 		AlertFeed:       buildAlertFeedRows(feedEntries, names, now),
 		HubTabs:         buildHubTabs(selectedHub, filter),
