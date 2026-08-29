@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/mgoodness/eve-trader/internal/hub"
@@ -92,11 +93,88 @@ func TestFetchHubPricesNoOrders(t *testing.T) {
 	}
 }
 
+// TestFetchHubPricesFetchesItemsConcurrently proves items are actually
+// fetched in parallel (see #57), not just that the sequential result is
+// unchanged: MarketOrdersDelay widens the window so overlapping in-flight
+// calls are reliably observable via MarketOrdersPeakInFlight.
+func TestFetchHubPricesFetchesItemsConcurrently(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.MarketOrdersResp = nil
+	fake.MarketOrdersDelay = 20 * time.Millisecond
+
+	itemUniverse := make([]int32, 20)
+	for i := range itemUniverse {
+		itemUniverse[i] = int32(i + 1)
+	}
+
+	if _, err := FetchHubPrices(context.Background(), fake, hub.Jita, itemUniverse); err != nil {
+		t.Fatalf("FetchHubPrices: %v", err)
+	}
+
+	if peak := fake.MarketOrdersPeakInFlight.Load(); peak <= 1 {
+		t.Errorf("MarketOrdersPeakInFlight = %d, want > 1 (items must be fetched concurrently, not sequentially)", peak)
+	}
+}
+
+// TestFetchHubPricesBoundsConcurrency proves concurrency is bounded, not
+// unbounded -- the peak in-flight count must never exceed the fixed limit
+// even with far more items than that limit.
+func TestFetchHubPricesBoundsConcurrency(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.MarketOrdersResp = nil
+	fake.MarketOrdersDelay = 20 * time.Millisecond
+
+	itemUniverse := make([]int32, 40)
+	for i := range itemUniverse {
+		itemUniverse[i] = int32(i + 1)
+	}
+
+	if _, err := FetchHubPrices(context.Background(), fake, hub.Jita, itemUniverse); err != nil {
+		t.Fatalf("FetchHubPrices: %v", err)
+	}
+
+	if peak := fake.MarketOrdersPeakInFlight.Load(); peak > maxConcurrentFetches {
+		t.Errorf("MarketOrdersPeakInFlight = %d, want <= %d (bounded concurrency)", peak, maxConcurrentFetches)
+	}
+}
+
 func TestFetchHubPricesPropagatesError(t *testing.T) {
 	fake := esi.NewFakeClient()
 	fake.MarketOrdersErr = context.DeadlineExceeded
 
 	if _, err := FetchHubPrices(context.Background(), fake, hub.Jita, []int32{34}); err == nil {
 		t.Fatal("FetchHubPrices: want error, got nil")
+	}
+}
+
+// TestFetchHubPricesStopsPromptlyOnError proves an early item's error
+// cancels the rest of the batch rather than dispatching every remaining
+// item against ESI for a result that will be discarded anyway (see #57's
+// AC: "not... keep hammering ESI after the caller has given up"). Far
+// more items than maxConcurrentFetches, each artificially slow, so a
+// version that keeps dispatching after the first error would take
+// noticeably longer than one that stops.
+func TestFetchHubPricesStopsPromptlyOnError(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.MarketOrdersResp = nil
+	fake.MarketOrdersDelay = 200 * time.Millisecond
+	fake.MarketOrdersErr = context.DeadlineExceeded
+
+	items := make([]int32, 10*maxConcurrentFetches)
+	for i := range items {
+		items[i] = int32(i + 1)
+	}
+
+	start := time.Now()
+	if _, err := FetchHubPrices(context.Background(), fake, hub.Jita, items); err == nil {
+		t.Fatal("FetchHubPrices: want error, got nil")
+	}
+	elapsed := time.Since(start)
+
+	if elapsed > 2*fake.MarketOrdersDelay {
+		t.Errorf("took %v, want well under %v (should stop dispatching after the first error, not fetch all %d items)", elapsed, 2*fake.MarketOrdersDelay, len(items))
+	}
+	if calls := fake.MarketOrdersCalls.Load(); calls >= int32(len(items)) {
+		t.Errorf("MarketOrdersCalls = %d, want fewer than %d (the full item count) -- dispatch should have stopped early", calls, len(items))
 	}
 }
