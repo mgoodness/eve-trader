@@ -367,6 +367,27 @@ func TestMarketOrdersRealDoesNotRequireAuth(t *testing.T) {
 	}
 }
 
+// TestMarketOrdersRealTreatsPageNotFoundAsEndOfPages: ESI returns 404
+// (not an empty 200 array) once a requested page is past the last one --
+// confirmed against the live API, where this surfaced as every dashboard
+// request failing outright once an order book's last page was reached.
+// Pagination loops in internal/tracker and internal/scanner rely on
+// MarketOrders signaling "no more pages" via an empty, non-error result.
+func TestMarketOrdersRealTreatsPageNotFoundAsEndOfPages(t *testing.T) {
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Requested page does not exist!"})
+	})
+
+	orders, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 55)
+	if err != nil {
+		t.Fatalf("MarketOrders: %v", err)
+	}
+	if len(orders) != 0 {
+		t.Errorf("orders = %+v, want empty", orders)
+	}
+}
+
 func TestMarketHistoryReal(t *testing.T) {
 	var gotPath string
 	var gotQuery url.Values
