@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/mgoodness/eve-trader/compare/v1.0.0...v1.0.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* use TARGETPLATFORM-qualified COPY path for goreleaser dockers_v2 ([e4cb5aa](https://github.com/mgoodness/eve-trader/commit/e4cb5aa3c66519f18f9947a0c270e81be06fc955)), closes [#20](https://github.com/mgoodness/eve-trader/issues/20)
+
 ## 1.0.0 (2026-08-29)
 
 
