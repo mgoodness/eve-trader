@@ -15,4 +15,45 @@ var ItemUniverse = []int32{
 	40,    // Megacyte
 	11399, // Morphite
 	44992, // PLEX
+
+	// Ammunition
+	193,   // EMP M
+	230,   // Antimatter Charge M
+	254,   // Multifrequency M
+	12773, // Barrage M
+	21896, // Republic Fleet EMP M
+	23025, // Caldari Navy Antimatter Charge M
+
+	// Ships
+	587,   // Rifter
+	585,   // Slasher
+	603,   // Merlin
+	602,   // Kestrel
+	597,   // Punisher
+	589,   // Executioner
+	16240, // Catalyst
+	32880, // Venture
+	17478, // Retriever
+	626,   // Vexor
+	627,   // Thorax
+	621,   // Caracal
+
+	// Modules
+	2048,  // Damage Control II
+	438,   // 1MN Afterburner II
+	3831,  // Medium Shield Extender II
+	380,   // Small Shield Extender II
+	519,   // Gyrostabilizer II
+	22291, // Ballistic Control System II
+	10190, // Magnetic Field Stabilizer II
+	2410,  // Heavy Missile Launcher II
+	10631, // Rocket Launcher II
+
+	// Drones
+	2488, // Warrior II
+	2456, // Hobgoblin II
+
+	// Materials/components
+	28668, // Nanite Repair Paste
+	40520, // Large Skill Injector
 }
