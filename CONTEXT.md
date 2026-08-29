@@ -36,6 +36,10 @@ _Avoid_: Volume period, lookback.
 One full recomputation of a Hub's ranked Opportunity list.
 _Avoid_: Refresh, poll, tick.
 
+**Refresh Cycle**:
+One full pass evaluating the character's Orders (firing any due Alerts) and running a Scan Cycle for every Hub — a superset of Scan Cycle, spanning both the scanner and order-tracking vocabularies below. Triggered either by a dashboard request or independently on a background schedule; both share the same underlying Alert-throttle state, so one triggering a Refresh Cycle doesn't cause a duplicate Alert the other already fired.
+_Avoid_: Tick, poll, sync (this is specifically "evaluate Orders + Scan every Hub", not a generic periodic action).
+
 ### Order tracking
 
 Distinct from the scanner vocabulary above: these terms come from the character's own placed orders (ESI's character-orders endpoint), not the public market-order-book the scanner reads.

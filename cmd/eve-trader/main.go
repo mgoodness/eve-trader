@@ -54,6 +54,11 @@ func run() error {
 	notifier := notify.New(discordWebhookURL, dashboardURL)
 	srv := web.NewServer(esiClient, store, notifier, clientID, callbackURL)
 
+	// Keeps Orders/Alerts/Opportunity data fresh even with nobody
+	// watching the dashboard -- runs for the life of the process, so
+	// there's no cancellation to wire up beyond process exit.
+	web.StartBackgroundRefresh(context.Background(), esiClient, store, notifier)
+
 	log.Printf("listening on %s", addr)
 	return http.ListenAndServe(addr, srv)
 }

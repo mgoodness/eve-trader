@@ -250,6 +250,31 @@ func TestDashboardShowsLoginPromptWhenNotAuthenticated(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `href="/auth/login"`) {
 		t.Errorf("body missing login link:\n%s", rec.Body.String())
 	}
+	if strings.Contains(rec.Body.String(), `http-equiv="refresh"`) {
+		t.Error("login prompt must not auto-reload")
+	}
+}
+
+// TestAuthenticatedDashboardAutoReloadsEvery5Minutes proves the
+// authenticated view carries the client-side auto-reload directive (see
+// #45): no JS in this app, so a plain meta refresh is what keeps the
+// dashboard live while a tab is open.
+func TestAuthenticatedDashboardAutoReloadsEvery5Minutes(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.TokenResp.AccessToken = fakeCharacterAccessToken(t, 95465499)
+	srv := newTestServer(t, fake)
+	authenticate(t, srv)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `<meta http-equiv="refresh" content="300">`) {
+		t.Errorf("authenticated dashboard body missing a 300s auto-reload directive:\n%s", rec.Body.String())
+	}
 }
 
 // TestDashboardRendersOrdersFromFakeESIClient is the AC-mandated test: a
