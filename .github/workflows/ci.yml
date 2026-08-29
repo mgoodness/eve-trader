@@ -1,8 +1,13 @@
 name: CI
 
+# PR-only: main's branch protection requires this "test" check to be
+# strict (branch must be up to date with main before merge) and merges
+# are squash-only, so the commit that lands on main is always
+# byte-identical to what this workflow already tested on the PR --
+# re-running on push to main would be redundant. deploy.yml (which does
+# trigger on push to main) still runs its own `go test -race` before
+# publishing.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:

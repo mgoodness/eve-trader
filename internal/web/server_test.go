@@ -283,6 +283,40 @@ func TestDashboardRendersOrdersFromFakeESIClient(t *testing.T) {
 	}
 }
 
+// TestDashboardShowsCommit proves both AC-mandated rendering paths: the
+// default "dev" placeholder (an un-injected build), and an -ldflags -X
+// injected value, each visible on the authenticated dashboard view.
+func TestDashboardShowsCommit(t *testing.T) {
+	cases := []struct {
+		name   string
+		commit string
+	}{
+		{"default placeholder", "dev"},
+		{"injected value", "abc1234"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			withCommit(t, c.commit)
+
+			fake := esi.NewFakeClient()
+			fake.TokenResp.AccessToken = fakeCharacterAccessToken(t, 95465499)
+			srv := newTestServer(t, fake)
+			authenticate(t, srv)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+			if !strings.Contains(rec.Body.String(), c.commit) {
+				t.Errorf("dashboard body missing commit %q:\n%s", c.commit, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestDashboardPropagatesESIErrorAsBadGateway(t *testing.T) {
 	fake := esi.NewFakeClient()
 	fake.TokenResp.AccessToken = fakeCharacterAccessToken(t, 95465499)
