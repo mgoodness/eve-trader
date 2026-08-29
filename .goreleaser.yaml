@@ -1,0 +1,67 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: eve-trader
+    main: ./cmd/eve-trader
+    binary: eve-trader
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+# No binary archives/GitHub release assets -- this ships as a Docker image
+# only (see the parent issue: "adapted for a Docker image instead of
+# distributed binaries").
+archives:
+  - id: eve-trader
+    formats: [none]
+
+# dockers (v1) is being phased out in favor of dockers_v2 -- no reason to
+# start a new project on the deprecated form.
+dockers_v2:
+  - id: eve-trader
+    ids:
+      - eve-trader
+    dockerfile: Dockerfile
+    images:
+      - "ghcr.io/mgoodness/eve-trader"
+    tags:
+      # vX.Y.Z: immutable, one per release. stable: floating, the tag
+      # Watchtower on the VM polls for redeploys. .Tag (not .Version,
+      # which strips the "v") so this is exactly the triggering git tag.
+      - "{{ .Tag }}"
+      - "stable"
+    platforms:
+      - linux/amd64
+    labels:
+      "org.opencontainers.image.source": "https://github.com/mgoodness/eve-trader"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: mgoodness
+    name: eve-trader
+  # release-please creates the GitHub Release (with its own changelog
+  # notes) before this runs; keep-existing means GoReleaser only adds
+  # build artifacts to it rather than overwriting those notes with its
+  # own git-log-derived changelog.
+  mode: keep-existing
