@@ -52,9 +52,14 @@ func StartBackgroundRefresh(ctx context.Context, client esi.Client, store *stora
 // evaluation (firing due Alerts via notifier) and per-Hub Scan a
 // dashboard request triggers, but independent of one. A cycle with no
 // currently-authenticated character skips gracefully -- nobody's Orders
-// to evaluate yet, not an error. Failures are logged and skip only the
-// affected step, so one Hub's scan failing doesn't stop Order
-// evaluation or the other Hub's scan.
+// to evaluate yet, not an error.
+//
+// Unlike buildDashboardView (which fails an HTTP request fast on any
+// step's error, since a half-built page for a waiting user is worse
+// than a clear error), a background cycle has nobody waiting on it --
+// failures are logged and skip only the affected step, so e.g. a
+// transient Order-fetch error doesn't also skip every Hub's Scan for
+// the next four hours.
 func runBackgroundCycle(ctx context.Context, client esi.Client, store *storage.Store, notifier *notify.Notifier, now time.Time) {
 	characterID, err := auth.CurrentCharacterID(ctx, store)
 	if errors.Is(err, storage.ErrNoToken) {
