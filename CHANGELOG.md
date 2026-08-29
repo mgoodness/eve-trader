@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/mgoodness/eve-trader/compare/v1.0.3...v1.0.4) (2026-08-29)
+
+
+### Bug Fixes
+
+* scope market order fetches to one item type via ESI's type_id filter ([#33](https://github.com/mgoodness/eve-trader/issues/33)) ([d0bcccd](https://github.com/mgoodness/eve-trader/commit/d0bcccdeb515686af4194daaa6e9ba04d904371a))
+
 ## [1.0.3](https://github.com/mgoodness/eve-trader/compare/v1.0.2...v1.0.3) (2026-08-29)
 
 
