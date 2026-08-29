@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/mgoodness/eve-trader/compare/v1.0.4...v1.1.0) (2026-08-29)
+
+
+### Features
+
+* auto-switch dashboard to a light palette via prefers-color-scheme ([#41](https://github.com/mgoodness/eve-trader/issues/41)) ([faaa83f](https://github.com/mgoodness/eve-trader/commit/faaa83f17cf7e955ea8f770708762038a8661a49))
+* expand ItemUniverse from 9 to 40 verified items ([#44](https://github.com/mgoodness/eve-trader/issues/44)) ([a4baa2d](https://github.com/mgoodness/eve-trader/commit/a4baa2d8aa2427dd207ba46d28a5197a9dd2e59e))
+* format dashboard numbers with thousands separators ([#43](https://github.com/mgoodness/eve-trader/issues/43)) ([6945f4b](https://github.com/mgoodness/eve-trader/commit/6945f4bf08a9ba46f86c5f188dbffc0e508b469c))
+
+
+### Performance Improvements
+
+* cache per-order competing-price snapshots with a 5-minute TTL ([#46](https://github.com/mgoodness/eve-trader/issues/46)) ([f357aa0](https://github.com/mgoodness/eve-trader/commit/f357aa03c164097611c70826840610668e169f28))
+
 ## [1.0.4](https://github.com/mgoodness/eve-trader/compare/v1.0.3...v1.0.4) (2026-08-29)
 
 
