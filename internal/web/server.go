@@ -128,10 +128,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("Logged in.")); err != nil {
-		log.Printf("write auth callback response: %v", err)
-	}
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 // handleDashboard renders the split-panel dashboard: a fixed Orders
