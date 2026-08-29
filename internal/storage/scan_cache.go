@@ -237,3 +237,35 @@ func (s *Store) LoadOpportunityCache(ctx context.Context, hub string) (map[int32
 	}
 	return entries, nil
 }
+
+// SaveOrderSnapshot upserts orderID's cached competing-price snapshot
+// (see tracker.MarketSnapshot): bestCompetingPrice nil means no
+// competing order was found, distinct from a price of zero.
+func (s *Store) SaveOrderSnapshot(ctx context.Context, orderID int64, bestCompetingPrice *float64, fetchedAt time.Time) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO order_snapshot_cache (order_id, best_competing_price, fetched_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT (order_id) DO UPDATE SET
+			best_competing_price = excluded.best_competing_price,
+			fetched_at           = excluded.fetched_at
+	`, orderID, bestCompetingPrice, fetchedAt)
+	if err != nil {
+		return fmt.Errorf("save order snapshot: %w", err)
+	}
+	return nil
+}
+
+// LoadOrderSnapshot returns orderID's cached competing-price snapshot and
+// when it was fetched. ok is false if this Order has never been
+// snapshotted.
+func (s *Store) LoadOrderSnapshot(ctx context.Context, orderID int64) (bestCompetingPrice *float64, fetchedAt time.Time, ok bool, err error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT best_competing_price, fetched_at FROM order_snapshot_cache WHERE order_id = ?`, orderID)
+
+	if err := row.Scan(&bestCompetingPrice, &fetchedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, time.Time{}, false, nil
+		}
+		return nil, time.Time{}, false, fmt.Errorf("load order snapshot: %w", err)
+	}
+	return bestCompetingPrice, fetchedAt, true, nil
+}

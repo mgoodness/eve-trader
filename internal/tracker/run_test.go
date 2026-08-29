@@ -94,6 +94,127 @@ func TestFetchSnapshotPropagatesError(t *testing.T) {
 	}
 }
 
+func f64ptr(v float64) *float64 { return &v }
+
+// TestRunUsesCachedSnapshotWithinTTL proves a dashboard load within the
+// snapshot cache's TTL makes zero live ESI calls for an Order whose
+// snapshot is already cached and fresh, and evaluates Alerts from that
+// cached snapshot rather than a live (and here, disagreeing) fetch.
+func TestRunUsesCachedSnapshotWithinTTL(t *testing.T) {
+	ctx := context.Background()
+	store := openStore(t)
+	fake := esi.NewFakeClient()
+
+	order := sellOrder(5.50, time.Now().AddDate(0, 0, -1), 90)
+	order.OrderID = 200
+
+	now := time.Now()
+	// Fresh cached snapshot showing Undercut (5.40 < 5.50).
+	if err := store.SaveOrderSnapshot(ctx, order.OrderID, f64ptr(5.40), now.Add(-1*time.Minute)); err != nil {
+		t.Fatalf("SaveOrderSnapshot: %v", err)
+	}
+	// The live response (if fetched) says no competition at all -- it
+	// must disagree with the cache so the assertions below actually
+	// prove which one Run used.
+	fake.MarketOrdersResp = nil
+
+	results, _, err := Run(ctx, fake, store, []esi.Order{order}, now)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if fake.MarketOrdersCalls.Load() != 0 {
+		t.Errorf("MarketOrdersCalls = %d, want 0 (a fresh cache must avoid a live ESI call)", fake.MarketOrdersCalls.Load())
+	}
+	if !has(results[0].Alerts, Undercut) {
+		t.Errorf("Alerts = %+v, want Undercut (from the cached snapshot, not the live/empty response)", results[0].Alerts)
+	}
+}
+
+// TestRunRefetchesAndUpdatesCacheWhenStale proves a dashboard load past
+// the TTL re-fetches live and updates the cached snapshot, rather than
+// trusting stale cached data.
+func TestRunRefetchesAndUpdatesCacheWhenStale(t *testing.T) {
+	ctx := context.Background()
+	store := openStore(t)
+	fake := esi.NewFakeClient()
+
+	order := sellOrder(5.50, time.Now().AddDate(0, 0, -1), 90)
+	order.OrderID = 201
+
+	now := time.Now()
+	// Stale cached snapshot (older than the 5-minute TTL) claiming no
+	// competition -- a live fetch must override it.
+	if err := store.SaveOrderSnapshot(ctx, order.OrderID, nil, now.Add(-10*time.Minute)); err != nil {
+		t.Fatalf("SaveOrderSnapshot: %v", err)
+	}
+	fake.MarketOrdersResp = []esi.MarketOrder{
+		{OrderID: 999, TypeID: order.TypeID, LocationID: order.LocationID, IsBuyOrder: false, Price: 5.40},
+	}
+
+	results, _, err := Run(ctx, fake, store, []esi.Order{order}, now)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if fake.MarketOrdersCalls.Load() == 0 {
+		t.Error("MarketOrdersCalls = 0, want at least 1 (a stale cache must trigger a live re-fetch)")
+	}
+	if !has(results[0].Alerts, Undercut) {
+		t.Errorf("Alerts = %+v, want Undercut (from the live re-fetch, not the stale cache)", results[0].Alerts)
+	}
+
+	price, fetchedAt, ok, err := store.LoadOrderSnapshot(ctx, order.OrderID)
+	if err != nil {
+		t.Fatalf("LoadOrderSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false after a live re-fetch, want true")
+	}
+	if price == nil || *price != 5.40 {
+		t.Errorf("cached price = %v, want 5.40 (the cache must be updated after a live re-fetch)", price)
+	}
+	if !fetchedAt.Equal(now) {
+		t.Errorf("cached fetchedAt = %v, want %v (updated to the fetch time)", fetchedAt, now)
+	}
+}
+
+// TestRunFetchesAndCachesOnFirstEvaluation proves an Order with no prior
+// cached snapshot fetches live and populates the cache, so the next
+// evaluation within the TTL can use it.
+func TestRunFetchesAndCachesOnFirstEvaluation(t *testing.T) {
+	ctx := context.Background()
+	store := openStore(t)
+	fake := esi.NewFakeClient()
+
+	order := sellOrder(5.50, time.Now().AddDate(0, 0, -1), 90)
+	order.OrderID = 202
+	fake.MarketOrdersResp = nil // no competition
+
+	now := time.Now()
+	if _, _, err := Run(ctx, fake, store, []esi.Order{order}, now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if fake.MarketOrdersCalls.Load() == 0 {
+		t.Error("MarketOrdersCalls = 0, want at least 1 (no cache entry yet, must fetch live)")
+	}
+
+	price, fetchedAt, ok, err := store.LoadOrderSnapshot(ctx, order.OrderID)
+	if err != nil {
+		t.Fatalf("LoadOrderSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false after Run's first evaluation, want true (a fresh fetch must populate the cache)")
+	}
+	if price != nil {
+		t.Errorf("cached price = %v, want nil (no competition)", *price)
+	}
+	if !fetchedAt.Equal(now) {
+		t.Errorf("cached fetchedAt = %v, want %v", fetchedAt, now)
+	}
+}
+
 // TestRunFiresOnNewDetectionThenSuppressesRepeats is the AC-mandated test
 // for throttling/suppression across repeated evaluation cycles: an Alert
 // fires once on new detection, then suppresses repeats for that
@@ -174,11 +295,14 @@ func TestRunFiresOnNewDetectionThenSuppressesRepeats(t *testing.T) {
 
 	// Cycle 4: condition recurs. Since it fully resolved in between, this
 	// is a NEW detection -- should fire again immediately, even though
-	// cycle 4 is well within 4h of cycle 1's firing.
+	// cycle 4 is well within 4h of cycle 1's firing. It's placed past
+	// snapshotCacheTTL from cycle 3 so the recurrence is actually
+	// observed via a live re-fetch rather than cycle 3's now-stale
+	// cached "no competition" snapshot.
 	fake.MarketOrdersResp = []esi.MarketOrder{
 		{OrderID: 1, TypeID: order.TypeID, LocationID: order.LocationID, IsBuyOrder: false, Price: 5.40},
 	}
-	cycle4 := cycle3.Add(1 * time.Minute)
+	cycle4 := cycle3.Add(snapshotCacheTTL + time.Minute)
 	results, fired, err = Run(ctx, fake, store, orders, cycle4)
 	if err != nil {
 		t.Fatalf("Run (cycle 4): %v", err)
