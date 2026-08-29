@@ -217,7 +217,7 @@ finish() {
 # for them to leak from. Only RELEASE_PLEASE_APP_PRIVATE_KEY, which CI
 # itself needs as a GitHub secret, goes through set_secret.
 
-TOTAL_STAGES=9
+TOTAL_STAGES=10
 
 banner "eve-trader: finish CI/CD + deployment automation (#20)"
 
@@ -264,7 +264,18 @@ step "existing keys, if any, keep working)."
 ask RELEASE_PLEASE_KEY_PATH "Path to the downloaded .pem file:"
 if [[ -f "$RELEASE_PLEASE_KEY_PATH" ]]; then
     set_secret RELEASE_PLEASE_APP_PRIVATE_KEY "$(cat "$RELEASE_PLEASE_KEY_PATH")"
-    note "you can delete the downloaded .pem now; it's stored as the GitHub secret"
+    # set_secret only reports whether `gh secret set` exited zero, not
+    # whether GitHub actually stored a non-empty value -- confirm the name
+    # now shows up in the repo's secret list before moving on, since a
+    # silent gap here only surfaces later as a release-please failure.
+    if gh secret list --json name --jq '.[].name' 2>/dev/null | grep -qx RELEASE_PLEASE_APP_PRIVATE_KEY; then
+        printf '  %s✓%s confirmed on GitHub\n' "$GREEN" "$RESET"
+        note "you can delete the downloaded .pem now; it's stored as the GitHub secret"
+    else
+        warn "gh reported success but the secret isn't showing up -- set it manually:"
+        warn "  gh secret set RELEASE_PLEASE_APP_PRIVATE_KEY < $RELEASE_PLEASE_KEY_PATH"
+        SKIPPED+=("verify GitHub secret RELEASE_PLEASE_APP_PRIVATE_KEY actually landed")
+    fi
 else
     warn "no file at that path -- skipped. Set it later: gh secret set RELEASE_PLEASE_APP_PRIVATE_KEY < path/to/key.pem"
     SKIPPED+=("GitHub secret RELEASE_PLEASE_APP_PRIVATE_KEY")
@@ -312,7 +323,47 @@ ask_secret DISCORD_WEBHOOK_URL "Discord webhook URL [Enter to skip Discord alert
 } | gcp_ssh "cat > ~/eve-trader.env && chmod 600 ~/eve-trader.env"
 printf '  %s✓%s wrote ~/eve-trader.env on the VM (mode 600)\n' "$GREEN" "$RESET"
 
-# ── Stage 7: first-time app container ───────────────────────────────────────
+# ── Stage 7: trigger and wait for the first real release ───────────────────
+stage "Trigger the first release"
+say "release.yml has never run successfully yet -- there's no image on"
+say "ghcr.io to deploy until it does. This needs stages 2+3 (App repo"
+say "access + private key secret) actually done, not just skipped through."
+if ! gh secret list --json name --jq '.[].name' 2>/dev/null | grep -qx RELEASE_PLEASE_APP_PRIVATE_KEY; then
+    warn "RELEASE_PLEASE_APP_PRIVATE_KEY still isn't set on GitHub."
+    warn "Go back and finish stage 3 before continuing -- release-please will"
+    warn "keep failing without it."
+    confirm "Set it now (in another terminal/tab) and ready to continue?" || exit 1
+fi
+open_url "https://github.com/mgoodness/eve-trader/pulls"
+step "release-please opens a PR titled like 'chore(main): release 0.1.0' on"
+step "its own after a Conventional Commit lands on main."
+step "If none is open yet, push any feat:/fix: commit to main, wait ~30s,"
+step "and refresh."
+step "Merge that PR."
+say "Waiting for release.yml to publish ghcr.io/mgoodness/eve-trader:stable"
+say "(checking on the VM every 15s, up to 10 minutes -- Ctrl-C to stop"
+say "waiting and check manually instead)..."
+FOUND=""
+for _ in $(seq 1 40); do
+    if gcp_ssh "docker pull ghcr.io/mgoodness/eve-trader:stable" >/dev/null 2>&1; then
+        FOUND=1
+        break
+    fi
+    printf '.'
+    sleep 15
+done
+printf '\n'
+if [[ -n "$FOUND" ]]; then
+    printf '  %s✓%s ghcr.io/mgoodness/eve-trader:stable exists and is pulled\n' "$GREEN" "$RESET"
+else
+    warn "still no image after 10 minutes. Check the release.yml run in GitHub"
+    warn "Actions, fix whatever failed, then re-run this script -- it'll ask"
+    warn "the same questions again (harmless to re-enter) and pick back up"
+    warn "from here."
+    exit 1
+fi
+
+# ── Stage 8: first-time app container ───────────────────────────────────────
 stage "First deploy of the eve-trader container"
 say "No host port is published -- Caddy reverse-proxies to it over"
 say "eve-trader-net by container name (eve-trader:8080)."
@@ -326,7 +377,7 @@ warn "eve-trader.opsgoodness.net to eve-trader:8080, and reload Caddy if you"
 warn "change it."
 confirm "Caddy routing verified/updated?" || SKIPPED+=("verify Caddy proxies to eve-trader:8080")
 
-# ── Stage 8: Watchtower ─────────────────────────────────────────────────────
+# ── Stage 9: Watchtower ─────────────────────────────────────────────────────
 stage "Watchtower"
 say "Scoped to just the eve-trader container (not Caddy or anything else on"
 say "the VM), polling every 5 minutes."
@@ -338,15 +389,16 @@ gcp_ssh "docker rm -f watchtower >/dev/null 2>&1 || true"
 gcp_ssh 'docker run -d --name watchtower --restart=always --network eve-trader-net -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.docker/config.json:/config.json:ro containrrr/watchtower --interval 300 eve-trader'
 gcp_ssh "docker ps --filter name=watchtower --format '{{.Names}}: {{.Status}}'"
 
-# ── Stage 9: end-to-end proof ────────────────────────────────────────────────
+# ── Stage 10: end-to-end proof ───────────────────────────────────────────────
 stage "Prove it end-to-end"
-say "This is the AC's own proof, so do it for real once, now that everything"
-say "above is wired up:"
+say "Stage 7 already proved release.yml publishes to ghcr.io; stage 8's"
+say "deploy was a manual docker run, not Watchtower. This is the AC's own"
+say "proof that the whole automated loop works, so do it for real once:"
 step "Push a Conventional Commit (feat:/fix:) to main, or merge the next"
 step "release-please PR if one's already open."
 step "Watch release.yml run in GitHub Actions -- it should build and push"
 step "ghcr.io/mgoodness/eve-trader:<version> and :stable."
-step "Watch Watchtower notice and redeploy (within ~5 min):"
+step "Watch Watchtower notice and redeploy on its own (within ~5 min):"
 note "    gcloud compute ssh $GCP_INSTANCE --project $GCP_PROJECT --zone $GCP_ZONE --command 'docker logs -f watchtower'"
 confirm "Confirmed a fresh image landed on ghcr.io and the VM redeployed automatically?"
 
