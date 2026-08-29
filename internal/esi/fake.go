@@ -21,6 +21,12 @@ type FakeClient struct {
 	MarketOrdersResp []MarketOrder
 	MarketOrdersErr  error
 
+	// MarketOrdersByType, if non-nil, overrides MarketOrdersResp: a call
+	// returns MarketOrdersByType[typeID] instead of always the same
+	// canned slice, so a test can verify typeID is actually plumbed
+	// through by call site.
+	MarketOrdersByType map[int32][]MarketOrder
+
 	MarketHistoryResp []MarketHistoryEntry
 	MarketHistoryErr  error
 
@@ -145,9 +151,12 @@ func (f *FakeClient) CharacterOrderHistory(ctx context.Context, characterID int3
 	return f.OrderHistory, f.OrderHistoryErr
 }
 
-func (f *FakeClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, page int32) ([]MarketOrder, error) {
+func (f *FakeClient) MarketOrders(ctx context.Context, regionID int32, orderType OrderType, typeID int32, page int32) ([]MarketOrder, error) {
 	if page > 1 {
 		return nil, f.MarketOrdersErr
+	}
+	if f.MarketOrdersByType != nil {
+		return f.MarketOrdersByType[typeID], f.MarketOrdersErr
 	}
 	return f.MarketOrdersResp, f.MarketOrdersErr
 }

@@ -27,9 +27,11 @@ type Client interface {
 	CharacterOrderHistory(ctx context.Context, characterID int32, page int32) ([]OrderHistoryEntry, error)
 
 	// MarketOrders lists orders in a region, one page at a time (page is
-	// 1-based). The region-wide result must be filtered client-side by
-	// LocationID to isolate a specific Hub.
-	MarketOrders(ctx context.Context, regionID int32, orderType OrderType, page int32) ([]MarketOrder, error)
+	// 1-based). typeID scopes results to one item type server-side (pass 0
+	// for unfiltered); ESI has no per-station endpoint, so the result must
+	// still be filtered client-side by LocationID to isolate a specific
+	// Hub.
+	MarketOrders(ctx context.Context, regionID int32, orderType OrderType, typeID int32, page int32) ([]MarketOrder, error)
 	// MarketHistory returns daily market statistics for one item type in a
 	// region, refreshed once daily by ESI at 11:05 UTC.
 	MarketHistory(ctx context.Context, regionID int32, typeID int32) ([]MarketHistoryEntry, error)

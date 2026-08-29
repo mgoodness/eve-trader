@@ -151,9 +151,11 @@ func evaluateExpiring(order esi.Order, now time.Time) (EvaluatedAlert, bool) {
 }
 
 // FetchSnapshot fetches the current best competing price for order's
-// Hub+item+side, by paginating that region's order book (there is no
-// per-item ESI endpoint) and filtering client-side to matching orders at
-// the same location, same item, same side, excluding order itself.
+// Hub+item+side, scoping the region's order book to order's item type
+// server-side (ESI's type_id filter -- fetching a region unfiltered is
+// far too slow to do synchronously per order) and filtering client-side
+// to matching orders at the same location, same side, excluding order
+// itself.
 func FetchSnapshot(ctx context.Context, client esi.Client, order esi.Order) (MarketSnapshot, error) {
 	orderType := esi.OrderTypeSell
 	if order.IsBuyOrder {
@@ -162,7 +164,7 @@ func FetchSnapshot(ctx context.Context, client esi.Client, order esi.Order) (Mar
 
 	var snap MarketSnapshot
 	for page := int32(1); page <= maxMarketPages; page++ {
-		entries, err := client.MarketOrders(ctx, order.RegionID, orderType, page)
+		entries, err := client.MarketOrders(ctx, order.RegionID, orderType, order.TypeID, page)
 		if err != nil {
 			return MarketSnapshot{}, fmt.Errorf("fetch market orders (page %d): %w", page, err)
 		}

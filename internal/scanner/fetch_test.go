@@ -52,6 +52,33 @@ func TestFetchHubPricesFindsBestBuyAndSell(t *testing.T) {
 	}
 }
 
+// TestFetchHubPricesQueriesEachItemSeparately: FetchHubPrices must scope
+// each request to one item type (ESI's type_id filter) rather than
+// sweeping the whole region -- confirmed live, where an unfiltered sweep
+// of Jita's order book ran 400+ pages and never completed within a
+// dashboard request. MarketOrdersByType only returns a match when the
+// requested typeID equals the map key, so this fails if FetchHubPrices
+// stops passing typeID through.
+func TestFetchHubPricesQueriesEachItemSeparately(t *testing.T) {
+	fake := esi.NewFakeClient()
+	fake.MarketOrdersByType = map[int32][]esi.MarketOrder{
+		34: {{OrderID: 1, TypeID: 34, LocationID: hub.Jita.StationID, IsBuyOrder: false, Price: 5.45}},
+		35: {{OrderID: 2, TypeID: 35, LocationID: hub.Jita.StationID, IsBuyOrder: false, Price: 11.0}},
+	}
+
+	prices, err := FetchHubPrices(context.Background(), fake, hub.Jita, []int32{34, 35})
+	if err != nil {
+		t.Fatalf("FetchHubPrices: %v", err)
+	}
+
+	if p, ok := prices[34]; !ok || !p.HasBestSell || p.BestSell != 5.45 {
+		t.Errorf("prices[34] = %+v (ok=%v), want BestSell 5.45", p, ok)
+	}
+	if p, ok := prices[35]; !ok || !p.HasBestSell || p.BestSell != 11.0 {
+		t.Errorf("prices[35] = %+v (ok=%v), want BestSell 11.0", p, ok)
+	}
+}
+
 func TestFetchHubPricesNoOrders(t *testing.T) {
 	fake := esi.NewFakeClient()
 	fake.MarketOrdersResp = nil

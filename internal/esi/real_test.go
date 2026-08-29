@@ -332,7 +332,7 @@ func TestMarketOrdersReal(t *testing.T) {
 		})
 	})
 
-	orders, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 2)
+	orders, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 0, 2)
 	if err != nil {
 		t.Fatalf("MarketOrders: %v", err)
 	}
@@ -346,8 +346,30 @@ func TestMarketOrdersReal(t *testing.T) {
 	if gotQuery.Get("page") != "2" {
 		t.Errorf("page = %q, want 2", gotQuery.Get("page"))
 	}
+	if gotQuery.Has("type_id") {
+		t.Errorf("type_id = %q, want absent when typeID is 0", gotQuery.Get("type_id"))
+	}
 	if len(orders) != 1 || orders[0].TypeID != 34 || orders[0].LocationID != 60003760 {
 		t.Errorf("orders = %+v, unexpected", orders)
+	}
+}
+
+// TestMarketOrdersRealScopesByType: a nonzero typeID must reach ESI as
+// the type_id query param -- this is what lets FetchHubPrices/
+// FetchSnapshot scope a request to one item instead of paginating a
+// whole region's order book (400+ pages for a hub like Jita).
+func TestMarketOrdersRealScopesByType(t *testing.T) {
+	var gotQuery url.Values
+	client := newTestDataClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		json.NewEncoder(w).Encode([]map[string]any{})
+	})
+
+	if _, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 34, 1); err != nil {
+		t.Fatalf("MarketOrders: %v", err)
+	}
+	if gotQuery.Get("type_id") != "34" {
+		t.Errorf("type_id = %q, want 34", gotQuery.Get("type_id"))
 	}
 }
 
@@ -359,7 +381,7 @@ func TestMarketOrdersRealDoesNotRequireAuth(t *testing.T) {
 	})
 	client.Tokens = nil // must not be called for a public endpoint
 
-	if _, err := client.MarketOrders(context.Background(), 10000002, OrderTypeSell, 1); err != nil {
+	if _, err := client.MarketOrders(context.Background(), 10000002, OrderTypeSell, 0, 1); err != nil {
 		t.Fatalf("MarketOrders: %v", err)
 	}
 	if gotAuth != "" {
@@ -379,7 +401,7 @@ func TestMarketOrdersRealTreatsPageNotFoundAsEndOfPages(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Requested page does not exist!"})
 	})
 
-	orders, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 55)
+	orders, err := client.MarketOrders(context.Background(), 10000002, OrderTypeAll, 0, 55)
 	if err != nil {
 		t.Fatalf("MarketOrders: %v", err)
 	}
