@@ -50,9 +50,8 @@ dockers_v2:
       "org.opencontainers.image.revision": "{{ .FullCommit }}"
 
 # No version tags and no GitHub Release in this pipeline (see ADR-0008) --
-# just build + push the Docker image on every push to main.
+# just build + push the Docker image on every push to main. disable: true
+# suppresses release creation regardless of the --nightly flag deploy.yml
+# invokes GoReleaser with.
 release:
   disable: true
-
-nightly:
-  publish_release: false

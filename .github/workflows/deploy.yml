@@ -41,15 +41,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # --nightly builds and publishes (incl. pushing Docker images)
-      # without requiring a git tag -- unlike --snapshot, which skips
-      # publishing entirely. See .goreleaser.yaml: nightly.publish_release
-      # is off, since this pipeline only wants the Docker push, not a
-      # GitHub Release/tag artifact.
+      # --skip=validate skips the "HEAD must be exactly tagged" check
+      # (this pipeline runs on every push to main, not just tags -- it
+      # falls back to the nearest reachable tag for template values like
+      # .Version, unused here since the Docker tags below don't
+      # reference it) while still publishing (pushing Docker images).
+      # --skip=announce is just "nothing configured to announce to".
+      # See .goreleaser.yaml: release.disable is on, since this pipeline
+      # only wants the Docker push, not a GitHub Release/tag artifact.
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --nightly --clean
+          args: release --skip=validate,announce --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
