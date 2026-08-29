@@ -82,7 +82,11 @@ type dashboardView struct {
 	SelectedHubName string
 	MinVolume       float64
 	MinMargin       float64
-	Opportunities   []opportunityRow
+	// MinMarkup is a percentage (e.g. 15 for "15%"), matching what the
+	// input box displays -- scanner.Filter.MinMarkup is the fraction
+	// form this is derived from (see CONTEXT.md's Markup definition).
+	MinMarkup     float64
+	Opportunities []opportunityRow
 }
 
 // buildDashboardView fetches the character's open orders, runs the
@@ -140,6 +144,7 @@ func buildDashboardView(ctx context.Context, client esi.Client, store *storage.S
 		SelectedHubName: selectedHub.Name,
 		MinVolume:       filter.MinVolume,
 		MinMargin:       filter.MinMargin,
+		MinMarkup:       filter.MinMarkup * 100,
 		Opportunities:   buildOpportunityRows(ranked, oppNames),
 	}, nil
 }
@@ -259,6 +264,9 @@ func buildHubTabs(selected hub.Hub, filter scanner.Filter) []hubTab {
 		}
 		if filter.MinMargin > 0 {
 			q.Set("minMargin", strconv.FormatFloat(filter.MinMargin, 'f', -1, 64))
+		}
+		if filter.MinMarkup > 0 {
+			q.Set("minMarkup", strconv.FormatFloat(filter.MinMarkup*100, 'f', -1, 64))
 		}
 		tabs[i] = hubTab{Name: h.Name, URL: "/?" + q.Encode(), Active: h.Name == selected.Name}
 	}

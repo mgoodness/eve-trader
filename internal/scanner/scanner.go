@@ -26,10 +26,14 @@ type Opportunity struct {
 	AvgDailyVolume float64
 }
 
-// Filter bounds which Opportunities Rank keeps.
+// Filter bounds which Opportunities Rank keeps. MinMargin and MinMarkup
+// apply independently -- both are ISK/fraction floors that default to
+// no filtering at zero, and an Opportunity must clear whichever of them
+// are non-zero to be kept (see CONTEXT.md's Markup definition).
 type Filter struct {
 	MinVolume float64
 	MinMargin float64
+	MinMarkup float64
 }
 
 // VolumeWindow averages the most recent volumeWindowDays days of volume
@@ -59,7 +63,7 @@ func VolumeWindow(history []esi.MarketHistoryEntry) float64 {
 func Rank(opportunities []Opportunity, f Filter, limit int) []Opportunity {
 	kept := make([]Opportunity, 0, len(opportunities))
 	for _, o := range opportunities {
-		if o.AvgDailyVolume < f.MinVolume || o.Margin < f.MinMargin {
+		if o.AvgDailyVolume < f.MinVolume || o.Margin < f.MinMargin || Markup(o.Margin, o.BestBuy) < f.MinMarkup {
 			continue
 		}
 		kept = append(kept, o)
