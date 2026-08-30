@@ -1,0 +1,6 @@
+eve-trader.opsgoodness.net {
+    handle_path /internal/watchtower-hook/* {
+        reverse_proxy watchtower:8080
+    }
+    reverse_proxy eve-trader:8080
+}
