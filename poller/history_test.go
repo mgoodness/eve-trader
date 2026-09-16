@@ -1,0 +1,78 @@
+package poller_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/mgoodness/eve-trader/esi"
+	"github.com/mgoodness/eve-trader/internal/dbtest"
+	"github.com/mgoodness/eve-trader/poller"
+	"github.com/mgoodness/eve-trader/ranking"
+)
+
+type historyGateway struct {
+	orders  []esi.Order
+	history map[int][]esi.HistoryPoint
+	calls   []int
+}
+
+func (g *historyGateway) FetchRensOrders(context.Context) ([]esi.Order, error) { return g.orders, nil }
+func (g *historyGateway) FetchHistory(_ context.Context, typeID int) ([]esi.HistoryPoint, error) {
+	g.calls = append(g.calls, typeID)
+	return g.history[typeID], nil
+}
+func (*historyGateway) FetchCharacterSkills(context.Context, int, string) (esi.Skills, error) {
+	return esi.Skills{}, nil
+}
+func (*historyGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
+	return esi.Token{}, nil
+}
+func (*historyGateway) RefreshToken(context.Context, string) (esi.Token, error) {
+	return esi.Token{}, nil
+}
+
+func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
+	database := dbtest.OpenDB(t)
+	issued := time.Now().UTC()
+	gateway := &historyGateway{
+		orders: []esi.Order{{OrderID: 1, TypeID: 34, Name: "Tritanium", IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 34, Name: "Tritanium", Price: 8, Issued: issued}},
+		history: map[int][]esi.HistoryPoint{34: {
+			{Date: time.Now().UTC(), Volume: 10, OrderCount: 1},
+			{Date: time.Now().UTC().AddDate(0, 0, -1), Volume: 20, OrderCount: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -14), Volume: 999, OrderCount: 9},
+		}},
+	}
+	orders := poller.New(gateway, database, time.Hour)
+	if err := orders.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := poller.NewHistory(gateway, database).Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM market_history`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("history row count = %d, want 2", count)
+	}
+	var volume float64
+	if err := database.QueryRow(`SELECT AVG(volume) FROM market_history WHERE type_id = 34`).Scan(&volume); err != nil {
+		t.Fatal(err)
+	}
+	if volume != 15 {
+		t.Fatalf("average volume = %v, want 15", volume)
+	}
+	got, err := ranking.Load(t.Context(), database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].VolumePerDay != 15 {
+		t.Fatalf("ranking volume = %+v, want one opportunity at 15", got)
+	}
+	if len(gateway.calls) != 1 || gateway.calls[0] != 34 {
+		t.Fatalf("FetchHistory calls = %v, want [34]", gateway.calls)
+	}
+}

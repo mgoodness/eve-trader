@@ -111,10 +111,26 @@ func (g *HTTPGateway) get(ctx context.Context, endpoint string, target any) (*ht
 	return resp, nil
 }
 
-// These methods are intentionally explicit until the authenticated ESI client
-// is introduced; public market polling does not require OAuth.
-func (*HTTPGateway) FetchHistory(context.Context, int) ([]HistoryPoint, error) {
-	return nil, fmt.Errorf("history polling is not implemented")
+// FetchHistory returns Heimatar's daily market history for typeID.
+func (g *HTTPGateway) FetchHistory(ctx context.Context, typeID int) ([]HistoryPoint, error) {
+	var raw []struct {
+		Date       string `json:"date"`
+		Volume     int    `json:"volume"`
+		OrderCount int    `json:"order_count"`
+	}
+	_, err := g.get(ctx, fmt.Sprintf("%s/markets/%d/history/?type_id=%d", g.base(), regionHeimatar, typeID), &raw)
+	if err != nil {
+		return nil, fmt.Errorf("fetching history for type %d: %w", typeID, err)
+	}
+	out := make([]HistoryPoint, len(raw))
+	for i, point := range raw {
+		date, err := time.Parse("2006-01-02", point.Date)
+		if err != nil {
+			return nil, fmt.Errorf("parsing history date %q for type %d: %w", point.Date, typeID, err)
+		}
+		out[i] = HistoryPoint{Date: date, Volume: point.Volume, OrderCount: point.OrderCount}
+	}
+	return out, nil
 }
 func (*HTTPGateway) FetchCharacterSkills(context.Context, int, string) (Skills, error) {
 	return Skills{}, fmt.Errorf("skill fetching is not implemented")
