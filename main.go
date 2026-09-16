@@ -5,6 +5,8 @@ package main
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -41,10 +43,34 @@ func run() error {
 	// in the meantime.
 	gateway := &esi.Fake{}
 
+	authConfig := server.AuthConfig{
+		ClientID:     os.Getenv("EVE_TRADER_ESI_CLIENT_ID"),
+		CallbackURL:  cmp.Or(os.Getenv("EVE_TRADER_CALLBACK_URL"), "http://localhost:8080/auth/callback"),
+		CookieSecret: os.Getenv("EVE_TRADER_COOKIE_SECRET"),
+		TokenKey:     os.Getenv("EVE_TRADER_TOKEN_KEY"),
+	}
+	if authConfig.CookieSecret == "" || authConfig.TokenKey == "" {
+		slog.Warn("EVE_TRADER_COOKIE_SECRET/EVE_TRADER_TOKEN_KEY not set; using ephemeral secrets for this process only -- in-flight logins and previously stored tokens won't survive a restart")
+		if authConfig.CookieSecret == "" {
+			secret, err := randomSecret()
+			if err != nil {
+				return err
+			}
+			authConfig.CookieSecret = secret
+		}
+		if authConfig.TokenKey == "" {
+			secret, err := randomSecret()
+			if err != nil {
+				return err
+			}
+			authConfig.TokenKey = secret
+		}
+	}
+
 	addr := cmp.Or(os.Getenv("EVE_TRADER_ADDR"), ":8080")
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(gateway, sqlDB),
+		Handler:           server.New(gateway, sqlDB, authConfig),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -67,4 +93,15 @@ func run() error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// randomSecret returns a 32-byte cryptographically random value,
+// hex-encoded, suitable as an ephemeral fallback for an AuthConfig
+// secret when its environment variable isn't set.
+func randomSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

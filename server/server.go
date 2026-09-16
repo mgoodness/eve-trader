@@ -18,16 +18,20 @@ type Server struct {
 	gateway esi.ESIGateway
 	db      *sql.DB
 	mux     *http.ServeMux
+	auth    AuthConfig
 }
 
 // New builds a Server that serves ESI/database-backed routes using
-// gateway and db.
-func New(gateway esi.ESIGateway, db *sql.DB) *Server {
-	s := &Server{gateway: gateway, db: db}
+// gateway and db. auth configures the /auth/login and /auth/callback
+// EVE SSO login flow (see auth.go).
+func New(gateway esi.ESIGateway, db *sql.DB, auth AuthConfig) *Server {
+	s := &Server{gateway: gateway, db: db, auth: auth}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /opportunities", s.handleOpportunities)
+	mux.HandleFunc("GET /auth/login", s.handleAuthLogin)
+	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	s.mux = mux
 
 	return s
