@@ -151,12 +151,6 @@ func (s *Server) latchAuthFailure(err error) (esi.Token, bool, error) {
 	return esi.Token{}, false, err
 }
 
-func (s *Server) setAuthState(checked, failed bool) {
-	s.mu.Lock()
-	s.authChecked, s.reauthRequired = checked, failed
-	s.mu.Unlock()
-}
-
 func (s *Server) resetAuthentication() {
 	s.mu.Lock()
 	s.authChecked, s.reauthRequired = false, false
