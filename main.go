@@ -72,15 +72,16 @@ func run() error {
 	}
 
 	addr := cmp.Or(os.Getenv("EVE_TRADER_ADDR"), ":8080")
+	serverHandler := server.New(gateway, sqlDB, authConfig)
+	go serverHandler.NewSkillPoller(server.CharacterSkillsInterval).Run(ctx)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(gateway, sqlDB, authConfig),
+		Handler:           serverHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("eve-trader listening", "addr", addr)
