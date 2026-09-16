@@ -7,6 +7,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -88,60 +90,65 @@ func (s *Server) renderIndex(w http.ResponseWriter, data pageData) {
 // ESI work. A failed refresh is latched: requests must not create a silent
 // retry loop while the user is being asked to authenticate again.
 func (s *Server) authenticationFailed(ctx context.Context) bool {
-	// Serialize the first refresh. EVE refresh tokens rotate and are
-	// single-use, so concurrent home requests must not refresh the same token.
+	s.mu.Lock()
+	checked := s.authChecked
+	failed := s.reauthRequired
+	s.mu.Unlock()
+	if checked {
+		return failed
+	}
+	_, _, err := s.refreshAuthentication(ctx, false)
+	return err != nil
+}
+
+// refreshAuthentication mints a current access token from the stored refresh
+// token. All authenticated callers use this path, so refresh failures latch
+// the same re-authentication state rather than implementing separate handling.
+func (s *Server) refreshAuthentication(ctx context.Context, force bool) (esi.Token, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.authChecked {
-		return s.reauthRequired
+	if s.reauthRequired {
+		return esi.Token{}, false, errors.New("reauthentication required")
+	}
+	if !force && s.authChecked {
+		return esi.Token{}, false, nil
 	}
 
 	var characterID int
 	var ciphertext []byte
-	err := s.db.QueryRowContext(ctx, `SELECT character_id, encrypted_refresh_token FROM esi_token LIMIT 1`).Scan(&characterID, &ciphertext)
-	if err == sql.ErrNoRows {
-		s.authChecked = true
-		return false
+	if err := s.db.QueryRowContext(ctx, `SELECT character_id, encrypted_refresh_token FROM esi_token LIMIT 1`).Scan(&characterID, &ciphertext); err != nil {
+		if err == sql.ErrNoRows {
+			s.authChecked = true
+			return esi.Token{}, false, nil
+		}
+		return s.latchAuthFailure(fmt.Errorf("loading stored ESI token: %w", err))
 	}
-	if err != nil {
-		slog.Error("loading stored ESI token", "err", err)
-		s.authChecked, s.reauthRequired = true, true
-		return true
-	}
-
 	refreshToken, err := tokencrypt.Decrypt(s.auth.TokenKey, ciphertext)
 	if err != nil {
-		slog.Error("decrypting stored ESI refresh token", "err", err)
-		s.authChecked, s.reauthRequired = true, true
-		return true
+		return s.latchAuthFailure(fmt.Errorf("decrypting stored ESI refresh token: %w", err))
 	}
 	refreshed, err := s.gateway.RefreshToken(ctx, refreshToken)
 	if err != nil {
-		slog.Error("refreshing ESI token; polling stopped until re-authentication", "err", err)
-		s.authChecked, s.reauthRequired = true, true
-		return true
+		return s.latchAuthFailure(fmt.Errorf("refreshing ESI token: %w", err))
 	}
 	if refreshed.RefreshToken != "" && refreshed.RefreshToken != refreshToken {
-		encrypted, encryptErr := tokencrypt.Encrypt(s.auth.TokenKey, refreshed.RefreshToken)
-		if encryptErr != nil {
-			slog.Error("encrypting rotated ESI refresh token", "err", encryptErr)
-			s.authChecked, s.reauthRequired = true, true
-			return true
+		encrypted, err := tokencrypt.Encrypt(s.auth.TokenKey, refreshed.RefreshToken)
+		if err != nil {
+			return s.latchAuthFailure(fmt.Errorf("encrypting rotated ESI refresh token: %w", err))
 		}
 		if _, err := s.db.ExecContext(ctx, `UPDATE esi_token SET encrypted_refresh_token = ?, updated_at = ? WHERE character_id = ?`, encrypted, nowUTC(), characterID); err != nil {
-			slog.Error("storing rotated ESI refresh token", "err", err)
-			s.authChecked, s.reauthRequired = true, true
-			return true
+			return s.latchAuthFailure(fmt.Errorf("storing rotated ESI refresh token: %w", err))
 		}
 	}
 	s.authChecked = true
-	return false
+	return refreshed, true, nil
 }
 
-func (s *Server) setAuthState(checked, failed bool) {
-	s.mu.Lock()
-	s.authChecked, s.reauthRequired = checked, failed
-	s.mu.Unlock()
+func (s *Server) latchAuthFailure(err error) (esi.Token, bool, error) {
+	s.reauthRequired = true
+	s.authChecked = true
+	slog.Error("authenticated ESI work stopped until re-authentication", "err", err)
+	return esi.Token{}, false, err
 }
 
 func (s *Server) resetAuthentication() {
