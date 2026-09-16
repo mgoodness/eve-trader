@@ -76,3 +76,30 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 		t.Fatalf("FetchHistory calls = %v, want [34]", gateway.calls)
 	}
 }
+
+func TestHistoryPollKeepsExactlyFourteenCalendarDays(t *testing.T) {
+	database := dbtest.OpenDB(t)
+	issued := time.Now().UTC()
+	gateway := &historyGateway{
+		orders: []esi.Order{{OrderID: 1, TypeID: 34, Name: "Tritanium", Issued: issued}},
+		history: map[int][]esi.HistoryPoint{34: {
+			{Date: time.Now().UTC(), Volume: 1},
+			{Date: time.Now().UTC().AddDate(0, 0, -13), Volume: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -14), Volume: 3},
+		}},
+	}
+	if err := poller.New(gateway, database, time.Hour).Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := poller.NewHistory(gateway, database).Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM market_history`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("history row count = %d, want 2", count)
+	}
+}
