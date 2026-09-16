@@ -69,7 +69,7 @@ func TestIndexRendersRankedOpportunityTable(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	seedOpportunityFixtures(t, sqlDB)
 
-	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB))
+	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB, testAuthConfig()))
 	defer srv.Close()
 
 	status, body := getBody(t, srv.URL+"/")
@@ -130,7 +130,7 @@ func TestIndexOmitsAllRowsBelowThresholdWithNoQualifyingItems(t *testing.T) {
 	dbtest.SeedOrder(t, sqlDB, 2, 36, false, 103)
 	dbtest.SeedHistory(t, sqlDB, 36, 100, 100)
 
-	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB))
+	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB, testAuthConfig()))
 	defer srv.Close()
 
 	status, body := getBody(t, srv.URL+"/")
@@ -150,7 +150,7 @@ func TestOpportunitiesPartialResortsByColumn(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	seedOpportunityFixtures(t, sqlDB)
 
-	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB))
+	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB, testAuthConfig()))
 	defer srv.Close()
 
 	cases := []struct {

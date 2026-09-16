@@ -18,7 +18,7 @@ func TestIndexRespondsOK(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	fake := &esi.Fake{}
 
-	srv := httptest.NewServer(server.New(fake, sqlDB))
+	srv := httptest.NewServer(server.New(fake, sqlDB, testAuthConfig()))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
