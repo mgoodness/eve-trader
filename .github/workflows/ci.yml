@@ -51,6 +51,5 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          docker build --tag "$IMAGE:candidate-$SHA" --tag "$IMAGE:candidate" .
+          docker build --tag "$IMAGE:candidate-$SHA" .
           docker push "$IMAGE:candidate-$SHA"
-          docker push "$IMAGE:candidate"

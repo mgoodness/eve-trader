@@ -1,31 +1,79 @@
 #!/bin/sh
+# Deploys (or rolls back to) an immutable eve-trader image on the production
+# VM. Pulls before stopping the active container, takes a pre-switch SQLite
+# backup for schema-migrating releases, and restores the previously active
+# image if pull/startup fails so the known-good version stays live.
+#
+#   eve-trader-deploy <immutable-image> [rollback-tag]
+#
+# <immutable-image> is the full repo path of the candidate (e.g.
+# ghcr.io/<owner>/<repo>:candidate-<sha>); the optional rollback-tag
+# substitutes that tag portion so rollback always targets the same registry.
+#
+# Prints the image identity actually deployed as `deployed=<image>` on
+# stdout; the workflow uses that value for the deployment record.
 set -eu
-image=${1:?image is required}
+primary=${1:?image is required}
 rollback=${2:-}
 name=eve-trader
 state=/var/lib/eve-trader
+repo=${primary%:*}
+image=$primary
+[ -n "$rollback" ] && image="$repo:$rollback"
+retain=5
+
+mkdir -p "$state" "$state/backups"
+
 old_image=''
 if docker inspect "$name" >/dev/null 2>&1; then
     old_image=$(docker inspect --format '{{.Config.Image}}' "$name")
+    printf '%s' "$old_image" >"$state/previous-image"
 fi
-[ -n "$rollback" ] && image="ghcr.io/mgoodness/eve-trader:$rollback"
+
 docker pull "$image"
-mkdir -p "$state"
-docker stop "$name" 2>/dev/null || true
-docker rm "$name" 2>/dev/null || true
-if ! docker run -d --name "$name" --restart unless-stopped --env-file "$state/secrets" \
-    -v "$state:/data" -p 127.0.0.1:8080:8080 "$image" >/dev/null; then
-    [ -n "$old_image" ] && docker run -d --name "$name" --restart unless-stopped --env-file "$state/secrets" \
-        -v "$state:/data" -p 127.0.0.1:8080:8080 "$old_image" >/dev/null || true
+
+# Pre-switch backup: a schema-migrating release can then be rolled back in
+# place; normal image rollback never replaces SQLite (docs/deployment.md).
+if [ -f "$state/eve-trader.db" ]; then
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    sqlite3 "$state/eve-trader.db" \
+        ".backup '$state/backups/eve-trader-$stamp.db'"
+    # Newest-first (names embed a UTC timestamp), then drop entries past
+    # the retention count.
+    find "$state/backups" -maxdepth 1 -type f -name 'eve-trader-*.db' \
+        -printf '%f\n' 2>/dev/null | sort -r | tail -n +$((retain + 1)) |
+        while read -r f; do rm -f "$state/backups/$f"; done
+fi
+
+if ! /usr/local/sbin/eve-trader-start "$image"; then
+    if [ -n "$old_image" ]; then
+        /usr/local/sbin/eve-trader-start "$old_image" 2>/dev/null && printf 'restored=%s\n' "$old_image" >&2
+    fi
     exit 1
 fi
 sleep 2
 if ! curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
     docker logs "$name" >&2 || true
-    docker stop "$name" >/dev/null 2>&1 || true
-    docker rm "$name" >/dev/null 2>&1 || true
-    [ -n "$old_image" ] && docker run -d --name "$name" --restart unless-stopped --env-file "$state/secrets" \
-        -v "$state:/data" -p 127.0.0.1:8080:8080 "$old_image" >/dev/null || true
+    if [ -n "$old_image" ]; then
+        /usr/local/sbin/eve-trader-start "$old_image" 2>/dev/null && printf 'restored=%s\n' "$old_image" >&2
+    fi
     exit 1
 fi
+
+# Retain a fixed set of recent images for manual rollback, and prune the
+# rest of this repository's images that no container uses.
 printf '%s image=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$image" >>"$state/deployments.log"
+printf '%s' "$image" >"$state/current-image"
+
+keepfile="$state/.keep-images"
+: >"$keepfile"
+tail -n "$retain" "$state/deployments.log" | sed -n 's/^[^ ]* image=//p' >>"$keepfile"
+docker ps -aq --format '{{.Image}}' >>"$keepfile"
+for img in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -F "$repo:"); do
+    if ! grep -Fqx "$img" "$keepfile"; then
+        docker image rm "$img" >/dev/null 2>&1 || true
+    fi
+done
+rm -f "$keepfile"
+
+printf 'deployed=%s\n' "$image"
