@@ -17,6 +17,7 @@ import (
 
 	"github.com/mgoodness/eve-trader/db"
 	"github.com/mgoodness/eve-trader/esi"
+	"github.com/mgoodness/eve-trader/poller"
 	"github.com/mgoodness/eve-trader/server"
 )
 
@@ -38,10 +39,11 @@ func run() error {
 	}
 	defer sqlDB.Close()
 
-	// The real ESIGateway implementation (talking to live ESI/SSO) lands
-	// in a later ticket; the fake keeps the skeleton runnable end to end
-	// in the meantime.
-	gateway := &esi.Fake{}
+	// Public market data is fetched directly from ESI. Authenticated gateway
+	// methods are completed by the auth integration as those flows are used.
+	gateway := &esi.HTTPGateway{}
+	orderPoller := poller.New(gateway, sqlDB, poller.DefaultInterval)
+	go orderPoller.Run(ctx)
 
 	authConfig := server.AuthConfig{
 		ClientID:     os.Getenv("EVE_TRADER_ESI_CLIENT_ID"),

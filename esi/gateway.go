@@ -12,8 +12,11 @@ import (
 // Order is a single order in Rens's order book, as returned by
 // GET /markets/{region_id}/orders/ and filtered to Rens's location_id.
 type Order struct {
-	OrderID      int64
-	TypeID       int
+	OrderID int64
+	TypeID  int
+	// Name is optional; gateways that do not provide it leave it empty and
+	// the poller uses a stable fallback until a type lookup is available.
+	Name         string
 	IsBuyOrder   bool
 	Price        float64
 	VolumeRemain int
