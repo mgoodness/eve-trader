@@ -62,9 +62,34 @@ func (g *HTTPGateway) FetchRensOrders(ctx context.Context) ([]Order, error) {
 		pages := resp.Header.Get("X-Pages")
 		n, _ := strconv.Atoi(pages)
 		if n == 0 || page >= n {
-			return out, nil
+			break
 		}
 	}
+	names := make(map[int]string)
+	for i := range out {
+		name, ok := names[out[i].TypeID]
+		if !ok {
+			var err error
+			name, err = g.fetchTypeName(ctx, out[i].TypeID)
+			if err != nil {
+				return nil, err
+			}
+			names[out[i].TypeID] = name
+		}
+		out[i].Name = name
+	}
+	return out, nil
+}
+
+func (g *HTTPGateway) fetchTypeName(ctx context.Context, typeID int) (string, error) {
+	var typeData struct {
+		Name string `json:"name"`
+	}
+	_, err := g.get(ctx, fmt.Sprintf("%s/universe/types/%d/", g.base(), typeID), &typeData)
+	if err != nil {
+		return "", fmt.Errorf("fetching type %d name: %w", typeID, err)
+	}
+	return typeData.Name, nil
 }
 
 func (g *HTTPGateway) get(ctx context.Context, endpoint string, target any) (*http.Response, error) {
