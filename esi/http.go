@@ -2,10 +2,13 @@ package esi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,11 +17,14 @@ const (
 	rensStation    = 60004588
 )
 
-// HTTPGateway reads public market data from ESI. OAuth methods are supplied
-// through the same gateway seam by the production auth integration.
+// HTTPGateway reads public market data from ESI and implements the EVE SSO
+// calls used by the server's authentication and skill-refresh flows.
 type HTTPGateway struct {
-	Client  *http.Client
-	BaseURL string
+	Client       *http.Client
+	BaseURL      string
+	OAuthBaseURL string
+	ClientID     string
+	CallbackURL  string
 }
 
 func (g *HTTPGateway) client() *http.Client {
@@ -132,12 +138,120 @@ func (g *HTTPGateway) FetchHistory(ctx context.Context, typeID int) ([]HistoryPo
 	}
 	return out, nil
 }
-func (*HTTPGateway) FetchCharacterSkills(context.Context, int, string) (Skills, error) {
-	return Skills{}, fmt.Errorf("skill fetching is not implemented")
+func (g *HTTPGateway) FetchCharacterSkills(ctx context.Context, characterID int, accessToken string) (Skills, error) {
+	var raw struct {
+		Skills []struct {
+			ID     int `json:"skill_id"`
+			Active int `json:"active_skill_level"`
+		} `json:"skills"`
+	}
+	endpoint := fmt.Sprintf("%s/characters/%d/skills/", g.base(), characterID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return Skills{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	if err := g.doJSON(req, &raw); err != nil {
+		return Skills{}, fmt.Errorf("fetching skills for character %d: %w", characterID, err)
+	}
+	var skills Skills
+	for _, skill := range raw.Skills {
+		switch skill.ID {
+		case 3446:
+			skills.BrokerRelationsLevel = skill.Active
+		case 16622:
+			skills.AccountingLevel = skill.Active
+		}
+	}
+	return skills, nil
 }
-func (*HTTPGateway) ExchangeCode(context.Context, string, string) (Token, error) {
-	return Token{}, fmt.Errorf("oauth is not implemented")
+
+func (g *HTTPGateway) ExchangeCode(ctx context.Context, code, verifier string) (Token, error) {
+	values := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {g.ClientID},
+		"redirect_uri":  {g.CallbackURL},
+		"code_verifier": {verifier},
+	}
+	return g.exchangeToken(ctx, values)
 }
-func (*HTTPGateway) RefreshToken(context.Context, string) (Token, error) {
-	return Token{}, fmt.Errorf("oauth is not implemented")
+
+func (g *HTTPGateway) RefreshToken(ctx context.Context, refreshToken string) (Token, error) {
+	return g.exchangeToken(ctx, url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {g.ClientID},
+	})
+}
+
+func (g *HTTPGateway) exchangeToken(ctx context.Context, values url.Values) (Token, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.tokenURL(), strings.NewReader(values.Encode()))
+	if err != nil {
+		return Token{}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	var raw struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := g.doJSON(req, &raw); err != nil {
+		return Token{}, fmt.Errorf("exchanging EVE SSO token: %w", err)
+	}
+	token := Token{AccessToken: raw.AccessToken, RefreshToken: raw.RefreshToken, ExpiresIn: time.Duration(raw.ExpiresIn) * time.Second}
+	claims, err := jwtClaims(raw.AccessToken)
+	if err != nil {
+		return Token{}, fmt.Errorf("decoding EVE access token: %w", err)
+	}
+	const subjectPrefix = "CHARACTER:EVE:"
+	if !strings.HasPrefix(claims.Subject, subjectPrefix) {
+		return Token{}, fmt.Errorf("unexpected EVE token subject %q", claims.Subject)
+	}
+	token.CharacterID, err = strconv.Atoi(strings.TrimPrefix(claims.Subject, subjectPrefix))
+	if err != nil {
+		return Token{}, fmt.Errorf("parsing EVE character ID: %w", err)
+	}
+	token.OwnerHash = claims.Owner
+	return token, nil
+}
+
+func (g *HTTPGateway) tokenURL() string {
+	if g.OAuthBaseURL != "" {
+		return strings.TrimRight(g.OAuthBaseURL, "/") + "/oauth/token"
+	}
+	return "https://login.eveonline.com/v2/oauth/token"
+}
+
+func (g *HTTPGateway) doJSON(req *http.Request, target any) error {
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("EVE API: %s", resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(target)
+}
+
+type jwtClaimsPayload struct {
+	Subject string `json:"sub"`
+	Owner   string `json:"owner"`
+}
+
+func jwtClaims(token string) (jwtClaimsPayload, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return jwtClaimsPayload{}, fmt.Errorf("malformed JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return jwtClaimsPayload{}, err
+	}
+	var claims jwtClaimsPayload
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return jwtClaimsPayload{}, err
+	}
+	return claims, nil
 }

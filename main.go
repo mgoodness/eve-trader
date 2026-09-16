@@ -39,17 +39,20 @@ func run() error {
 	}
 	defer sqlDB.Close()
 
-	// Public market data is fetched directly from ESI. Authenticated gateway
-	// methods are completed by the auth integration as those flows are used.
-	gateway := &esi.HTTPGateway{}
+	// The gateway serves both public market data and authenticated ESI/SSO
+	// calls through the same seam used by the server and background pollers.
+	gateway := &esi.HTTPGateway{
+		ClientID:    os.Getenv("EVE_TRADER_ESI_CLIENT_ID"),
+		CallbackURL: cmp.Or(os.Getenv("EVE_TRADER_CALLBACK_URL"), "http://localhost:8080/auth/callback"),
+	}
 	orderPoller := poller.New(gateway, sqlDB, poller.DefaultInterval)
 	go orderPoller.Run(ctx)
 	historyPoller := poller.NewHistory(gateway, sqlDB)
 	go historyPoller.Run(ctx)
 
 	authConfig := server.AuthConfig{
-		ClientID:     os.Getenv("EVE_TRADER_ESI_CLIENT_ID"),
-		CallbackURL:  cmp.Or(os.Getenv("EVE_TRADER_CALLBACK_URL"), "http://localhost:8080/auth/callback"),
+		ClientID:     gateway.ClientID,
+		CallbackURL:  gateway.CallbackURL,
 		CookieSecret: os.Getenv("EVE_TRADER_COOKIE_SECRET"),
 		TokenKey:     os.Getenv("EVE_TRADER_TOKEN_KEY"),
 	}
