@@ -1,0 +1,19 @@
+#!/bin/sh
+# Starts (or replaces) the eve-trader container from the given image. The
+# single place that wires the container's runtime: SQLite state directory,
+# secrets env-file, restart policy, and the loopback port Caddy proxies.
+set -eu
+name=eve-trader
+state=/var/lib/eve-trader
+image=${1:?image is required}
+
+# Recreate rather than restart: the secrets env-file is only read at
+# container start, so rotation must replace the container.
+docker stop "$name" >/dev/null 2>&1 || true
+docker rm "$name" >/dev/null 2>&1 || true
+docker run -d --name "$name" --restart unless-stopped \
+    --env-file "$state/secrets" \
+    -v "$state:/data" \
+    -p 127.0.0.1:8080:8080 \
+    "$image" >/dev/null
+printf 'started=%s\n' "$image"

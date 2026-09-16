@@ -5,8 +5,8 @@ and firewall that the app runs behind — as Terraform infrastructure-as-code
 pinned to Terraform 1.16.2 ([`mise.toml`](../mise.toml)) using the
 [Google provider](https://registry.terraform.io/providers/hashicorp/google/latest).
 
-The config provisions infrastructure only; application deployment (binary,
-TLS, service) is out of scope for now.
+The config provisions infrastructure only; application deployment (binary, TLS, service) is
+covered separately by [`docs/deployment.md`](../docs/deployment.md).
 
 ## What it provisions
 

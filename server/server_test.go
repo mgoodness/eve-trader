@@ -39,3 +39,22 @@ func TestIndexRespondsOK(t *testing.T) {
 		t.Fatal("GET / body is empty")
 	}
 }
+
+// TestHealthRespondsOK verifies the unauthenticated /healthz probe the
+// deployment pipeline uses to confirm a freshly started container is live.
+func TestHealthRespondsOK(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	fake := &esi.Fake{}
+
+	srv := httptest.NewServer(server.New(fake, sqlDB, testAuthConfig()))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /healthz status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
