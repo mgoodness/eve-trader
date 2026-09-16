@@ -1,0 +1,45 @@
+{{define "page.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eve-trader &mdash; Rens Opportunities</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b1120; color: #e2e8f0; margin: 0; padding: 0 1.5rem 3rem; }
+  header { border-bottom: 1px solid #1e293b; padding: 1.5rem 0; }
+  h1 { margin: 0 0 .25rem; font-size: 1.25rem; }
+  .footnote { color: #94a3b8; font-size: .8rem; margin: 0; max-width: 60rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin-top: 1.5rem; }
+  th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid #1e293b; }
+  th { color: #94a3b8; font-weight: 600; }
+  th[hx-get] { cursor: pointer; }
+  th[hx-get]:hover { color: #e2e8f0; }
+  td.iskday { font-weight: 600; color: #34d399; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rens Station Trading Opportunities</h1>
+  <p class="footnote">{{template "footnote"}}</p>
+</header>
+<main>
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th hx-get="/opportunities?sort=buy" hx-target="#rows" hx-swap="innerHTML">Buy</th>
+        <th hx-get="/opportunities?sort=sell" hx-target="#rows" hx-swap="innerHTML">Sell</th>
+        <th hx-get="/opportunities?sort=margin" hx-target="#rows" hx-swap="innerHTML">Margin</th>
+        <th hx-get="/opportunities?sort=iskunit" hx-target="#rows" hx-swap="innerHTML">ISK/unit</th>
+        <th hx-get="/opportunities?sort=volday" hx-target="#rows" hx-swap="innerHTML">Vol/day</th>
+        <th hx-get="/opportunities?sort=iskday" hx-target="#rows" hx-swap="innerHTML">ISK/day</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      {{template "rows" .Opportunities}}
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
+{{end}}
