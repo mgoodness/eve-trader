@@ -44,6 +44,8 @@ func run() error {
 	gateway := &esi.HTTPGateway{}
 	orderPoller := poller.New(gateway, sqlDB, poller.DefaultInterval)
 	go orderPoller.Run(ctx)
+	historyPoller := poller.NewHistory(gateway, sqlDB)
+	go historyPoller.Run(ctx)
 
 	authConfig := server.AuthConfig{
 		ClientID:     os.Getenv("EVE_TRADER_ESI_CLIENT_ID"),
