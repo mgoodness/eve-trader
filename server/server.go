@@ -38,6 +38,7 @@ func New(gateway esi.ESIGateway, db *sql.DB, auth AuthConfig) *Server {
 	s := &Server{gateway: gateway, db: db, auth: auth}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /opportunities", s.handleOpportunities)
 	mux.HandleFunc("GET /auth/login", s.handleAuthLogin)
@@ -77,6 +78,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderIndex(w, pageData{Opportunities: opportunities})
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if err := s.db.PingContext(r.Context()); err != nil {
+		http.Error(w, "unhealthy", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
 }
 
 func (s *Server) renderIndex(w http.ResponseWriter, data pageData) {

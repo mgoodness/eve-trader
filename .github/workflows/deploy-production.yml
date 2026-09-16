@@ -1,0 +1,71 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Immutable image tag (candidate-SHA)
+        required: true
+        type: string
+      rollback:
+        description: Roll back to this previously deployed immutable tag
+        required: false
+        type: string
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: deploy and verify
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VM_HOST" > ~/.ssh/known_hosts
+      - name: Deploy immutable image
+        env:
+          VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          VM_USER: ${{ vars.PRODUCTION_VM_USER }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.image }}
+          ROLLBACK: ${{ inputs.rollback }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$VM_USER@$VM_HOST" \
+            "sudo /usr/local/sbin/eve-trader-deploy '$IMAGE' '${ROLLBACK:-}'"
+      - name: Verify public HTTPS routes
+        env:
+          URL: ${{ vars.PRODUCTION_URL }}
+          VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.image }}
+          APPROVER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 180))
+          until [ "$SECONDS" -ge "$deadline" ]; do
+            health=$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 "$URL/healthz" || true)
+            homepage=$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 "$URL/" || true)
+            if [ "$health" = "ok" ] && [ -n "$homepage" ]; then
+              printf 'health-check=passed url=%s approver=%s timestamp=%s target=%s image=%s\n' \
+                "$URL" "$APPROVER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VM_HOST" "$IMAGE"
+              exit 0
+            fi
+            sleep 5
+          done
+          printf 'health-check=failed url=%s target=%s image=%s\n' "$URL" "$VM_HOST" "$IMAGE"
+          exit 1

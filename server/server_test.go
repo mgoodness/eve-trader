@@ -14,6 +14,23 @@ import (
 // TestIndexRespondsOK demonstrates the test-harness convention the rest of
 // the build follows: a black-box HTTP test (httptest.Server) against a
 // real SQLite database and a fake ESIGateway.
+func TestHealthRespondsOK(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	fake := &esi.Fake{}
+
+	srv := httptest.NewServer(server.New(fake, sqlDB, testAuthConfig()))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /healthz status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
 func TestIndexRespondsOK(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	fake := &esi.Fake{}

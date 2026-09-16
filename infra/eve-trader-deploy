@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+image=${1:?image is required}
+rollback=${2:-}
+name=eve-trader
+state=/var/lib/eve-trader
+old_image=''
+if docker inspect "$name" >/dev/null 2>&1; then
+    old_image=$(docker inspect --format '{{.Config.Image}}' "$name")
+fi
+[ -n "$rollback" ] && image="ghcr.io/mgoodness/eve-trader:$rollback"
+docker pull "$image"
+mkdir -p "$state"
+docker stop "$name" 2>/dev/null || true
+docker rm "$name" 2>/dev/null || true
+if ! docker run -d --name "$name" --restart unless-stopped --env-file "$state/secrets" \
+    -v "$state:/data" -p 127.0.0.1:8080:8080 "$image" >/dev/null; then
+    [ -n "$old_image" ] && docker run -d --name "$name" --restart unless-stopped --env-file "$state/secrets" \
+        -v "$state:/data" -p 127.0.0.1:8080:8080 "$old_image" >/dev/null || true
+    exit 1
+fi
+sleep 2
+if ! curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
+    docker logs "$name" >&2 || true
+    docker stop "$name" >/dev/null 2>&1 || true
+    docker rm "$name" >/dev/null 2>&1 || true
+    [ -n "$old_image" ] && docker run -d --name "$name" --restart unless-stopped --env-file "$state/secrets" \
+        -v "$state:/data" -p 127.0.0.1:8080:8080 "$old_image" >/dev/null || true
+    exit 1
+fi
+printf '%s image=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$image" >>"$state/deployments.log"
