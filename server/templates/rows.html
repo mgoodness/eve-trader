@@ -1,0 +1,9 @@
+{{define "rows"}}{{if not .}}<tr id="empty-row"><td colspan="7">No opportunities currently clear the v1 thresholds (5% min margin, 10 units/day min volume).</td></tr>{{else}}{{range .}}<tr data-type-id="{{.TypeID}}">
+  <td>{{.Name}}</td>
+  <td>{{fmtISK .Buy}}</td>
+  <td>{{fmtISK .Sell}}</td>
+  <td>{{fmtPct .MarginPct}}</td>
+  <td>{{fmtISK .ProfitPerUnit}}</td>
+  <td>{{fmtNum .VolumePerDay}}</td>
+  <td class="iskday">{{fmtISK .ISKPerDay}}</td>
+</tr>{{end}}{{end}}{{end}}

@@ -1,32 +1,21 @@
 package server_test
 
 import (
-	"database/sql"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mgoodness/eve-trader/db"
 	"github.com/mgoodness/eve-trader/esi"
+	"github.com/mgoodness/eve-trader/internal/dbtest"
 	"github.com/mgoodness/eve-trader/server"
 )
-
-func openTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	sqlDB, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open() error = %v", err)
-	}
-	t.Cleanup(func() { sqlDB.Close() })
-	return sqlDB
-}
 
 // TestIndexRespondsOK demonstrates the test-harness convention the rest of
 // the build follows: a black-box HTTP test (httptest.Server) against a
 // real SQLite database and a fake ESIGateway.
 func TestIndexRespondsOK(t *testing.T) {
-	sqlDB := openTestDB(t)
+	sqlDB := dbtest.OpenDB(t)
 	fake := &esi.Fake{}
 
 	srv := httptest.NewServer(server.New(fake, sqlDB))
