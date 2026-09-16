@@ -143,6 +143,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.resetAuthentication()
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

@@ -15,6 +15,8 @@
   th[hx-get] { cursor: pointer; }
   th[hx-get]:hover { color: #e2e8f0; }
   td.iskday { font-weight: 600; color: #34d399; }
+  .reauth { min-height: 60vh; display: grid; place-items: center; text-align: center; }
+  .reauth a { display: inline-block; margin-top: 1rem; padding: .75rem 1.25rem; border-radius: .35rem; background: #34d399; color: #06251b; font-weight: 700; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -23,6 +25,15 @@
   <p class="footnote">{{template "footnote"}}</p>
 </header>
 <main>
+  {{if .Reauth}}
+  <section class="reauth" aria-labelledby="reauth-title">
+    <div>
+      <h2 id="reauth-title">Re-authenticate with EVE</h2>
+      <p>Your EVE session has expired or was revoked.</p>
+      <a href="/auth/login">Re-authenticate with EVE</a>
+    </div>
+  </section>
+  {{else}}
   <table>
     <thead>
       <tr>
@@ -39,6 +50,7 @@
       {{template "rows" .Opportunities}}
     </tbody>
   </table>
+  {{end}}
 </main>
 </body>
 </html>
