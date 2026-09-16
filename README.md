@@ -40,3 +40,9 @@ Run tests:
 ```sh
 go test ./...
 ```
+
+## Infrastructure
+
+The hosting environment (GCP VM, disk, static IP, firewall) is Terraform
+infrastructure-as-code. See [`infra/README.md`](infra/README.md) to
+(re)create or tear it down.
