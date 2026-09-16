@@ -14,4 +14,4 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 ### Workflow
 
-Every issue's work happens on a dedicated branch off the default branch, and is delivered as a pull request: create the branch before writing code, commit to it, push it, and open a PR against the default branch when the work is done.
+Every issue's work happens on a dedicated branch off the default branch, and is delivered as a pull request: create the branch before writing code, commit to it, push it, and open a PR against the default branch when the work is done. After the PR merges, delete the local and remote feature branch and return to the default branch.
