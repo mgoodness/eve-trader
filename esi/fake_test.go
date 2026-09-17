@@ -54,6 +54,31 @@ func TestFakeFetchHistoryReturnsSeededPointsByTypeID(t *testing.T) {
 	}
 }
 
+func TestFakeFetchTypeNamesReturnsSeededNamesByID(t *testing.T) {
+	fake := &esi.Fake{TypeNames: map[int]string{34: "Tritanium", 35: "Pyerite"}}
+
+	got, err := fake.FetchTypeNames(t.Context(), []int{34, 35, 36})
+	if err != nil {
+		t.Fatalf("FetchTypeNames() error = %v", err)
+	}
+	if len(got) != 2 || got[34] != "Tritanium" || got[35] != "Pyerite" {
+		t.Fatalf("FetchTypeNames() = %+v, want the two seeded names", got)
+	}
+	if _, ok := got[36]; ok {
+		t.Fatalf("FetchTypeNames() resolved unseeded id 36")
+	}
+}
+
+func TestFakeFetchTypeNamesReturnsSeededError(t *testing.T) {
+	wantErr := errors.New("esi down")
+	fake := &esi.Fake{FetchTypeNamesErr: wantErr}
+
+	_, err := fake.FetchTypeNames(t.Context(), []int{34})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("FetchTypeNames() error = %v, want %v", err, wantErr)
+	}
+}
+
 func TestFakeFetchCharacterSkillsReturnsSeededSkills(t *testing.T) {
 	want := esi.Skills{BrokerRelationsLevel: 4, AccountingLevel: 5}
 	fake := &esi.Fake{Skills: want}

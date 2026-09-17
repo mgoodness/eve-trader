@@ -22,6 +22,9 @@ func (g *scriptedGateway) FetchRensOrders(_ context.Context) ([]esi.Order, error
 	g.calls++
 	return orders, nil
 }
+func (*scriptedGateway) FetchTypeNames(context.Context, []int) (map[int]string, error) {
+	return nil, nil
+}
 func (*scriptedGateway) FetchHistory(context.Context, int) ([]esi.HistoryPoint, error) {
 	return nil, nil
 }
@@ -39,8 +42,8 @@ func TestPollReplacesAndPrunesSnapshot(t *testing.T) {
 	database := dbtest.OpenDB(t)
 	issued := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	gateway := &scriptedGateway{snapshots: [][]esi.Order{
-		{{OrderID: 1, TypeID: 34, Name: "Tritanium", IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 35, Price: 8, Issued: issued}},
-		{{OrderID: 1, TypeID: 34, Name: "Tritanium", IsBuyOrder: true, Price: 6, Issued: issued}, {OrderID: 3, TypeID: 36, Price: 9, Issued: issued}},
+		{{OrderID: 1, TypeID: 34, IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 35, Price: 8, Issued: issued}},
+		{{OrderID: 1, TypeID: 34, IsBuyOrder: true, Price: 6, Issued: issued}, {OrderID: 3, TypeID: 36, Price: 9, Issued: issued}},
 	}}
 	p := poller.New(gateway, database, time.Hour)
 	if err := p.Poll(t.Context()); err != nil {

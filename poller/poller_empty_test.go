@@ -12,7 +12,7 @@ import (
 
 func TestPollEmptySnapshotRemovesAllOrders(t *testing.T) {
 	database := dbtest.OpenDB(t)
-	gateway := &failingOrdersGateway{orders: []esi.Order{{OrderID: 1, TypeID: 34, Name: "Tritanium", Issued: time.Now()}}}
+	gateway := &failingOrdersGateway{orders: []esi.Order{{OrderID: 1, TypeID: 34, Issued: time.Now()}}}
 	p := poller.New(gateway, database, time.Hour)
 	if err := p.Poll(t.Context()); err != nil {
 		t.Fatal(err)

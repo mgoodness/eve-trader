@@ -19,6 +19,9 @@ type failingOrdersGateway struct {
 func (g *failingOrdersGateway) FetchRensOrders(context.Context) ([]esi.Order, error) {
 	return g.orders, g.err
 }
+func (*failingOrdersGateway) FetchTypeNames(context.Context, []int) (map[int]string, error) {
+	return nil, nil
+}
 func (*failingOrdersGateway) FetchHistory(context.Context, int) ([]esi.HistoryPoint, error) {
 	return nil, nil
 }
@@ -34,7 +37,7 @@ func (*failingOrdersGateway) RefreshToken(context.Context, string) (esi.Token, e
 
 func TestPollFailureLeavesPreviousSnapshot(t *testing.T) {
 	database := dbtest.OpenDB(t)
-	gateway := &failingOrdersGateway{orders: []esi.Order{{OrderID: 1, TypeID: 34, Name: "Tritanium", Issued: time.Now()}}}
+	gateway := &failingOrdersGateway{orders: []esi.Order{{OrderID: 1, TypeID: 34, Issued: time.Now()}}}
 	p := poller.New(gateway, database, time.Hour)
 	if err := p.Poll(t.Context()); err != nil {
 		t.Fatal(err)

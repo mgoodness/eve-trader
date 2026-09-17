@@ -18,6 +18,9 @@ type historyGateway struct {
 }
 
 func (g *historyGateway) FetchRensOrders(context.Context) ([]esi.Order, error) { return g.orders, nil }
+func (*historyGateway) FetchTypeNames(context.Context, []int) (map[int]string, error) {
+	return nil, nil
+}
 func (g *historyGateway) FetchHistory(_ context.Context, typeID int) ([]esi.HistoryPoint, error) {
 	g.calls = append(g.calls, typeID)
 	return g.history[typeID], nil
@@ -36,7 +39,7 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	database := dbtest.OpenDB(t)
 	issued := time.Now().UTC()
 	gateway := &historyGateway{
-		orders: []esi.Order{{OrderID: 1, TypeID: 34, Name: "Tritanium", IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 34, Name: "Tritanium", Price: 8, Issued: issued}},
+		orders: []esi.Order{{OrderID: 1, TypeID: 34, IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 34, Price: 8, Issued: issued}},
 		history: map[int][]esi.HistoryPoint{34: {
 			{Date: time.Now().UTC(), Volume: 10, OrderCount: 1},
 			{Date: time.Now().UTC().AddDate(0, 0, -1), Volume: 20, OrderCount: 2},
@@ -81,7 +84,7 @@ func TestHistoryPollKeepsExactlyFourteenCalendarDays(t *testing.T) {
 	database := dbtest.OpenDB(t)
 	issued := time.Now().UTC()
 	gateway := &historyGateway{
-		orders: []esi.Order{{OrderID: 1, TypeID: 34, Name: "Tritanium", Issued: issued}},
+		orders: []esi.Order{{OrderID: 1, TypeID: 34, Issued: issued}},
 		history: map[int][]esi.HistoryPoint{34: {
 			{Date: time.Now().UTC(), Volume: 1},
 			{Date: time.Now().UTC().AddDate(0, 0, -13), Volume: 2},
