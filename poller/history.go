@@ -35,7 +35,9 @@ func NewHistory(gateway esi.ESIGateway, db *sql.DB) *HistoryPoller {
 
 // Poll fetches history for each distinct type on the current order book and
 // atomically applies it. The current UTC date is retained plus the preceding
-// 13 calendar dates.
+// 13 calendar dates. A type whose fetch fails is skipped: its previous window
+// is left intact and the remaining types are still refreshed, so one bad type
+// (e.g. a non-marketable item ESI 404s on) cannot discard the whole batch.
 func (p *HistoryPoller) Poll(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -62,12 +64,27 @@ func (p *HistoryPoller) Poll(ctx context.Context) error {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	cutoff := today.AddDate(0, 0, -(HistoryRetention - 1))
 	history := make(map[int][]esi.HistoryPoint, len(typeIDs))
+	var failed []int
 	for _, typeID := range typeIDs {
 		points, err := p.gateway.FetchHistory(ctx, typeID)
 		if err != nil {
-			return fmt.Errorf("fetching history for type %d: %w", typeID, err)
+			// One type's failure (typically a non-marketable item ESI 404s on)
+			// must not discard the whole refresh. Keep this type's previous
+			// window and carry on with the rest.
+			failed = append(failed, typeID)
+			continue
 		}
 		history[typeID] = points
+	}
+	if len(failed) > 0 {
+		slog.Warn("skipping market-history types that failed to refresh",
+			"failed", len(failed), "of", len(typeIDs))
+	}
+	if len(history) == 0 {
+		if len(failed) > 0 {
+			return fmt.Errorf("refreshing market history: all %d fetches failed", len(failed))
+		}
+		return nil
 	}
 
 	tx, err := p.db.BeginTx(ctx, nil)
@@ -103,9 +120,36 @@ func (p *HistoryPoller) Poll(ctx context.Context) error {
 	return nil
 }
 
+// historyStartupRetry is how long Run waits between checks for a populated
+// order book before its first refresh.
+const historyStartupRetry = 10 * time.Second
+
+// waitForOrderBook blocks until market_order has at least one row or ctx is
+// done, re-checking every retry. It returns true once the book is populated
+// and false if ctx was cancelled first.
+func waitForOrderBook(ctx context.Context, db *sql.DB, retry time.Duration) bool {
+	for {
+		var n int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM market_order`).Scan(&n); err == nil && n > 0 {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(retry):
+		}
+	}
+}
+
 // Run performs an immediate refresh and then refreshes daily. It is intended
 // to be started as a goroutine alongside the order-book poller.
 func (p *HistoryPoller) Run(ctx context.Context) {
+	// The type set is derived from market_order, which the order poller fills
+	// on its own schedule. Wait for it so a first boot doesn't no-op here and
+	// then sit idle until the next daily reset.
+	if !waitForOrderBook(ctx, p.db, historyStartupRetry) {
+		return
+	}
 	if err := p.Poll(ctx); err != nil && ctx.Err() == nil {
 		slog.Error("polling market history", "err", err)
 	}
