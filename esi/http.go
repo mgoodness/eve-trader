@@ -16,6 +16,10 @@ import (
 const (
 	regionHeimatar = 10000030
 	rensStation    = 60004588
+
+	// errorLimitedStatus is ESI's 420 "error limited" response, distinct from
+	// the standard 429. Both mean the same thing to callers.
+	errorLimitedStatus = 420
 )
 
 // HTTPGateway reads public market data from ESI and implements the EVE SSO
@@ -120,13 +124,16 @@ func (g *HTTPGateway) get(ctx context.Context, endpoint string, target any) (*ht
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ESI %s: %s", endpoint, resp.Status)
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+			return nil, err
+		}
+		return resp, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
-		return nil, err
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == errorLimitedStatus {
+		return nil, newRateLimited(resp)
 	}
-	return resp, nil
+	return nil, &HTTPError{StatusCode: resp.StatusCode, Status: resp.Status}
 }
 
 // FetchHistory returns Heimatar's daily market history for typeID.

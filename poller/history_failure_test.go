@@ -2,7 +2,7 @@ package poller_test
 
 import (
 	"context"
-	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -48,7 +48,7 @@ func TestHistoryPollFailureLeavesPreviousWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gateway.err = errors.New("ESI unavailable")
+	gateway.err = &esi.HTTPError{StatusCode: http.StatusNotFound, Status: "404 Not Found"}
 	if err := history.Poll(t.Context()); err == nil {
 		t.Fatal("Poll() error = nil, want fetch failure")
 	}

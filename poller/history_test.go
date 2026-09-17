@@ -2,7 +2,8 @@ package poller_test
 
 import (
 	"context"
-	"errors"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,9 @@ type historyGateway struct {
 	orders  []esi.Order
 	history map[int][]esi.HistoryPoint
 	fail    map[int]error
-	calls   []int
+
+	mu    sync.Mutex
+	calls []int
 }
 
 func (g *historyGateway) FetchRensOrders(context.Context) ([]esi.Order, error) { return g.orders, nil }
@@ -24,7 +27,9 @@ func (*historyGateway) FetchTypeNames(context.Context, []int) (map[int]string, e
 	return nil, nil
 }
 func (g *historyGateway) FetchHistory(_ context.Context, typeID int) ([]esi.HistoryPoint, error) {
+	g.mu.Lock()
 	g.calls = append(g.calls, typeID)
+	g.mu.Unlock()
 	if err := g.fail[typeID]; err != nil {
 		return nil, err
 	}
@@ -107,7 +112,7 @@ func TestHistoryPollSkipsFailedTypeAndRefreshesTheRest(t *testing.T) {
 	}
 
 	// One type now 404s (a non-marketable item); the other gets a new volume.
-	gateway.fail = map[int]error{35: errors.New("ESI 404")}
+	gateway.fail = map[int]error{35: &esi.HTTPError{StatusCode: http.StatusNotFound, Status: "404 Not Found"}}
 	gateway.history = map[int][]esi.HistoryPoint{34: {{Date: time.Now().UTC(), Volume: 99}}}
 	if err := history.Poll(t.Context()); err != nil {
 		t.Fatalf("Poll() error = %v, want a partial refresh to succeed", err)

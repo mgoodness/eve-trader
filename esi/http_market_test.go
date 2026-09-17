@@ -3,10 +3,12 @@ package esi_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/mgoodness/eve-trader/esi"
 )
@@ -103,6 +105,44 @@ func TestHTTPGatewayFetchTypeNamesBatchesRequests(t *testing.T) {
 		if got[id] != name {
 			t.Fatalf("got[%d] = %q, want %q", id, got[id], name)
 		}
+	}
+}
+
+func TestHTTPGatewayFetchHistorySurfacesRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "42")
+		w.Header().Set("X-Esi-Error-Limit-Remain", "0")
+		w.Header().Set("X-Esi-Error-Limit-Reset", "7")
+		w.WriteHeader(420)
+	}))
+	defer server.Close()
+
+	_, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchHistory(context.Background(), 34)
+	var rateLimited *esi.RateLimited
+	if !errors.As(err, &rateLimited) {
+		t.Fatalf("FetchHistory() error = %v, want *esi.RateLimited", err)
+	}
+	if rateLimited.RetryAfter != 42*time.Second {
+		t.Fatalf("RetryAfter = %v, want 42s", rateLimited.RetryAfter)
+	}
+	if rateLimited.ErrorLimitRemain != 0 || rateLimited.ErrorLimitReset != 7*time.Second {
+		t.Fatalf("error-limit fields = remain %d reset %v, want 0 and 7s", rateLimited.ErrorLimitRemain, rateLimited.ErrorLimitReset)
+	}
+}
+
+func TestHTTPGatewayFetchHistorySurfacesHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	_, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchHistory(context.Background(), 34)
+	var httpErr *esi.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("FetchHistory() error = %v, want *esi.HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("StatusCode = %d, want 404", httpErr.StatusCode)
 	}
 }
 
