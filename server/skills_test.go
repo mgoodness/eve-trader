@@ -11,7 +11,6 @@ import (
 
 	"github.com/mgoodness/eve-trader/esi"
 	"github.com/mgoodness/eve-trader/internal/dbtest"
-	"github.com/mgoodness/eve-trader/internal/tokencrypt"
 	"github.com/mgoodness/eve-trader/server"
 )
 
@@ -21,13 +20,7 @@ func TestSkillPollerUpdatesSkillsAndNextRender(t *testing.T) {
 		RefreshTokenToken: esi.Token{AccessToken: "access", CharacterID: 1},
 		Skills:            esi.Skills{BrokerRelationsLevel: 0, AccountingLevel: 0},
 	}
-	ciphertext, err := tokencrypt.Encrypt(testAuthConfig().TokenKey, "refresh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sqlDB.Exec(`INSERT INTO esi_token (character_id, owner_hash, encrypted_refresh_token, updated_at) VALUES (1, 'owner', ?, 'now')`, ciphertext); err != nil {
-		t.Fatal(err)
-	}
+	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh")
 	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
 	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
 	dbtest.SeedOrder(t, sqlDB, 2, 34, false, 120)
@@ -82,13 +75,7 @@ func TestSkillPollerWithoutStoredTokenIsNoOp(t *testing.T) {
 
 func TestSkillPollerRefreshFailureRequiresReauthentication(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
-	ciphertext, err := tokencrypt.Encrypt(testAuthConfig().TokenKey, "refresh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sqlDB.Exec(`INSERT INTO esi_token (character_id, owner_hash, encrypted_refresh_token, updated_at) VALUES (1, 'owner', ?, 'now')`, ciphertext); err != nil {
-		t.Fatal(err)
-	}
+	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh")
 	fake := &esi.Fake{RefreshTokenErr: errors.New("refresh token revoked")}
 	srv := server.New(fake, sqlDB, testAuthConfig())
 	if err := srv.NewSkillPoller(server.CharacterSkillsInterval).Poll(t.Context()); err == nil {

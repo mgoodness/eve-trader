@@ -36,6 +36,10 @@ type Server struct {
 	mu             sync.RWMutex
 	authChecked    bool
 	reauthRequired bool
+	// reauthFirstBoot records that the latched re-authentication state is
+	// first boot (no token has ever been stored) rather than a failed
+	// refresh, so the banner can ask for the initial login accurately.
+	reauthFirstBoot bool
 }
 
 // New builds a Server that serves ESI/database-backed routes using
@@ -64,6 +68,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type pageData struct {
 	Opportunities []ranking.Opportunity
 	Reauth        bool
+	FirstBoot     bool
 }
 
 // handleIndex renders the opportunity table: one row per item that clears
@@ -72,8 +77,8 @@ type pageData struct {
 // are read directly from SQLite -- no ESIGateway call is made here (that
 // arrives with live polling in a later ticket).
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if s.authenticationFailed(r.Context()) {
-		s.renderIndex(w, pageData{Reauth: true})
+	if failed, firstBoot := s.authenticationFailed(r.Context()); failed {
+		s.renderIndex(w, pageData{Reauth: true, FirstBoot: firstBoot})
 		return
 	}
 
@@ -107,17 +112,26 @@ func (s *Server) renderIndex(w http.ResponseWriter, data pageData) {
 // authenticationFailed performs the one refresh attempt needed before live
 // ESI work. Both a failed refresh and the absence of a stored token count as
 // unauthenticated, and both are latched: requests must not create a silent
-// retry loop while the user is being asked to authenticate again.
-func (s *Server) authenticationFailed(ctx context.Context) bool {
+// retry loop while the user is being asked to authenticate again. firstBoot
+// distinguishes "no credential has ever been stored" from a refresh failure
+// so callers can word the prompt accurately.
+func (s *Server) authenticationFailed(ctx context.Context) (failed, firstBoot bool) {
 	s.mu.Lock()
 	checked := s.authChecked
-	failed := s.reauthRequired
+	failed = s.reauthRequired
+	firstBoot = s.reauthFirstBoot
 	s.mu.Unlock()
 	if checked {
-		return failed
+		return failed, firstBoot
 	}
 	_, _, err := s.refreshAuthentication(ctx, false)
-	return err != nil
+	if err == nil {
+		return false, false
+	}
+	s.mu.RLock()
+	firstBoot = s.reauthFirstBoot
+	s.mu.RUnlock()
+	return true, firstBoot
 }
 
 // refreshAuthentication mints a current access token from the stored refresh
@@ -138,6 +152,7 @@ func (s *Server) refreshAuthentication(ctx context.Context, force bool) (esi.Tok
 	var ciphertext []byte
 	if err := s.db.QueryRowContext(ctx, `SELECT character_id, encrypted_refresh_token FROM esi_token LIMIT 1`).Scan(&characterID, &ciphertext); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.reauthFirstBoot = true
 			return s.latchAuthFailure(errNoStoredToken)
 		}
 		return s.latchAuthFailure(fmt.Errorf("loading stored ESI token: %w", err))
@@ -172,7 +187,7 @@ func (s *Server) latchAuthFailure(err error) (esi.Token, bool, error) {
 
 func (s *Server) resetAuthentication() {
 	s.mu.Lock()
-	s.authChecked, s.reauthRequired = false, false
+	s.authChecked, s.reauthRequired, s.reauthFirstBoot = false, false, false
 	s.mu.Unlock()
 }
 

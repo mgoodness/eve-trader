@@ -11,7 +11,6 @@ import (
 
 	"github.com/mgoodness/eve-trader/esi"
 	"github.com/mgoodness/eve-trader/internal/dbtest"
-	"github.com/mgoodness/eve-trader/internal/tokencrypt"
 	"github.com/mgoodness/eve-trader/server"
 )
 
@@ -38,6 +37,12 @@ func TestIndexShowsReauthenticationOnFirstBootWithoutToken(t *testing.T) {
 	if !strings.Contains(body, "Re-authenticate with EVE") {
 		t.Fatalf("GET / body missing re-authentication banner on first boot with no stored token:\n%s", body)
 	}
+	if !strings.Contains(body, "Log in with EVE") {
+		t.Errorf("GET / first-boot banner should prompt the initial login, not an expired session; body:\n%s", body)
+	}
+	if strings.Contains(body, "session has expired or was revoked") {
+		t.Errorf("GET / first-boot banner wrongly claims an expired/revoked session; body:\n%s", body)
+	}
 	if strings.Contains(body, "id=\"rows\"") {
 		t.Errorf("GET / rendered opportunity table with no stored token")
 	}
@@ -52,13 +57,7 @@ func TestIndexShowsReauthenticationOnFirstBootWithoutToken(t *testing.T) {
 
 func TestIndexShowsReauthenticationAfterRefreshFailure(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
-	ciphertext, err := tokencrypt.Encrypt(testAuthConfig().TokenKey, "revoked-refresh-token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sqlDB.Exec(`INSERT INTO esi_token (character_id, owner_hash, encrypted_refresh_token, updated_at) VALUES (?, ?, ?, ?)`, 1, "owner", ciphertext, "now"); err != nil {
-		t.Fatal(err)
-	}
+	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "revoked-refresh-token")
 
 	gateway := &countingGateway{Fake: &esi.Fake{}}
 	srv := httptest.NewServer(server.New(gateway, sqlDB, testAuthConfig()))
@@ -73,6 +72,9 @@ func TestIndexShowsReauthenticationAfterRefreshFailure(t *testing.T) {
 	}
 	if strings.Contains(body, "id=\"rows\"") {
 		t.Errorf("GET / rendered opportunity table while re-authentication is required")
+	}
+	if !strings.Contains(body, "session has expired or was revoked") {
+		t.Errorf("GET / refresh-failure banner missing expired/revoked explanation; body:\n%s", body)
 	}
 
 	_, _ = getBody(t, srv.URL+"/")
