@@ -2,6 +2,7 @@ package poller_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 type historyGateway struct {
 	orders  []esi.Order
 	history map[int][]esi.HistoryPoint
+	fail    map[int]error
 	calls   []int
 }
 
@@ -23,6 +25,9 @@ func (*historyGateway) FetchTypeNames(context.Context, []int) (map[int]string, e
 }
 func (g *historyGateway) FetchHistory(_ context.Context, typeID int) ([]esi.HistoryPoint, error) {
 	g.calls = append(g.calls, typeID)
+	if err := g.fail[typeID]; err != nil {
+		return nil, err
+	}
 	return g.history[typeID], nil
 }
 func (*historyGateway) FetchCharacterSkills(context.Context, int, string) (esi.Skills, error) {
@@ -77,6 +82,49 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	}
 	if len(gateway.calls) != 1 || gateway.calls[0] != 34 {
 		t.Fatalf("FetchHistory calls = %v, want [34]", gateway.calls)
+	}
+}
+
+func TestHistoryPollSkipsFailedTypeAndRefreshesTheRest(t *testing.T) {
+	database := dbtest.OpenDB(t)
+	issued := time.Now().UTC()
+	gateway := &historyGateway{
+		orders: []esi.Order{
+			{OrderID: 1, TypeID: 34, Issued: issued},
+			{OrderID: 2, TypeID: 35, Issued: issued},
+		},
+		history: map[int][]esi.HistoryPoint{
+			34: {{Date: time.Now().UTC(), Volume: 10}},
+			35: {{Date: time.Now().UTC(), Volume: 20}},
+		},
+	}
+	if err := poller.New(gateway, database, time.Hour).Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	history := poller.NewHistory(gateway, database)
+	if err := history.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// One type now 404s (a non-marketable item); the other gets a new volume.
+	gateway.fail = map[int]error{35: errors.New("ESI 404")}
+	gateway.history = map[int][]esi.HistoryPoint{34: {{Date: time.Now().UTC(), Volume: 99}}}
+	if err := history.Poll(t.Context()); err != nil {
+		t.Fatalf("Poll() error = %v, want a partial refresh to succeed", err)
+	}
+
+	var v34, v35 float64
+	if err := database.QueryRow(`SELECT AVG(volume) FROM market_history WHERE type_id = 34`).Scan(&v34); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT AVG(volume) FROM market_history WHERE type_id = 35`).Scan(&v35); err != nil {
+		t.Fatal(err)
+	}
+	if v34 != 99 {
+		t.Fatalf("type 34 volume = %v, want the successful type refreshed to 99", v34)
+	}
+	if v35 != 20 {
+		t.Fatalf("type 35 volume = %v, want the failed type's previous window preserved", v35)
 	}
 }
 
