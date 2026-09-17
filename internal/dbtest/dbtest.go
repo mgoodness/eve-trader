@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mgoodness/eve-trader/db"
+	"github.com/mgoodness/eve-trader/internal/tokencrypt"
 )
 
 // OpenDB opens a fresh in-memory SQLite database with the v1 schema
@@ -71,5 +72,24 @@ func SeedSkills(t *testing.T, sqlDB *sql.DB, characterID, brokerRelations, accou
 		characterID, brokerRelations, accounting,
 	); err != nil {
 		t.Fatalf("seeding character_skill: %v", err)
+	}
+}
+
+// SeedToken inserts the single esi_token row, AES-GCM-encrypting
+// refreshToken with tokenKey exactly as the auth callback does. Tests that
+// exercise authenticated routes (the opportunity table) need this: without a
+// stored token the server serves the re-authentication banner instead.
+func SeedToken(t *testing.T, sqlDB *sql.DB, characterID int, tokenKey, refreshToken string) {
+	t.Helper()
+	ciphertext, err := tokencrypt.Encrypt(tokenKey, refreshToken)
+	if err != nil {
+		t.Fatalf("encrypting refresh token: %v", err)
+	}
+	if _, err := sqlDB.Exec(
+		`INSERT INTO esi_token (character_id, owner_hash, encrypted_refresh_token, updated_at)
+		 VALUES (?, 'owner', ?, '2024-01-01T00:00:00Z')`,
+		characterID, ciphertext,
+	); err != nil {
+		t.Fatalf("seeding esi_token: %v", err)
 	}
 }

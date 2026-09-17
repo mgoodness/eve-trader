@@ -19,6 +19,13 @@ import (
 	"github.com/mgoodness/eve-trader/ranking"
 )
 
+// errNoStoredToken reports that no esi_token row exists at all -- the
+// first-boot state before the one-time EVE SSO login. It is distinct from a
+// refresh failure of a stored token: both leave the app unauthenticated and
+// latch the re-authentication banner, but only the former leaves the skill
+// poller with nothing to do.
+var errNoStoredToken = errors.New("no stored ESI token")
+
 // Server is the eve-trader HTTP handler.
 type Server struct {
 	gateway esi.ESIGateway
@@ -98,7 +105,8 @@ func (s *Server) renderIndex(w http.ResponseWriter, data pageData) {
 }
 
 // authenticationFailed performs the one refresh attempt needed before live
-// ESI work. A failed refresh is latched: requests must not create a silent
+// ESI work. Both a failed refresh and the absence of a stored token count as
+// unauthenticated, and both are latched: requests must not create a silent
 // retry loop while the user is being asked to authenticate again.
 func (s *Server) authenticationFailed(ctx context.Context) bool {
 	s.mu.Lock()
@@ -113,8 +121,9 @@ func (s *Server) authenticationFailed(ctx context.Context) bool {
 }
 
 // refreshAuthentication mints a current access token from the stored refresh
-// token. All authenticated callers use this path, so refresh failures latch
-// the same re-authentication state rather than implementing separate handling.
+// token. All authenticated callers use this path, so a refresh failure -- and
+// the absence of any stored token -- latches the same re-authentication state
+// rather than implementing separate handling.
 func (s *Server) refreshAuthentication(ctx context.Context, force bool) (esi.Token, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -128,9 +137,8 @@ func (s *Server) refreshAuthentication(ctx context.Context, force bool) (esi.Tok
 	var characterID int
 	var ciphertext []byte
 	if err := s.db.QueryRowContext(ctx, `SELECT character_id, encrypted_refresh_token FROM esi_token LIMIT 1`).Scan(&characterID, &ciphertext); err != nil {
-		if err == sql.ErrNoRows {
-			s.authChecked = true
-			return esi.Token{}, false, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.latchAuthFailure(errNoStoredToken)
 		}
 		return s.latchAuthFailure(fmt.Errorf("loading stored ESI token: %w", err))
 	}

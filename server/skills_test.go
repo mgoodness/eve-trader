@@ -59,6 +59,27 @@ func TestSkillPollerUpdatesSkillsAndNextRender(t *testing.T) {
 	}
 }
 
+func TestSkillPollerWithoutStoredTokenIsNoOp(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	gateway := &countingGateway{Fake: &esi.Fake{}}
+	srv := server.New(gateway, sqlDB, testAuthConfig())
+
+	if err := srv.NewSkillPoller(server.CharacterSkillsInterval).Poll(t.Context()); err != nil {
+		t.Fatalf("Poll() error = %v, want nil with no stored token", err)
+	}
+
+	// Polling an absent token is a no-op, but the app is still
+	// unauthenticated and must ask for a login.
+	response := httptest.NewRecorder()
+	srv.ServeHTTP(response, httptest.NewRequest("GET", "/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Re-authenticate with EVE") {
+		t.Fatalf("GET / with no stored token = %d %q, want re-authentication banner", response.Code, response.Body.String())
+	}
+	if got := gateway.calls.Load(); got != 0 {
+		t.Errorf("RefreshToken calls = %d, want 0 with no stored token", got)
+	}
+}
+
 func TestSkillPollerRefreshFailureRequiresReauthentication(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	ciphertext, err := tokencrypt.Encrypt(testAuthConfig().TokenKey, "refresh")
