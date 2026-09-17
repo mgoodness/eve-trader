@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: Immutable candidate tag to deploy (candidate-<40-hex-sha>)
-        required: true
+        description: Immutable candidate tag to deploy (candidate-<40-hex-sha>); leave blank to use the current main HEAD
+        required: false
         type: string
       rollback:
         description: Previously deployed immutable tag to restore (optional)
@@ -29,9 +29,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Resolve candidate tag
+        id: resolve
+        if: inputs.image == ''
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          [ "$REF" = 'refs/heads/main' ] || {
+            printf 'leave image blank only when running from main, got %s\n' "$REF" >&2
+            exit 1
+          }
+          tag="candidate-$SHA"
+          repo=${REPO,,}
+          token=$(curl -fsSL "https://ghcr.io/token?scope=repository:$repo:pull&service=ghcr.io" | jq -r .token)
+          curl -fsSL -H "Authorization: Bearer $token" "https://ghcr.io/v2/$repo/tags/list" \
+            | jq -e --arg t "$tag" 'any(.tags[]?; . == $t)' >/dev/null || {
+              printf 'candidate image %s is not published yet (CI may still be running)\n' "$tag" >&2
+              exit 1
+            }
+          printf 'image=%s\n' "$tag" >> "$GITHUB_OUTPUT"
       - name: Validate image tag
         env:
-          IMAGE: ${{ inputs.image }}
+          IMAGE: ${{ inputs.image || steps.resolve.outputs.image }}
           ROLLBACK: ${{ inputs.rollback }}
         run: |
           set -euo pipefail
@@ -55,7 +77,7 @@ jobs:
         env:
           VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           VM_USER: ${{ vars.PRODUCTION_VM_USER }}
-          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.image }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.image || steps.resolve.outputs.image }}
           ROLLBACK: ${{ inputs.rollback }}
         run: |
           set -euo pipefail
