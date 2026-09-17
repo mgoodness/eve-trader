@@ -3,8 +3,10 @@ package poller
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -18,7 +20,29 @@ const (
 	// reset time. Refreshes are scheduled just after this point.
 	HistoryResetHour   = 11
 	HistoryResetMinute = 5
+
+	// historyConcurrency is the fixed number of workers fetching history at
+	// once. See ADR 0002 for why it is fixed rather than adaptive.
+	historyConcurrency = 12
+	// historyCommitBatch is how many successful types are accumulated before a
+	// transaction commits them, so an interrupted refresh keeps the progress
+	// already written.
+	historyCommitBatch = 500
+	// historyRequestTimeout bounds a single ESI history request.
+	historyRequestTimeout = 15 * time.Second
+	// historyRefreshTimeout bounds a whole refresh (30 minutes). On expiry the
+	// pool stops dispatching, in-flight requests finish, and the remainder is
+	// committed.
+	historyRefreshTimeout = 30 * time.Minute
+	// historyMaxAttempts is the total number of tries per type, retries included.
+	historyMaxAttempts = 3
+	// historyProgressEvery logs progress at debug level every N refreshed types.
+	historyProgressEvery = 1000
 )
+
+// historyBackoff is the delay before the next attempt (indexed by attempt-1)
+// when ESI gave no Retry-After. Jitter is applied on top.
+var historyBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
 // HistoryPoller refreshes the rolling market history window for every type
 // currently present in market_order. A failed refresh leaves the prior window
@@ -27,17 +51,30 @@ type HistoryPoller struct {
 	gateway esi.ESIGateway
 	db      *sql.DB
 	mu      sync.Mutex
+
+	// requestTimeout, refreshTimeout and backoff default to the constants
+	// above; tests override them to run quickly.
+	requestTimeout time.Duration
+	refreshTimeout time.Duration
+	backoff        []time.Duration
 }
 
 func NewHistory(gateway esi.ESIGateway, db *sql.DB) *HistoryPoller {
-	return &HistoryPoller{gateway: gateway, db: db}
+	return &HistoryPoller{
+		gateway:        gateway,
+		db:             db,
+		requestTimeout: historyRequestTimeout,
+		refreshTimeout: historyRefreshTimeout,
+		backoff:        historyBackoff,
+	}
 }
 
 // Poll fetches history for each distinct type on the current order book and
-// atomically applies it. The current UTC date is retained plus the preceding
-// 13 calendar dates. A type whose fetch fails is skipped: its previous window
-// is left intact and the remaining types are still refreshed, so one bad type
-// (e.g. a non-marketable item ESI 404s on) cannot discard the whole batch.
+// writes it in chunks. Workers fetch concurrently under a fixed pool, but a
+// type whose fetch fails is skipped: its previous window is left intact and
+// the remaining types are still refreshed, so one bad type (e.g. a
+// non-marketable item ESI 404s on) cannot discard the whole batch. Poll
+// returns an error only when it refreshed nothing.
 func (p *HistoryPoller) Poll(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -60,42 +97,203 @@ func (p *HistoryPoller) Poll(ctx context.Context) error {
 		return fmt.Errorf("reading market-history type IDs: %w", err)
 	}
 	rows.Close()
-
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	cutoff := today.AddDate(0, 0, -(HistoryRetention - 1))
-	history := make(map[int][]esi.HistoryPoint, len(typeIDs))
-	var failed []int
-	for _, typeID := range typeIDs {
-		points, err := p.gateway.FetchHistory(ctx, typeID)
-		if err != nil {
-			// One type's failure (typically a non-marketable item ESI 404s on)
-			// must not discard the whole refresh. Keep this type's previous
-			// window and carry on with the rest.
-			failed = append(failed, typeID)
-			continue
-		}
-		history[typeID] = points
-	}
-	if len(failed) > 0 {
-		slog.Warn("skipping market-history types that failed to refresh",
-			"failed", len(failed), "of", len(typeIDs))
-	}
-	if len(history) == 0 {
-		if len(failed) > 0 {
-			return fmt.Errorf("refreshing market history: all %d fetches failed", len(failed))
-		}
+	if len(typeIDs) == 0 {
 		return nil
 	}
 
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	cutoff := today.AddDate(0, 0, -(HistoryRetention - 1))
+	started := time.Now()
+	slog.Info("refreshing market history", "types", len(typeIDs), "concurrency", historyConcurrency)
+
+	// The ceiling bounds dispatch only: in-flight requests are allowed to
+	// finish (each carries its own per-request timeout) so the pool can commit
+	// the work it already did.
+	dispatchCtx, cancelDispatch := context.WithTimeout(ctx, p.refreshTimeout)
+	defer cancelDispatch()
+
+	gate := &rateLimitGate{}
+	jobs := make(chan int)
+	results := make(chan historyResult, historyConcurrency)
+
+	var wg sync.WaitGroup
+	for range historyConcurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.worker(ctx, gate, jobs, results)
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, typeID := range typeIDs {
+			select {
+			case jobs <- typeID:
+			case <-dispatchCtx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var (
+		refreshed int
+		failed    int
+		attempted int
+		pending   = make(map[int][]esi.HistoryPoint)
+		commitErr error
+	)
+	for result := range results {
+		attempted++
+		if result.err != nil {
+			failed++
+			continue
+		}
+		refreshed++
+		if commitErr != nil {
+			continue
+		}
+		pending[result.typeID] = result.points
+		if refreshed%historyProgressEvery == 0 {
+			slog.Debug("market-history refresh progress", "refreshed", refreshed, "of", len(typeIDs))
+		}
+		if len(pending) >= historyCommitBatch {
+			if err := p.writeHistory(ctx, pending, cutoff, today); err != nil {
+				commitErr = err
+				cancelDispatch()
+				continue
+			}
+			pending = make(map[int][]esi.HistoryPoint)
+		}
+	}
+	// Only commit the remainder on a clean run; a cancelled caller is shutting
+	// down and the chunks already written are what matters.
+	if commitErr == nil && ctx.Err() == nil && len(pending) > 0 {
+		commitErr = p.writeHistory(ctx, pending, cutoff, today)
+	}
+
+	timedOut := ctx.Err() == nil && errors.Is(dispatchCtx.Err(), context.DeadlineExceeded)
+	if failed > 0 {
+		slog.Warn("market-history types failed to refresh", "failed", failed, "of", len(typeIDs))
+	}
+	skipped := len(typeIDs) - attempted
+	slog.Info("market-history refresh complete",
+		"refreshed", refreshed, "skipped", skipped, "failed", failed,
+		"elapsed", time.Since(started).Round(time.Second), "timed_out", timedOut)
+
+	if commitErr != nil {
+		return fmt.Errorf("writing market history: %w", commitErr)
+	}
+	if refreshed == 0 {
+		return fmt.Errorf("refreshing market history: no types refreshed of %d", len(typeIDs))
+	}
+	return nil
+}
+
+// historyResult is one worker's outcome for a single type.
+type historyResult struct {
+	typeID int
+	points []esi.HistoryPoint
+	err    error
+}
+
+// worker pulls type IDs and fetches each one until the job channel is closed.
+func (p *HistoryPoller) worker(ctx context.Context, gate *rateLimitGate, jobs <-chan int, results chan<- historyResult) {
+	for typeID := range jobs {
+		points, err := p.fetchHistory(ctx, gate, typeID)
+		select {
+		case results <- historyResult{typeID: typeID, points: points, err: err}:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// fetchHistory fetches one type, retrying retryable failures up to
+// historyMaxAttempts. A rate-limited response pauses the whole pool until
+// Retry-After via gate; other retryable failures back off locally. A 404 (or
+// any other 4xx) is not retried.
+func (p *HistoryPoller) fetchHistory(ctx context.Context, gate *rateLimitGate, typeID int) ([]esi.HistoryPoint, error) {
+	var lastErr error
+	for attempt := 1; attempt <= historyMaxAttempts; attempt++ {
+		if err := gate.wait(ctx); err != nil {
+			return nil, err
+		}
+		reqCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
+		points, err := p.gateway.FetchHistory(reqCtx, typeID)
+		cancel()
+		if err == nil {
+			return points, nil
+		}
+		lastErr = err
+
+		var rateLimited *esi.RateLimited
+		if errors.As(err, &rateLimited) {
+			delay := rateLimited.RetryAfter
+			if delay <= 0 {
+				delay = p.backoffDelay(attempt)
+			}
+			gate.pause(delay)
+			continue
+		}
+		if !retryable(err) {
+			return nil, err
+		}
+		if attempt < historyMaxAttempts {
+			if err := sleep(ctx, p.jitter(p.backoffDelay(attempt))); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return nil, lastErr
+}
+
+// retryable reports whether an error is worth another attempt. ESI 5xx and
+// other HTTP errors (notably 404) are classified by status; anything else --
+// rate limiting and network errors -- retries.
+func retryable(err error) bool {
+	var httpErr *esi.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode >= 500
+	}
+	return true
+}
+
+func (p *HistoryPoller) backoffDelay(attempt int) time.Duration {
+	if len(p.backoff) == 0 {
+		return 0
+	}
+	i := attempt - 1
+	if i >= len(p.backoff) {
+		i = len(p.backoff) - 1
+	}
+	return p.backoff[i]
+}
+
+// jitter spreads a backoff delay over [d/2, d] to avoid a thundering herd.
+func (*HistoryPoller) jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	half := d / 2
+	return half + rand.N(half+1)
+}
+
+// writeHistory applies one chunk of refreshed windows in its own transaction.
+// Each type's retained slice is replaced (so a day ESI omitted is not kept
+// from an earlier refresh) and rows older than the window are pruned.
+func (p *HistoryPoller) writeHistory(ctx context.Context, history map[int][]esi.HistoryPoint, cutoff, today time.Time) error {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("starting history poll transaction: %w", err)
 	}
 	defer tx.Rollback()
+	cutoffText := cutoff.Format("2006-01-02")
 	for typeID, points := range history {
-		// Replace the retained slice for this type so a day omitted by ESI is
-		// not accidentally kept forever from an earlier refresh.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM market_history WHERE type_id = ? AND date >= ?`, typeID, cutoff.Format("2006-01-02")); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM market_history WHERE type_id = ? AND date >= ?`, typeID, cutoffText); err != nil {
 			return fmt.Errorf("resetting history for type %d: %w", typeID, err)
 		}
 		for _, point := range points {
@@ -111,13 +309,54 @@ func (p *HistoryPoller) Poll(ctx context.Context) error {
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM market_history WHERE date < ?`, cutoff.Format("2006-01-02")); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM market_history WHERE date < ?`, cutoffText); err != nil {
 		return fmt.Errorf("pruning market history: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing history poll: %w", err)
 	}
 	return nil
+}
+
+// rateLimitGate coordinates a pool-wide pause after ESI reports rate
+// limiting: the first worker to see a 420/429 pushes the resume time out, and
+// every worker waits for it before its next fetch.
+type rateLimitGate struct {
+	mu    sync.Mutex
+	until time.Time
+}
+
+func (g *rateLimitGate) pause(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	g.mu.Lock()
+	if end := time.Now().Add(d); end.After(g.until) {
+		g.until = end
+	}
+	g.mu.Unlock()
+}
+
+func (g *rateLimitGate) wait(ctx context.Context) error {
+	g.mu.Lock()
+	until := g.until
+	g.mu.Unlock()
+	return sleep(ctx, time.Until(until))
+}
+
+// sleep waits for d or ctx cancellation, whichever comes first.
+func sleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // historyStartupRetry is how long Run waits between checks for a populated

@@ -54,6 +54,20 @@ func TestFakeFetchHistoryReturnsSeededPointsByTypeID(t *testing.T) {
 	}
 }
 
+func TestFakeFetchHistoryCanProduceRateLimited(t *testing.T) {
+	want := &esi.RateLimited{RetryAfter: 3 * time.Second}
+	fake := &esi.Fake{FetchHistoryErr: want}
+
+	_, err := fake.FetchHistory(t.Context(), 34)
+	var rateLimited *esi.RateLimited
+	if !errors.As(err, &rateLimited) {
+		t.Fatalf("FetchHistory() error = %v, want *esi.RateLimited", err)
+	}
+	if rateLimited.RetryAfter != want.RetryAfter {
+		t.Fatalf("RetryAfter = %v, want %v", rateLimited.RetryAfter, want.RetryAfter)
+	}
+}
+
 func TestFakeFetchTypeNamesReturnsSeededNamesByID(t *testing.T) {
 	fake := &esi.Fake{TypeNames: map[int]string{34: "Tritanium", 35: "Pyerite"}}
 
