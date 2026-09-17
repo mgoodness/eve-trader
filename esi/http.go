@@ -1,6 +1,7 @@
 package esi
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -71,31 +72,42 @@ func (g *HTTPGateway) FetchRensOrders(ctx context.Context) ([]Order, error) {
 			break
 		}
 	}
-	names := make(map[int]string)
-	for i := range out {
-		name, ok := names[out[i].TypeID]
-		if !ok {
-			var err error
-			name, err = g.fetchTypeName(ctx, out[i].TypeID)
-			if err != nil {
-				return nil, err
-			}
-			names[out[i].TypeID] = name
-		}
-		out[i].Name = name
-	}
 	return out, nil
 }
 
-func (g *HTTPGateway) fetchTypeName(ctx context.Context, typeID int) (string, error) {
-	var typeData struct {
-		Name string `json:"name"`
+// typeNamesBatchLimit is ESI's cap on IDs per POST /universe/names/
+// request. Batching up to this many keeps name resolution to a handful of
+// requests instead of one per distinct type in the order book.
+const typeNamesBatchLimit = 1000
+
+// FetchTypeNames resolves display names for typeIDs with batched
+// POST /universe/names/ requests, at most typeNamesBatchLimit IDs each.
+// IDs absent from ESI's response are omitted from the result.
+func (g *HTTPGateway) FetchTypeNames(ctx context.Context, typeIDs []int) (map[int]string, error) {
+	names := make(map[int]string, len(typeIDs))
+	for start := 0; start < len(typeIDs); start += typeNamesBatchLimit {
+		end := min(start+typeNamesBatchLimit, len(typeIDs))
+		body, err := json.Marshal(typeIDs[start:end])
+		if err != nil {
+			return nil, fmt.Errorf("encoding type IDs: %w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.base()+"/universe/names/", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		var raw []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := g.doJSON(req, &raw); err != nil {
+			return nil, fmt.Errorf("fetching type names: %w", err)
+		}
+		for _, v := range raw {
+			names[v.ID] = v.Name
+		}
 	}
-	_, err := g.get(ctx, fmt.Sprintf("%s/universe/types/%d/", g.base(), typeID), &typeData)
-	if err != nil {
-		return "", fmt.Errorf("fetching type %d name: %w", typeID, err)
-	}
-	return typeData.Name, nil
+	return names, nil
 }
 
 func (g *HTTPGateway) get(ctx context.Context, endpoint string, target any) (*http.Response, error) {

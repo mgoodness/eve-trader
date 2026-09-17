@@ -41,6 +41,11 @@ func (p *Poller) Poll(ctx context.Context) error {
 		return fmt.Errorf("fetching Rens orders: %w", err)
 	}
 
+	names, err := p.resolveTypeNames(ctx, orders)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -49,16 +54,16 @@ func (p *Poller) Poll(ctx context.Context) error {
 	defer tx.Rollback()
 
 	for _, order := range orders {
-		name := order.Name
+		name := names[order.TypeID]
 		if name == "" {
-			// The gateway may not have names yet. Keep the cache usable until a
-			// type-name lookup is added, while still satisfying item_type's
-			// non-null display-name contract.
+			// The gateway could not name this type. Keep the cache usable while
+			// still satisfying item_type's non-null display-name contract; the
+			// "Type " prefix marks the row for retry on a later poll.
 			name = "Type " + strconv.Itoa(order.TypeID)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO item_type (type_id, name, updated_at) VALUES (?, ?, ?)
-			ON CONFLICT(type_id) DO UPDATE SET name = CASE WHEN item_type.name LIKE 'Type %' THEN excluded.name ELSE item_type.name END, updated_at = excluded.updated_at`,
+			ON CONFLICT(type_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`,
 			order.TypeID, name, now); err != nil {
 			return fmt.Errorf("upserting item type %d: %w", order.TypeID, err)
 		}
@@ -77,6 +82,66 @@ func (p *Poller) Poll(ctx context.Context) error {
 		return fmt.Errorf("committing order poll: %w", err)
 	}
 	return nil
+}
+
+// resolveTypeNames returns a display name for every distinct type_id in
+// orders. Names already cached in item_type are reused; only the remaining
+// type_ids are resolved, through one batched gateway call. A type the
+// gateway cannot name is left out of the map so the caller can fall back.
+func (p *Poller) resolveTypeNames(ctx context.Context, orders []esi.Order) (map[int]string, error) {
+	names, err := p.cachedTypeNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int]bool, len(orders))
+	var missing []int
+	for _, order := range orders {
+		if seen[order.TypeID] {
+			continue
+		}
+		seen[order.TypeID] = true
+		if _, ok := names[order.TypeID]; !ok {
+			missing = append(missing, order.TypeID)
+		}
+	}
+	if len(missing) == 0 {
+		return names, nil
+	}
+
+	resolved, err := p.gateway.FetchTypeNames(ctx, missing)
+	if err != nil {
+		return nil, fmt.Errorf("resolving type names: %w", err)
+	}
+	for id, name := range resolved {
+		names[id] = name
+	}
+	return names, nil
+}
+
+// cachedTypeNames loads the item_type rows the poller can trust -- those
+// with a real display name. Rows still holding the "Type <id>" fallback
+// are omitted so a later poll retries them.
+func (p *Poller) cachedTypeNames(ctx context.Context) (map[int]string, error) {
+	rows, err := p.db.QueryContext(ctx, `SELECT type_id, name FROM item_type WHERE name NOT LIKE 'Type %'`)
+	if err != nil {
+		return nil, fmt.Errorf("loading cached type names: %w", err)
+	}
+	defer rows.Close()
+
+	names := make(map[int]string)
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("scanning cached type name: %w", err)
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("loading cached type names: %w", err)
+	}
+	return names, nil
 }
 
 // Run performs an immediate poll and then polls on the configured cadence.

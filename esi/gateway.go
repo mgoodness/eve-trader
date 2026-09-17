@@ -11,12 +11,12 @@ import (
 
 // Order is a single order in Rens's order book, as returned by
 // GET /markets/{region_id}/orders/ and filtered to Rens's location_id.
+// It carries no display name: names are resolved separately, in batch,
+// via FetchTypeNames so the order fetch stays a single pass over the
+// region pages.
 type Order struct {
-	OrderID int64
-	TypeID  int
-	// Name is optional; gateways that do not provide it leave it empty and
-	// the poller uses a stable fallback until a type lookup is available.
-	Name         string
+	OrderID      int64
+	TypeID       int
 	IsBuyOrder   bool
 	Price        float64
 	VolumeRemain int
@@ -58,6 +58,11 @@ type Token struct {
 type ESIGateway interface {
 	// FetchRensOrders returns Rens's current order book.
 	FetchRensOrders(ctx context.Context) ([]Order, error)
+
+	// FetchTypeNames resolves display names for the given type_ids in
+	// batched universe-names requests. IDs the gateway cannot resolve are
+	// omitted from the returned map rather than reported as an error.
+	FetchTypeNames(ctx context.Context, typeIDs []int) (map[int]string, error)
 
 	// FetchHistory returns the Heimatar-region daily trading history for
 	// the given type_id.

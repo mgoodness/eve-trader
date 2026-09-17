@@ -12,6 +12,9 @@ type Fake struct {
 	Orders         []Order
 	FetchOrdersErr error
 
+	TypeNames         map[int]string
+	FetchTypeNamesErr error
+
 	History         map[int][]HistoryPoint
 	FetchHistoryErr error
 
@@ -31,6 +34,21 @@ func (f *Fake) FetchRensOrders(ctx context.Context) ([]Order, error) {
 		return nil, f.FetchOrdersErr
 	}
 	return f.Orders, nil
+}
+
+// FetchTypeNames returns the seeded TypeNames for the requested IDs, or
+// FetchTypeNamesErr if set. IDs missing from TypeNames are omitted.
+func (f *Fake) FetchTypeNames(ctx context.Context, typeIDs []int) (map[int]string, error) {
+	if f.FetchTypeNamesErr != nil {
+		return nil, f.FetchTypeNamesErr
+	}
+	names := make(map[int]string, len(typeIDs))
+	for _, id := range typeIDs {
+		if name, ok := f.TypeNames[id]; ok {
+			names[id] = name
+		}
+	}
+	return names, nil
 }
 
 // FetchHistory returns the seeded History for typeID, or FetchHistoryErr
