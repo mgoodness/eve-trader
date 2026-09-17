@@ -8,6 +8,7 @@ pinned to Terraform 1.16.2 ([`mise.toml`](../mise.toml)) using the
 The config provisions infrastructure only; application deployment (binary, TLS, service) is
 covered separately by [`docs/deployment.md`](../docs/deployment.md). The
 operator artifacts installed on the VM — [`Caddyfile`](Caddyfile),
+[`caddy-environment.conf`](caddy-environment.conf),
 [`eve-trader-backup`](eve-trader-backup), and
 [`eve-trader-backup.cron`](eve-trader-backup.cron) — live in this directory
 alongside the existing start/deploy/secrets scripts.
