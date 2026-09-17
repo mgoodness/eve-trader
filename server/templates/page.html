@@ -29,7 +29,7 @@
   <section class="reauth" aria-labelledby="reauth-title">
     <div>
       <h2 id="reauth-title">Re-authenticate with EVE</h2>
-      <p>Your EVE session has expired or was revoked.</p>
+      <p>{{if .FirstBoot}}Log in with EVE to load your character's trading skills and start ranking opportunities.{{else}}Your EVE session has expired or was revoked.{{end}}</p>
       <a href="/auth/login">Re-authenticate with EVE</a>
     </div>
   </section>

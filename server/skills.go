@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -25,9 +26,13 @@ func (s *Server) NewSkillPoller(interval time.Duration) *SkillPoller {
 }
 
 // Poll refreshes the stored token, fetches the current skills, and replaces
-// the character_skill row. No stored token means there is nothing to poll.
+// the character_skill row. No stored token means there is nothing to poll yet
+// (the first-boot state): that is a no-op, not a polling failure.
 func (p *SkillPoller) Poll(ctx context.Context) error {
 	token, ok, err := p.server.refreshAuthentication(ctx, true)
+	if errors.Is(err, errNoStoredToken) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

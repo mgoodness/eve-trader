@@ -19,6 +19,7 @@ import (
 func seedOpportunityFixtures(t *testing.T, sqlDB *sql.DB) {
 	t.Helper()
 	dbtest.SeedSkills(t, sqlDB, 1, 4, 3) // Broker Relations 4, Accounting 3
+	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
 
 	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
 	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
@@ -125,6 +126,7 @@ func TestIndexRendersRankedOpportunityTable(t *testing.T) {
 func TestIndexOmitsAllRowsBelowThresholdWithNoQualifyingItems(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	dbtest.SeedSkills(t, sqlDB, 1, 0, 0)
+	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
 	dbtest.SeedItem(t, sqlDB, 36, "Below Margin Ore")
 	dbtest.SeedOrder(t, sqlDB, 1, 36, true, 100)
 	dbtest.SeedOrder(t, sqlDB, 2, 36, false, 103)
