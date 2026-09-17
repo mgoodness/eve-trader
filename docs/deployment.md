@@ -78,13 +78,13 @@ The app writes structured JSON lines to stdout; Docker's default `json-file` dri
 
 ## GitHub setup
 
-1. Enable GitHub Container Registry for the repository. Successful pushes to `main` run CI and publish the immutable image `ghcr.io/<owner>/<repo>:candidate-<full-commit-sha>`. That tag is the deployment input.
+1. Enable GitHub Container Registry for the repository. Successful pushes to `main` run CI and publish the immutable image `ghcr.io/<owner>/<repo>:candidate-<full-commit-sha>`. That tag is the deployment target; the deploy workflow can resolve it for you (see [Deploy and rollback](#deploy-and-rollback)).
 2. Create a protected Actions environment named `production` with required reviewers. Add the deployment SSH private key and VM host as environment secrets `PRODUCTION_SSH_PRIVATE_KEY` and `PRODUCTION_VM_HOST`; add `PRODUCTION_VM_USER` and `PRODUCTION_URL` as environment variables.
 3. Do not put registry credentials, EVE secrets, or any other secret in the Docker image.
 
 ## Deploy and rollback
 
-Run **Deploy production** manually with an immutable `candidate-<sha>` tag. The protected environment pauses the job for reviewer approval; the `production` concurrency group serializes deployments. The SSH/VM steps are credentials for the deployment key; nothing is logged.
+Run **Deploy production** manually. Leave the `image` input blank to deploy the immutable `candidate-<sha>` built from the current `main` HEAD — the workflow resolves that tag from the `main` commit and verifies it exists in GHCR before proceeding, failing with a clear message if CI has not finished publishing it. Provide an explicit `candidate-<sha>` tag to deploy a specific candidate instead (required when running from any ref other than `main`). The protected environment pauses the job for reviewer approval; the `production` concurrency group serializes deployments. The SSH/VM steps are credentials for the deployment key; nothing is logged.
 
 The remote **deploy** script:
 
