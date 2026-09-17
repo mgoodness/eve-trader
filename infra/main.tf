@@ -23,6 +23,9 @@ resource "google_compute_instance" "app" {
   zone         = var.zone
   tags         = [var.name]
 
+  # Adds the 2 GB swap file on every boot (docs/spec/v1.md §8).
+  metadata_startup_script = file("${path.module}/startup.sh")
+
   boot_disk {
     initialize_params {
       image = "debian-cloud/debian-12"

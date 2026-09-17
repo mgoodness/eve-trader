@@ -30,6 +30,13 @@ settings from environment variables:
 | `EVE_TRADER_COOKIE_SECRET`  | Signs the short-lived PKCE cookie. Any string; never commit it.               |
 | `EVE_TRADER_TOKEN_KEY`      | Encrypts the persisted refresh token at rest. Any string; never commit it.    |
 
+Register both redirect URIs on the EVE developer application:
+production `https://<domain>/auth/callback` and local dev
+`http://localhost:<port>/auth/callback` (default port `8080`). The
+production value is set through `EVE_TRADER_CALLBACK_URL`; see
+[`docs/deployment.md`](docs/deployment.md#domain-tls-and-redirect-uris) for
+the full production setup.
+
 If `EVE_TRADER_COOKIE_SECRET`/`EVE_TRADER_TOKEN_KEY` are unset, the app
 generates ephemeral secrets for that process only -- fine for local
 development, but in-flight logins and previously stored tokens won't

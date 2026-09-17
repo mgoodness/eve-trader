@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,10 +23,18 @@ import (
 )
 
 func main() {
+	setupLogging(os.Stdout)
 	if err := run(); err != nil {
 		slog.Error("eve-trader exited with error", "err", err)
 		os.Exit(1)
 	}
+}
+
+// setupLogging installs the process-wide logger. Lines are JSON on w (stdout
+// in production) so Docker's default json-file log driver captures structured
+// records for `docker logs`, per docs/spec/v1.md §8.
+func setupLogging(w io.Writer) {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(w, nil)))
 }
 
 func run() error {
