@@ -25,21 +25,29 @@ swapon --show          # expect /swapfile
 Install the operator scripts, the Caddy config, and the daily backup cron job:
 
 ```sh
-sudo install -d -o 65534 -g 65534 /var/lib/eve-trader   # container uid, runtime state
+sudo install -d -o 65532 -g 65532 /var/lib/eve-trader   # distroless nonroot uid, runtime state
 sudo install -m 0755 eve-trader-start   /usr/local/sbin/eve-trader-start
 sudo install -m 0755 eve-trader-deploy  /usr/local/sbin/eve-trader-deploy
 sudo install -m 0755 eve-trader-secrets /usr/local/sbin/eve-trader-secrets
 sudo install -m 0755 eve-trader-backup  /usr/local/sbin/eve-trader-backup
 sudo install -m 0644 eve-trader-backup.cron /etc/cron.d/eve-trader-backup
 sudo install -m 0644 Caddyfile /etc/caddy/Caddyfile
+sudo install -D -m 0644 caddy-environment.conf /etc/systemd/system/caddy.service.d/override.conf
 printf 'EVE_TRADER_DOMAIN=%s\n' "$DOMAIN" | sudo tee /etc/default/caddy
-printf 'EVE_TRADER_CALLBACK_URL=https://%s/auth/callback\n' "$DOMAIN" | sudo tee /var/lib/eve-trader/env
+printf 'EVE_TRADER_CALLBACK_URL=https://%s/auth/callback\nEVE_TRADER_ESI_CLIENT_ID=%s\n' "$DOMAIN" "$CLIENT_ID" | sudo tee /var/lib/eve-trader/env
+sudo systemctl daemon-reload
 sudo systemctl restart caddy
 ```
 
-The Debian Caddy package loads `/etc/default/caddy` into its environment, so the `{$EVE_TRADER_DOMAIN}` placeholder in the installed `Caddyfile` resolves. If your package's unit does not read that file, replace the placeholder in `/etc/caddy/Caddyfile` with the literal domain instead.
+`$DOMAIN` and `$CLIENT_ID` are the operator-supplied hostname and EVE developer app client ID (see [Domain, TLS, and redirect URIs](#domain-tls-and-redirect-uris)).
 
-Log the VM's Docker daemon into GHCR with a read-only token so `eve-trader-deploy` can pull candidates.
+The packaged Caddy unit does **not** read `/etc/default/caddy`, so `caddy-environment.conf` is installed as a systemd drop-in that loads it. Without the drop-in, `{$EVE_TRADER_DOMAIN}` expands empty and Caddy fails with `unrecognized global option`. Alternatively, replace the placeholder in `/etc/caddy/Caddyfile` with the literal domain instead.
+
+This repo's GHCR package is anonymously pullable, so `eve-trader-deploy` needs no registry credentials. If you make the package private, log the VM's Docker daemon in once with a read-only (`read:packages`) token:
+
+```sh
+echo "$TOKEN" | sudo docker login ghcr.io -u "$GITHUB_USER" --password-stdin
+```
 
 Give the deployment SSH user narrowly scoped sudo so the workflows can run only the operations they need:
 
@@ -56,14 +64,13 @@ deploy ALL=(root) NOPASSWD: /usr/bin/cat /var/lib/eve-trader/previous-image
 
 The public hostname is an operator-supplied, deploy-time value. Point an `A` record at the VM's external static IP (output by `terraform apply`), set `EVE_TRADER_DOMAIN` for Caddy as above, and Caddy obtains/renews a Let's Encrypt certificate automatically and proxies HTTPS to `127.0.0.1:8080`.
 
-Register **both** redirect URIs on the EVE developer application:
+An EVE developer application accepts a **single** callback URL, so register the production URI on the production app:
 
-| Environment | Redirect URI                                  |
-|-------------|-----------------------------------------------|
-| Production  | `https://<domain>/auth/callback`              |
-| Local dev   | `http://localhost:<port>/auth/callback`       |
+| Environment | Redirect URI                              |
+|-------------|-------------------------------------------|
+| Production  | `https://<domain>/auth/callback`          |
 
-`<domain>` is the same value as `EVE_TRADER_DOMAIN`; the local-dev port is whatever `EVE_TRADER_ADDR` uses (default `8080`). The app's callback defaults to `http://localhost:8080/auth/callback`, so production bootstrap writes `EVE_TRADER_CALLBACK_URL=https://<domain>/auth/callback` to `/var/lib/eve-trader/env`. `eve-trader-start` passes that file to the container when present, and recreates the container so a change takes effect immediately.
+Register the local-dev URI (`http://localhost:<port>/auth/callback`) on a **separate** developer application with its own client ID, or temporarily change the production app's callback URL while developing locally. The app takes the callback from `EVE_TRADER_CALLBACK_URL` and the client ID from `EVE_TRADER_ESI_CLIENT_ID`; production bootstrap writes both to `/var/lib/eve-trader/env`, and `eve-trader-start` passes that file to the container when present (recreating the container so a change takes effect immediately).
 
 ## Logging
 
