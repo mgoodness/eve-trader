@@ -6,7 +6,11 @@ pinned to Terraform 1.16.2 ([`mise.toml`](../mise.toml)) using the
 [Google provider](https://registry.terraform.io/providers/hashicorp/google/latest).
 
 The config provisions infrastructure only; application deployment (binary, TLS, service) is
-covered separately by [`docs/deployment.md`](../docs/deployment.md).
+covered separately by [`docs/deployment.md`](../docs/deployment.md). The
+operator artifacts installed on the VM — [`Caddyfile`](Caddyfile),
+[`eve-trader-backup`](eve-trader-backup), and
+[`eve-trader-backup.cron`](eve-trader-backup.cron) — live in this directory
+alongside the existing start/deploy/secrets scripts.
 
 ## What it provisions
 
@@ -15,6 +19,9 @@ covered separately by [`docs/deployment.md`](../docs/deployment.md).
 - A `pd-standard` boot disk, ≤ 30 GB.
 - An external static IPv4 address.
 - A firewall rule allowing inbound HTTPS (443) only.
+- A 2 GB swap file, created on every boot by the instance startup script
+  [`startup.sh`](startup.sh) as an OOM safety net for the 1 GB `e2-micro`
+  (see [`docs/spec/v1.md` §8](../docs/spec/v1.md)).
 
 ### Firewall scope
 

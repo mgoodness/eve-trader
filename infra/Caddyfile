@@ -1,0 +1,13 @@
+# Reverse proxy for the eve-trader production deployment (docs/spec/v1.md §8).
+#
+# The public hostname is an operator-supplied, deploy-time value: set
+# EVE_TRADER_DOMAIN in the Caddy service environment (Debian's package reads
+# /etc/default/caddy) before installing this file. Caddy then obtains and
+# renews a publicly trusted Let's Encrypt certificate for it automatically and
+# proxies HTTPS to the app's loopback port.
+#
+# EVE SSO requires the registered production redirect URI to be
+# https://<domain>/auth/callback -- see docs/deployment.md.
+{$EVE_TRADER_DOMAIN} {
+	reverse_proxy 127.0.0.1:8080
+}

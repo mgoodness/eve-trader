@@ -1,0 +1,23 @@
+#!/bin/sh
+# Daily rotating SQLite backup (docs/spec/v1.md §8). Installed on the VM as
+# /usr/local/sbin/eve-trader-backup and run once a day by
+# /etc/cron.d/eve-trader-backup. Keeps the newest 7 daily copies under
+# $state/backups/daily; there is no off-VM destination for v1.
+#
+# This is distinct from the deploy script's pre-switch backups, which live one
+# directory up and retain the newest 5 deploys.
+set -eu
+state=/var/lib/eve-trader
+daily=$state/backups/daily
+db=$state/eve-trader.db
+retain=7
+
+[ -f "$db" ] || exit 0
+
+mkdir -p "$daily"
+sqlite3 "$db" ".backup '$daily/eve-trader-$(date -u +%F).db'"
+
+# Newest-first (names embed a UTC date), then drop entries past retention.
+find "$daily" -maxdepth 1 -type f -name 'eve-trader-????-??-??.db' \
+    -printf '%f\n' 2>/dev/null | sort -r | tail -n +$((retain + 1)) |
+    while read -r f; do rm -f "$daily/$f"; done
