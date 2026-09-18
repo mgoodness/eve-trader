@@ -39,12 +39,23 @@ resource "google_compute_instance" "app" {
   zone         = var.zone
   tags         = [var.name]
 
-  # Adds the 2 GB swap file and installs the Google Cloud Ops Agent on every
-  # boot (docs/spec/v1.md §8, docs/adr/0003). Set via the mutable metadata map
-  # (not metadata_startup_script, which is ForceNew) so script edits update in
-  # place instead of replacing the VM and its disk.
+  # Runs the full OS bootstrap on every boot (docs/spec/v1.md §8,
+  # docs/adr/0003): OS packages, swap, state dir, deploy user, Caddy config,
+  # and first-boot secret generation. Set via the mutable metadata map (not
+  # metadata_startup_script, which is ForceNew) so script edits update in place
+  # instead of replacing the VM and its disk.
+  #
+  # The non-secret config values and the verbatim Caddy config files are passed
+  # as additional metadata attributes, which the startup script reads from the
+  # metadata server. These land in Terraform state, which is fine: none are
+  # secret. The app secrets are generated on the VM and never come through here.
   metadata = {
-    startup-script = file("${path.module}/startup.sh")
+    startup-script          = file("${path.module}/startup.sh")
+    eve-trader-domain       = var.domain
+    eve-trader-client-id    = var.esi_client_id
+    eve-trader-deploy-key   = var.deploy_public_key
+    eve-trader-caddyfile    = file("${path.module}/Caddyfile")
+    eve-trader-caddy-dropin = file("${path.module}/caddy-environment.conf")
   }
 
   # Bind the dedicated service account with only the logging.write scope, so

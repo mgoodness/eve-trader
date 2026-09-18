@@ -36,3 +36,23 @@ variable "machine_type" {
   type        = string
   default     = "e2-micro"
 }
+
+# The following are consumed by the startup script via instance metadata. All
+# three are non-secret: passing them as metadata (and thus into Terraform
+# state) is intentional. The app secrets are generated on the VM at first boot
+# and never enter Terraform.
+
+variable "domain" {
+  description = "Public hostname for the production deployment. Caddy obtains a Let's Encrypt certificate for it and the EVE callback URL is derived from it. Point an A record at the VM's external IP."
+  type        = string
+}
+
+variable "esi_client_id" {
+  description = "EVE developer application client ID for the production app. Non-secret; written to the app's runtime env on the VM."
+  type        = string
+}
+
+variable "deploy_public_key" {
+  description = "SSH public key authorized for the deploy user. Its private half is the GitHub production PRODUCTION_SSH_PRIVATE_KEY secret."
+  type        = string
+}

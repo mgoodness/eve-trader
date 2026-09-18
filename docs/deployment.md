@@ -1,47 +1,49 @@
 # Production deployment
 
-The VM created by Terraform is only infrastructure. Before the first deploy, bootstrap a Debian VM with Docker, Caddy, and sqlite3, then install the operator scripts in `infra/` as root-owned `0755` files on the VM: `eve-trader-start`, `eve-trader-deploy`, `eve-trader-secrets`, and `eve-trader-backup` (paths below). Configure Caddy to proxy the public hostname to `127.0.0.1:8080` with a publicly trusted certificate; the workflow deliberately uses normal HTTPS certificate verification.
+`terraform apply` produces a fully-configured VM: it installs Docker, sqlite3,
+and Caddy; creates the swap file and the `/var/lib/eve-trader` state directory;
+provisions the `deploy` user with its authorized key and scoped sudoers; writes
+the Caddy config and the non-secret app env; and generates the app secrets on
+the VM at first boot. No manual SSH bootstrap is required (see
+[`infra/startup.sh`](../infra/startup.sh) and [`infra/README.md`](../infra/README.md)).
 
-## VM bootstrap
+The operator scripts (`eve-trader-start`, `-deploy`, `-secrets`, `-backup`, and
+the backup cron) version with the application, so they are installed by the
+deploy and secrets workflows rather than by `terraform apply` — each run scps
+them to the VM and installs them via the root-owned
+`eve-trader-install-scripts` helper. Caddy proxies the public hostname to
+`127.0.0.1:8080` with a publicly trusted certificate; the workflow deliberately
+uses normal HTTPS certificate verification.
 
-Install Docker, sqlite3, and Caddy. Caddy is not in Debian's base repos, so add its official package repository first:
+What still needs a human before the first deploy: create the DNS A record
+([Domain, TLS, and redirect URIs](#domain-tls-and-redirect-uris)), configure the
+GitHub `production` environment ([GitHub setup](#github-setup)), and — only if
+you make the GHCR package private — log the VM's Docker daemon into the
+registry (below). Then run the deploy and secret-provisioning workflows.
 
-```sh
-sudo apt-get update && sudo apt-get install -y docker.io sqlite3 curl debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt-get update && sudo apt-get install -y caddy
-```
+## Terraform inputs for the bootstrap
 
-The Terraform startup script (`infra/startup.sh`) has already created a 2 GB swap file. Verify it and, if the VM predates that change, create it manually:
+The startup script reads its non-secret config from instance metadata, so
+`terraform apply` needs three additional variables (see
+[`infra/README.md`](../infra/README.md)):
 
-```sh
-swapon --show          # expect /swapfile
-# fallback if empty:
-# sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
-# echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
+| Variable            | What it is                                                              |
+|---------------------|------------------------------------------------------------------------|
+| `domain`            | Public hostname (see [Domain, TLS, and redirect URIs](#domain-tls-and-redirect-uris)). |
+| `esi_client_id`     | EVE developer app client ID for the production app.                     |
+| `deploy_public_key` | SSH public key for the `deploy` user; its private half is the GitHub `PRODUCTION_SSH_PRIVATE_KEY` secret. |
 
-Install the operator scripts, the Caddy config, and the daily backup cron job:
+The packaged Caddy unit does **not** read `/etc/default/caddy`, so the startup
+script installs `caddy-environment.conf` as a systemd drop-in that loads it.
+Without the drop-in, `{$EVE_TRADER_DOMAIN}` expands empty and Caddy fails with
+`unrecognized global option`.
 
-```sh
-sudo install -d -o 65532 -g 65532 /var/lib/eve-trader   # distroless nonroot uid, runtime state
-sudo install -m 0755 eve-trader-start   /usr/local/sbin/eve-trader-start
-sudo install -m 0755 eve-trader-deploy  /usr/local/sbin/eve-trader-deploy
-sudo install -m 0755 eve-trader-secrets /usr/local/sbin/eve-trader-secrets
-sudo install -m 0755 eve-trader-backup  /usr/local/sbin/eve-trader-backup
-sudo install -m 0644 eve-trader-backup.cron /etc/cron.d/eve-trader-backup
-sudo install -m 0644 Caddyfile /etc/caddy/Caddyfile
-sudo install -D -m 0644 caddy-environment.conf /etc/systemd/system/caddy.service.d/override.conf
-printf 'EVE_TRADER_DOMAIN=%s\n' "$DOMAIN" | sudo tee /etc/default/caddy
-printf 'EVE_TRADER_CALLBACK_URL=https://%s/auth/callback\nEVE_TRADER_ESI_CLIENT_ID=%s\n' "$DOMAIN" "$CLIENT_ID" | sudo tee /var/lib/eve-trader/env
-sudo systemctl daemon-reload
-sudo systemctl restart caddy
-```
+The app secrets (`EVE_TRADER_COOKIE_SECRET`, `EVE_TRADER_TOKEN_KEY`) are
+generated on the VM at first boot into `/var/lib/eve-trader/secrets` (guarded so
+a re-boot never rotates them) and never enter Terraform state. Run **Provision
+production secrets** only to rotate or override them ([Secrets](#secrets)).
 
-`$DOMAIN` and `$CLIENT_ID` are the operator-supplied hostname and EVE developer app client ID (see [Domain, TLS, and redirect URIs](#domain-tls-and-redirect-uris)).
-
-The packaged Caddy unit does **not** read `/etc/default/caddy`, so `caddy-environment.conf` is installed as a systemd drop-in that loads it. Without the drop-in, `{$EVE_TRADER_DOMAIN}` expands empty and Caddy fails with `unrecognized global option`. Alternatively, replace the placeholder in `/etc/caddy/Caddyfile` with the literal domain instead.
+## Registry credentials (private package only)
 
 This repo's GHCR package is anonymously pullable, so `eve-trader-deploy` needs no registry credentials. If you make the package private, log the VM's Docker daemon in once with a read-only (`read:packages`) token:
 
@@ -49,20 +51,11 @@ This repo's GHCR package is anonymously pullable, so `eve-trader-deploy` needs n
 echo "$TOKEN" | sudo docker login ghcr.io -u "$GITHUB_USER" --password-stdin
 ```
 
-Give the deployment SSH user narrowly scoped sudo so the workflows can run only the operations they need:
-
-```
-deploy ALL=(root) NOPASSWD: /usr/local/sbin/eve-trader-start
-deploy ALL=(root) NOPASSWD: /usr/local/sbin/eve-trader-deploy
-deploy ALL=(root) NOPASSWD: /usr/local/sbin/eve-trader-secrets
-deploy ALL=(root) NOPASSWD: /usr/bin/cat /var/lib/eve-trader/previous-image
-```
-
 `/var/lib/eve-trader` holds the SQLite database (`eve-trader.db`), the `secrets` env-file, the non-secret runtime `env` file, `deployments.log`, `current-image`/`previous-image`, and `backups/` (see [Backups](#backups)).
 
 ## Domain, TLS, and redirect URIs
 
-The public hostname is an operator-supplied, deploy-time value. Point an `A` record at the VM's external static IP (output by `terraform apply`), set `EVE_TRADER_DOMAIN` for Caddy as above, and Caddy obtains/renews a Let's Encrypt certificate automatically and proxies HTTPS to `127.0.0.1:8080`.
+The public hostname is an operator-supplied value, passed to `terraform apply` as the `domain` variable (it also feeds `deploy_public_key`'s sibling metadata). Point an `A` record at the VM's external static IP (output by `terraform apply`); the startup script writes `EVE_TRADER_DOMAIN` for Caddy, and Caddy obtains/renews a Let's Encrypt certificate automatically and proxies HTTPS to `127.0.0.1:8080`.
 
 An EVE developer application accepts a **single** callback URL, so register the production URI on the production app:
 
@@ -70,7 +63,7 @@ An EVE developer application accepts a **single** callback URL, so register the 
 |-------------|-------------------------------------------|
 | Production  | `https://<domain>/auth/callback`          |
 
-Register the local-dev URI (`http://localhost:<port>/auth/callback`) on a **separate** developer application with its own client ID, or temporarily change the production app's callback URL while developing locally. The app takes the callback from `EVE_TRADER_CALLBACK_URL` and the client ID from `EVE_TRADER_ESI_CLIENT_ID`; production bootstrap writes both to `/var/lib/eve-trader/env`, and `eve-trader-start` passes that file to the container when present (recreating the container so a change takes effect immediately).
+Register the local-dev URI (`http://localhost:<port>/auth/callback`) on a **separate** developer application with its own client ID, or temporarily change the production app's callback URL while developing locally. The app takes the callback from `EVE_TRADER_CALLBACK_URL` and the client ID from `EVE_TRADER_ESI_CLIENT_ID`; the startup script derives both from the `domain` and `esi_client_id` variables and writes them to `/var/lib/eve-trader/env`, and `eve-trader-start` passes that file to the container when present (recreating the container so a change takes effect immediately).
 
 ## Logging
 
