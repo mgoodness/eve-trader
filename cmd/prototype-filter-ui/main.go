@@ -346,6 +346,12 @@ var tplFuncs = template.FuncMap{
 	"fmtPct": func(v float64) string { return trimFloat(v) + "%" },
 	"fmtNum": func(v float64) string { return formatThousands(int64(v)) },
 	"add":    func(a, b int) int { return a + b },
+	"help":   helpTip,
+}
+
+// helpTip renders a small hover tooltip icon. Prototype-only.
+func helpTip(text string) template.HTML {
+	return template.HTML(`<span class="group relative inline-block align-middle ml-1 cursor-help text-slate-500">&#9432;<span class="pointer-events-none absolute z-20 hidden group-hover:block w-56 bottom-full left-1/2 -translate-x-1/2 mb-1 rounded-md bg-slate-700 text-slate-100 text-xs normal-case leading-snug p-2 shadow-lg">` + template.HTMLEscapeString(text) + `</span></span>`)
 }
 
 func mustExec(tpl *template.Template, data any) template.HTML {
@@ -380,10 +386,10 @@ const footnoteHTML = `Profit figures are <strong>after broker fee and sales tax<
 	Rens-station-specific, so treat Vol/day and ISK/day as an approximation. Items with thin or
 	manipulated history are hidden automatically.`
 
-func summaryText(m pageModel) string {
-	return "Showing <strong>" + itoa(len(m.Rows)) + "</strong> of " + itoa(m.Total) +
+func summaryText(m pageModel) template.HTML {
+	return template.HTML("Showing <strong>" + itoa(len(m.Rows)) + "</strong> of " + itoa(m.Total) +
 		" items &middot; <strong>" + itoa(m.RealismHidden) + "</strong> hidden by realism filters" +
-		" &middot; <strong>" + itoa(m.UserHidden) + "</strong> outside your filters."
+		" &middot; <strong>" + itoa(m.UserHidden) + "</strong> outside your filters.")
 }
 
 // ---- variant A: toolbar strip ----
@@ -408,16 +414,16 @@ var variantATpl = template.Must(template.New("a").Funcs(tplFuncs).Parse(`
   <form id="filterform" hx-get="/" hx-target="#results" hx-swap="innerHTML" hx-push-url="true"
         class="flex flex-wrap items-end gap-3 rounded-lg bg-slate-900 border border-slate-800 px-4 py-3">
     <input type="hidden" name="sort" value="{{.Sort}}">
-    <label class="text-xs text-slate-400">Min vol/day
+    <label class="text-xs text-slate-400">Min vol/day{{help "Hide items whose average daily Heimatar volume is below this. Default 20 keeps dead markets out; clear it to show everything."}}
       <input name="minvol" value="{{index .Inputs "minvol"}}" size="7"
         class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
-    <label class="text-xs text-slate-400">Min gross margin %
+    <label class="text-xs text-slate-400">Min gross margin %{{help "Hide items whose gross spread is below this. Gross margin = (sell - buy) / sell; the default 7% clears fees at max skills. Clear for no floor."}}
       <input name="minmargin" value="{{index .Inputs "minmargin"}}" size="5"
         class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
-    <label class="text-xs text-slate-400">Max gross margin %
+    <label class="text-xs text-slate-400">Max gross margin %{{help "Hide items whose gross spread is above this - usually a stale or manipulated price. Default 60%; clear it to show those outliers."}}
       <input name="maxmargin" value="{{index .Inputs "maxmargin"}}" size="5"
         class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
-    <label class="text-xs text-slate-400">Max sell price
+    <label class="text-xs text-slate-400">Max sell price{{help "Budget cap on the item's sell price. Leave blank for no cap."}}
       <input name="maxsell" value="{{index .Inputs "maxsell"}}" size="12" placeholder="no cap"
         class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
     <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-sm font-medium px-3 py-1.5 rounded">Apply</button>
@@ -440,7 +446,8 @@ var variantATpl = template.Must(template.New("a").Funcs(tplFuncs).Parse(`
 `))
 
 type variantAData struct {
-	Variant, Sort, Summary string
+	Variant, Sort string
+	Summary       template.HTML
 	Inputs                 map[string]string
 	Footnote               template.HTML
 	Rows                   template.HTML
@@ -471,16 +478,16 @@ var variantBTpl = template.Must(template.New("b").Funcs(tplFuncs).Parse(`
           class="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-4">
       <input type="hidden" name="sort" value="{{.Sort}}">
       <h2 class="text-sm font-semibold text-slate-200">Your filters</h2>
-      <label class="block text-xs text-slate-400">Min daily volume
+      <label class="block text-xs text-slate-400">Min daily volume{{help "Hide items whose average daily Heimatar volume is below this. Default 20 keeps dead markets out; clear it to show everything."}}
         <input name="minvol" value="{{index .Inputs "minvol"}}"
           class="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100"></label>
-      <label class="block text-xs text-slate-400">Min gross margin %
+      <label class="block text-xs text-slate-400">Min gross margin %{{help "Hide items whose gross spread is below this. Gross margin = (sell - buy) / sell; the default 7% clears fees at max skills. Clear for no floor."}}
         <input name="minmargin" value="{{index .Inputs "minmargin"}}"
           class="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100"></label>
-      <label class="block text-xs text-slate-400">Max gross margin %
+      <label class="block text-xs text-slate-400">Max gross margin %{{help "Hide items whose gross spread is above this - usually a stale or manipulated price. Default 60%; clear it to show those outliers."}}
         <input name="maxmargin" value="{{index .Inputs "maxmargin"}}"
           class="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100"></label>
-      <label class="block text-xs text-slate-400">Max sell price
+      <label class="block text-xs text-slate-400">Max sell price{{help "Budget cap on the item's sell price. Leave blank for no cap."}}
         <input name="maxsell" value="{{index .Inputs "maxsell"}}" placeholder="no cap"
           class="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100"></label>
       <div class="flex gap-2 pt-1">
@@ -515,7 +522,8 @@ var variantBTpl = template.Must(template.New("b").Funcs(tplFuncs).Parse(`
 `))
 
 type variantBData struct {
-	Variant, Sort, Summary string
+	Variant, Sort string
+	Summary       template.HTML
 	Inputs                 map[string]string
 	RealismRules           []string
 	RealismHidden          int
@@ -567,13 +575,13 @@ var variantCTpl = template.Must(template.New("c").Funcs(tplFuncs).Parse(`
   <form id="filterform" hx-get="/" hx-target="#results" hx-swap="innerHTML" hx-push-url="true"
         class="flex flex-wrap items-end gap-3 rounded-lg bg-slate-900 border border-slate-800 px-4 py-3 mt-3">
     <input type="hidden" name="sort" value="{{.Sort}}">
-    <label class="text-xs text-slate-400">Min vol/day
+    <label class="text-xs text-slate-400">Min vol/day{{help "Hide items whose average daily Heimatar volume is below this. Default 20 keeps dead markets out; clear it to show everything."}}
       <input name="minvol" value="{{index .Inputs "minvol"}}" size="7" class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
-    <label class="text-xs text-slate-400">Min gross margin %
+    <label class="text-xs text-slate-400">Min gross margin %{{help "Hide items whose gross spread is below this. Gross margin = (sell - buy) / sell; the default 7% clears fees at max skills. Clear for no floor."}}
       <input name="minmargin" value="{{index .Inputs "minmargin"}}" size="5" class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
-    <label class="text-xs text-slate-400">Max gross margin %
+    <label class="text-xs text-slate-400">Max gross margin %{{help "Hide items whose gross spread is above this - usually a stale or manipulated price. Default 60%; clear it to show those outliers."}}
       <input name="maxmargin" value="{{index .Inputs "maxmargin"}}" size="5" class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
-    <label class="text-xs text-slate-400">Max sell price
+    <label class="text-xs text-slate-400">Max sell price{{help "Budget cap on the item's sell price. Leave blank for no cap."}}
       <input name="maxsell" value="{{index .Inputs "maxsell"}}" size="12" placeholder="no cap" class="block mt-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"></label>
     <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-sm font-medium px-3 py-1.5 rounded">Apply</button>
   </form>
@@ -592,7 +600,8 @@ var variantCTpl = template.Must(template.New("c").Funcs(tplFuncs).Parse(`
 `))
 
 type variantCData struct {
-	Variant, Sort, Summary string
+	Variant, Sort string
+	Summary       template.HTML
 	Inputs                 map[string]string
 	Chips                  []chip
 	RealismRules           []string
