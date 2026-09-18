@@ -40,8 +40,12 @@ resource "google_compute_instance" "app" {
   tags         = [var.name]
 
   # Adds the 2 GB swap file and installs the Google Cloud Ops Agent on every
-  # boot (docs/spec/v1.md §8, docs/adr/0003).
-  metadata_startup_script = file("${path.module}/startup.sh")
+  # boot (docs/spec/v1.md §8, docs/adr/0003). Set via the mutable metadata map
+  # (not metadata_startup_script, which is ForceNew) so script edits update in
+  # place instead of replacing the VM and its disk.
+  metadata = {
+    startup-script = file("${path.module}/startup.sh")
+  }
 
   # Bind the dedicated service account with only the logging.write scope, so
   # the Ops Agent can write logs and nothing else. IAM (logging.logWriter
