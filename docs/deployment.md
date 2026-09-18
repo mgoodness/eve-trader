@@ -74,7 +74,16 @@ Register the local-dev URI (`http://localhost:<port>/auth/callback`) on a **sepa
 
 ## Logging
 
-The app writes structured JSON lines to stdout; Docker's default `json-file` driver captures them and they are viewable with `docker logs eve-trader`. No external log aggregation service is used, and the app runs no sidecars (see `docs/spec/v1.md` §8).
+The app writes structured JSON lines to stdout; Docker's default `json-file` driver captures them and they remain viewable with `docker logs eve-trader` over SSH.
+
+In addition, the **Google Cloud Ops Agent** runs on the VM and ships the `eve-trader` container's `json-file` stdout to **GCP Cloud Logging**, so logs are queryable in Logs Explorer without shelling into the VM. The agent tails the existing Docker logs (it does not change the container's logging driver, so `docker logs` is unaffected) with a custom, app-scoped config (written by `infra/startup.sh` to `/etc/google-cloud-ops-agent/config.yaml`) that unwraps the Docker envelope and then the app's `slog` JSON so the structured fields are preserved as filterable payload — filter in Logs Explorer by fields like `severity` and `msg` rather than searching a flattened text blob.
+
+Setup is codified, not manual (see `docs/adr/0003`):
+
+- **Terraform** (`infra/main.tf`) creates a dedicated, least-privilege service account granted only `roles/logging.logWriter`, and binds it to the instance with just the `logging.write` OAuth scope. The instance no longer uses the default compute service account.
+- **`infra/startup.sh`** installs and starts the Ops Agent on every boot, idempotently (a no-op once installed), alongside the swap file.
+
+Only the `eve-trader` app container's logs are shipped. Caddy runs as a native systemd service (not a container) so it is not picked up, and the config's explicit `default_pipeline` overrides the agent's built-in one so host system/SSH (`syslog`) logs are **not** forwarded either. No exclusion filters, custom retention, or custom log buckets are configured — GCP defaults apply (50 GiB/month free ingestion, 30-day default retention), which comfortably covers this single-user tool's volume. No app secrets (`EVE_TRADER_*` values) are ever logged, so none reach Cloud Logging (see `docs/spec/v1.md` §8).
 
 ## GitHub setup
 
