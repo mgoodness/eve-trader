@@ -2,7 +2,8 @@
 --
 -- Five tables. market_order and character_skill/esi_token are
 -- current-state caches; only market_history retains a rolling window.
--- No order-level or price history is kept anywhere.
+-- No order-level history is kept; market_history carries each day's
+-- aggregate price figures alongside its volume.
 
 -- Current Rens order book. Upserted + hard-pruned every poll (~5 min).
 CREATE TABLE IF NOT EXISTS market_order (
@@ -19,14 +20,25 @@ CREATE TABLE IF NOT EXISTS market_order (
 );
 CREATE INDEX IF NOT EXISTS idx_market_order_type_id ON market_order(type_id);
 
--- 14-day rolling window of Heimatar-region daily volume, refreshed once/day.
--- V_d in the ranking formula is the average `volume` over this window,
--- computed at query time (not pre-aggregated).
+-- 30-day rolling window of Heimatar-region daily volume and prices,
+-- refreshed once/day. V_d in the ranking formula is the average `volume`
+-- over this window, computed at query time (not pre-aggregated).
+--
+-- average/highest/lowest were added after the initial v1 schema (see the
+-- migration in db.go). They are nullable so an existing database upgrades
+-- in place: rows written before the change keep NULL price fields until
+-- that type's next history refresh replaces its window. The v1.1 realism
+-- filters exclude a type whose window still lacks them, so the opportunity
+-- list may be shorter for up to one history cycle after deploy. This is
+-- expected and needs no manual backfill.
 CREATE TABLE IF NOT EXISTS market_history (
   type_id      INTEGER NOT NULL REFERENCES item_type(type_id),
   date         TEXT    NOT NULL,  -- ISO8601 date
   volume       INTEGER NOT NULL,
   order_count  INTEGER NOT NULL,
+  average      REAL,
+  highest      REAL,
+  lowest       REAL,
   PRIMARY KEY (type_id, date)
 );
 

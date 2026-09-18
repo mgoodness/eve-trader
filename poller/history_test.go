@@ -51,9 +51,9 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	gateway := &historyGateway{
 		orders: []esi.Order{{OrderID: 1, TypeID: 34, IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 34, Price: 8, Issued: issued}},
 		history: map[int][]esi.HistoryPoint{34: {
-			{Date: time.Now().UTC(), Volume: 10, OrderCount: 1},
-			{Date: time.Now().UTC().AddDate(0, 0, -1), Volume: 20, OrderCount: 2},
-			{Date: time.Now().UTC().AddDate(0, 0, -14), Volume: 999, OrderCount: 9},
+			{Date: time.Now().UTC(), Volume: 10, OrderCount: 1, Average: 1.5, Highest: 2, Lowest: 1},
+			{Date: time.Now().UTC().AddDate(0, 0, -1), Volume: 20, OrderCount: 2, Average: 3.5, Highest: 4, Lowest: 3},
+			{Date: time.Now().UTC().AddDate(0, 0, -30), Volume: 999, OrderCount: 9, Average: 9, Highest: 9, Lowest: 9},
 		}},
 	}
 	orders := poller.New(gateway, database, time.Hour)
@@ -77,6 +77,16 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	}
 	if volume != 15 {
 		t.Fatalf("average volume = %v, want 15", volume)
+	}
+	var avg, high, low float64
+	if err := database.QueryRow(
+		`SELECT average, highest, lowest FROM market_history WHERE type_id = 34 AND date = ?`,
+		time.Now().UTC().Format("2006-01-02"),
+	).Scan(&avg, &high, &low); err != nil {
+		t.Fatal(err)
+	}
+	if avg != 1.5 || high != 2 || low != 1 {
+		t.Fatalf("stored prices = average %v highest %v lowest %v, want 1.5/2/1", avg, high, low)
 	}
 	got, err := ranking.Load(t.Context(), database)
 	if err != nil {
@@ -133,15 +143,15 @@ func TestHistoryPollSkipsFailedTypeAndRefreshesTheRest(t *testing.T) {
 	}
 }
 
-func TestHistoryPollKeepsExactlyFourteenCalendarDays(t *testing.T) {
+func TestHistoryPollKeepsExactlyThirtyCalendarDays(t *testing.T) {
 	database := dbtest.OpenDB(t)
 	issued := time.Now().UTC()
 	gateway := &historyGateway{
 		orders: []esi.Order{{OrderID: 1, TypeID: 34, Issued: issued}},
 		history: map[int][]esi.HistoryPoint{34: {
 			{Date: time.Now().UTC(), Volume: 1},
-			{Date: time.Now().UTC().AddDate(0, 0, -13), Volume: 2},
-			{Date: time.Now().UTC().AddDate(0, 0, -14), Volume: 3},
+			{Date: time.Now().UTC().AddDate(0, 0, -29), Volume: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -30), Volume: 3},
 		}},
 	}
 	if err := poller.New(gateway, database, time.Hour).Poll(t.Context()); err != nil {
