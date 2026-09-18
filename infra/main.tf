@@ -3,6 +3,22 @@ resource "google_compute_address" "external" {
   region = var.region
 }
 
+# Dedicated, least-privilege service account for the VM. It exists so the
+# Google Cloud Ops Agent can ship the app container's logs to Cloud Logging
+# without granting the instance the broad default compute service account
+# (docs/adr/0003, docs/spec/v1.md §8).
+resource "google_service_account" "vm" {
+  account_id   = "${var.name}-vm"
+  display_name = "${var.name} VM (Ops Agent log writer)"
+}
+
+# The only role the instance needs: write log entries to Cloud Logging.
+resource "google_project_iam_member" "vm_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.vm.email}"
+}
+
 resource "google_compute_firewall" "https" {
   name    = "${var.name}-https"
   network = "default"
@@ -23,8 +39,17 @@ resource "google_compute_instance" "app" {
   zone         = var.zone
   tags         = [var.name]
 
-  # Adds the 2 GB swap file on every boot (docs/spec/v1.md §8).
+  # Adds the 2 GB swap file and installs the Google Cloud Ops Agent on every
+  # boot (docs/spec/v1.md §8, docs/adr/0003).
   metadata_startup_script = file("${path.module}/startup.sh")
+
+  # Bind the dedicated service account with only the logging.write scope, so
+  # the Ops Agent can write logs and nothing else. IAM (logging.logWriter
+  # above) is the real authority; the scope is the coarse OAuth ceiling.
+  service_account {
+    email  = google_service_account.vm.email
+    scopes = ["https://www.googleapis.com/auth/logging.write"]
+  }
 
   boot_disk {
     initialize_params {
