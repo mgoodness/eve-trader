@@ -2,7 +2,7 @@
 
 A single-user, hosted web tool that scans Rens's own order book for
 profitable station-trading opportunities. See
-[`docs/spec/v1.md`](docs/spec/v1.md) for the full build spec.
+[`docs/spec/v1.md`](https://github.com/mgoodness/eve-trader/blob/agent-context/docs/spec/v1.md) for the full build spec.
 
 ## Development
 
@@ -20,7 +20,7 @@ EVE_TRADER_DB_PATH=eve-trader.db EVE_TRADER_ADDR=:8080 ./eve-trader
 ```
 
 The one-time EVE SSO login (`/auth/login` -> `/auth/callback`, see
-[`docs/spec/v1.md` §6](docs/spec/v1.md#6-oauth--esi-auth-flow)) reads its
+[`docs/spec/v1.md` §6](https://github.com/mgoodness/eve-trader/blob/agent-context/docs/spec/v1.md#6-oauth--esi-auth-flow)) reads its
 settings from environment variables:
 
 | Variable                   | Purpose                                                                       |

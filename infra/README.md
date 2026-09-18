@@ -50,7 +50,7 @@ pull/run handled by the deploy pipeline (see
 - A firewall rule allowing inbound HTTPS (443) only.
 - A 2 GB swap file, created on every boot by the instance startup script
   [`startup.sh`](startup.sh) as an OOM safety net for the 1 GB `e2-micro`
-  (see [`docs/spec/v1.md` §8](../docs/spec/v1.md)).
+  (see [`docs/spec/v1.md` §8](https://github.com/mgoodness/eve-trader/blob/agent-context/docs/spec/v1.md#8-deployment-gcp-e2-micro)).
 
 And, via [`startup.sh`](startup.sh) on every boot (idempotently):
 
