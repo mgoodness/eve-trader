@@ -61,15 +61,19 @@ func TestLoadFiltersAndRanksByISKPerDayDescending(t *testing.T) {
 	// R_b = 3% - 0.3%*4 = 1.8%; R_t = 7.5%*(1-0.11*3) = 5.025%.
 	// π = 120 - 100 - (100*0.018) - (120*0.018) - (120*0.05025) = 10.01
 	wantProfit := 10.01
-	wantMargin := 100.0 / 6.0 // (120-100)/120*100 = 16.666...
-	wantISKPerDay := wantProfit * 50
+	wantGrossMargin := 100.0 / 6.0 // (120-100)/120*100 = 16.666...
+	wantNetMargin := wantProfit / 120 * 100
+	wantISKPerDay := wantProfit * 50 * ranking.CaptureRate
 
 	tritanium := got[0]
 	if !approxEqual(tritanium.ProfitPerUnit, wantProfit) {
 		t.Errorf("Tritanium ProfitPerUnit = %v, want %v", tritanium.ProfitPerUnit, wantProfit)
 	}
-	if !approxEqual(tritanium.MarginPct, wantMargin) {
-		t.Errorf("Tritanium MarginPct = %v, want %v", tritanium.MarginPct, wantMargin)
+	if !approxEqual(tritanium.GrossMarginPct, wantGrossMargin) {
+		t.Errorf("Tritanium GrossMarginPct = %v, want %v", tritanium.GrossMarginPct, wantGrossMargin)
+	}
+	if !approxEqual(tritanium.NetMarginPct, wantNetMargin) {
+		t.Errorf("Tritanium NetMarginPct = %v, want %v", tritanium.NetMarginPct, wantNetMargin)
 	}
 	if !approxEqual(tritanium.ISKPerDay, wantISKPerDay) {
 		t.Errorf("Tritanium ISKPerDay = %v, want %v", tritanium.ISKPerDay, wantISKPerDay)
@@ -154,8 +158,8 @@ func TestLoadExcludesItemsMissingEitherSideOfTheBook(t *testing.T) {
 
 func TestSortReordersByColumn(t *testing.T) {
 	rows := []ranking.Opportunity{
-		{Name: "A", Buy: 100, Sell: 120, MarginPct: 10, ProfitPerUnit: 5, VolumePerDay: 30, ISKPerDay: 150},
-		{Name: "B", Buy: 50, Sell: 60, MarginPct: 20, ProfitPerUnit: 8, VolumePerDay: 60, ISKPerDay: 480},
+		{Name: "A", Buy: 100, Sell: 120, GrossMarginPct: 15, NetMarginPct: 10, ProfitPerUnit: 5, VolumePerDay: 30, ISKPerDay: 150},
+		{Name: "B", Buy: 50, Sell: 60, GrossMarginPct: 15, NetMarginPct: 20, ProfitPerUnit: 8, VolumePerDay: 60, ISKPerDay: 480},
 	}
 
 	cases := []struct {
