@@ -62,7 +62,7 @@ And, via [`startup.sh`](startup.sh) on every boot (idempotently):
 - Caddy config (Caddyfile, systemd drop-in, `EVE_TRADER_DOMAIN`) and the
   non-secret app env.
 - First-boot generation of the app secrets, kept out of Terraform state.
-- The Google Cloud Ops Agent (see [`docs/adr/0003`](../docs/adr/0003-cloud-logging-for-app-container.md)).
+- The Google Cloud Ops Agent (see [`docs/adr/0003`](https://github.com/mgoodness/eve-trader/blob/agent-context/docs/adr/0003-cloud-logging-for-app-container.md)).
 
 ### Firewall scope
 
