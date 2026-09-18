@@ -27,10 +27,9 @@ CREATE INDEX IF NOT EXISTS idx_market_order_type_id ON market_order(type_id);
 -- average/highest/lowest were added after the initial v1 schema (see the
 -- migration in db.go). They are nullable so an existing database upgrades
 -- in place: rows written before the change keep NULL price fields until
--- that type's next history refresh replaces its window. The v1.1 realism
--- filters exclude a type whose window still lacks them, so the opportunity
--- list may be shorter for up to one history cycle after deploy. This is
--- expected and needs no manual backfill.
+-- that type's next history refresh replaces its window. A temporarily
+-- shorter opportunity list for up to one history cycle after deploy is
+-- expected, not a bug, and needs no manual backfill.
 CREATE TABLE IF NOT EXISTS market_history (
   type_id      INTEGER NOT NULL REFERENCES item_type(type_id),
   date         TEXT    NOT NULL,  -- ISO8601 date
