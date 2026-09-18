@@ -5,13 +5,41 @@ and firewall that the app runs behind — as Terraform infrastructure-as-code
 pinned to Terraform 1.16.2 ([`mise.toml`](../mise.toml)) using the
 [Google provider](https://registry.terraform.io/providers/hashicorp/google/latest).
 
-The config provisions infrastructure only; application deployment (binary, TLS, service) is
-covered separately by [`docs/deployment.md`](../docs/deployment.md). The
-operator artifacts installed on the VM — [`Caddyfile`](Caddyfile),
-[`caddy-environment.conf`](caddy-environment.conf),
-[`eve-trader-backup`](eve-trader-backup), and
-[`eve-trader-backup.cron`](eve-trader-backup.cron) — live in this directory
-alongside the existing start/deploy/secrets scripts.
+The config provisions the infrastructure **and** configures the VM: the
+instance startup script ([`startup.sh`](startup.sh)) folds the whole OS
+bootstrap into `terraform apply`, so a fresh apply yields a VM ready for the
+first deploy with no manual SSH (see the split below and
+[`docs/deployment.md`](../docs/deployment.md)).
+
+The Caddy config files — [`Caddyfile`](Caddyfile) and
+[`caddy-environment.conf`](caddy-environment.conf) — are passed to the VM as
+instance metadata and installed by the startup script. The operator scripts —
+[`eve-trader-start`](eve-trader-start), [`eve-trader-deploy`](eve-trader-deploy),
+[`eve-trader-secrets`](eve-trader-secrets), [`eve-trader-backup`](eve-trader-backup),
+and [`eve-trader-backup.cron`](eve-trader-backup.cron) — version with the
+application, so the deploy/secrets workflows install them (via the startup
+script's `eve-trader-install-scripts` helper), not `terraform apply`.
+
+### Config vs. bootstrap split
+
+- **Terraform / startup script owns infra + config:** OS packages (Docker,
+  sqlite3, Caddy + repo), swap, the `/var/lib/eve-trader` state directory
+  (uid 65532), the `deploy` user + authorized key + scoped sudoers, Caddy
+  config + systemd drop-in, the non-secret app env (`domain`, `esi_client_id`),
+  and first-boot generation of the app secrets.
+- **Deploy/secrets workflows own the operator scripts** because they version
+  with the application; installing them here would force a `terraform apply` on
+  every edit.
+- **Secrets never enter Terraform state.** `EVE_TRADER_COOKIE_SECRET` and
+  `EVE_TRADER_TOKEN_KEY` are generated on the VM at first boot (guarded so a
+  re-boot never rotates them). Non-secret values (`domain`, `esi_client_id`,
+  `deploy_public_key`, the Caddy files) do pass through metadata and state,
+  which is fine.
+
+Still external to Terraform: the DNS A record, the GitHub `production`
+environment/secrets, the GHCR token (private package only), and the app image
+pull/run handled by the deploy pipeline (see
+[`docs/deployment.md`](../docs/deployment.md)).
 
 ## What it provisions
 
@@ -23,6 +51,18 @@ alongside the existing start/deploy/secrets scripts.
 - A 2 GB swap file, created on every boot by the instance startup script
   [`startup.sh`](startup.sh) as an OOM safety net for the 1 GB `e2-micro`
   (see [`docs/spec/v1.md` §8](../docs/spec/v1.md)).
+
+And, via [`startup.sh`](startup.sh) on every boot (idempotently):
+
+- Docker, sqlite3, and Caddy (plus Caddy's package repo).
+- The `/var/lib/eve-trader` runtime state directory, owned by uid 65532 (the
+  distroless nonroot user the app runs as).
+- The `deploy` user with its authorized SSH key, scoped sudoers, and the
+  root-owned `eve-trader-install-scripts` helper the deploy workflow uses.
+- Caddy config (Caddyfile, systemd drop-in, `EVE_TRADER_DOMAIN`) and the
+  non-secret app env.
+- First-boot generation of the app secrets, kept out of Terraform state.
+- The Google Cloud Ops Agent (see [`docs/adr/0003`](../docs/adr/0003-cloud-logging-for-app-container.md)).
 
 ### Firewall scope
 
@@ -84,6 +124,13 @@ has everything it needs; running it again later is a no-op.)
 | `zone`         | `us-central1-a`| Must be in the selected region.            |
 | `name`         | `eve-trader`   | Name prefix for created resources.         |
 | `machine_type` | `e2-micro`     | Always Free tier. Set to nothing else.     |
+| `domain`          | *(required)* | Public hostname; Caddy gets a Let's Encrypt cert for it. |
+| `esi_client_id`   | *(required)* | EVE developer app client ID for production. |
+| `deploy_public_key` | *(required)* | SSH public key for the `deploy` user. |
+
+`domain`, `esi_client_id`, and `deploy_public_key` are non-secret and are
+passed to the VM as instance metadata (and thus land in Terraform state, which
+is fine). The app secrets are generated on the VM and never enter Terraform.
 
 Example:
 
@@ -92,6 +139,9 @@ mise x -- terraform plan \
   -var project_id=my-project \
   -var region=us-east1 \
   -var zone=us-east1-b \
+  -var domain=trader.example.com \
+  -var esi_client_id=abcd1234 \
+  -var deploy_public_key="$(cat ~/.ssh/eve-trader-deploy.pub)" \
   -out=tfplan
 ```
 
