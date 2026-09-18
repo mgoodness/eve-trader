@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"math"
 	"strconv"
+
+	"github.com/mgoodness/eve-trader/ranking"
 )
 
 // templateFuncs are the formatting helpers used by the opportunity-table
@@ -12,6 +14,9 @@ var templateFuncs = template.FuncMap{
 	"fmtISK": func(v float64) string { return formatThousands(round(v)) + " ISK" },
 	"fmtPct": func(v float64) string { return trimFloat(v) + "%" },
 	"fmtNum": func(v float64) string { return formatThousands(round(v)) },
+	// fmtCaptureRate renders ranking.CaptureRate as a percentage so the
+	// user-facing footnote can't silently drift from the constant.
+	"fmtCaptureRate": func() string { return trimFloat(ranking.CaptureRate*100) + "%" },
 }
 
 // round rounds v to the nearest integer (half away from zero), rather

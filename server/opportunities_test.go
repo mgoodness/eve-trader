@@ -78,16 +78,16 @@ func TestIndexRendersRankedOpportunityTable(t *testing.T) {
 		t.Fatalf("GET / status = %d, want %d", status, http.StatusOK)
 	}
 
-	// Column headers match the spec: Item, Buy, Sell, Margin, ISK/unit,
+	// Column headers match the spec: Item, Buy, Sell, Net margin, ISK/unit,
 	// Vol/day, ISK/day.
-	for _, want := range []string{">Item<", ">Buy<", ">Sell<", ">Margin<", ">ISK/unit<", ">Vol/day<", ">ISK/day<"} {
+	for _, want := range []string{">Item<", ">Buy<", ">Sell<", ">Net margin<", ">ISK/unit<", ">Vol/day<", ">ISK/day<"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET / body missing column header %q", want)
 		}
 	}
 
-	// Default rank is ISK/day descending: Tritanium (≈400.4 ISK/day) before
-	// Pyerite (≈150.15 ISK/day).
+	// Default rank is ISK/day descending: Tritanium (≈80 ISK/day at the
+	// 20% capture rate) before Pyerite (≈30 ISK/day).
 	tritaniumIdx := strings.Index(body, "Tritanium")
 	pyeriteIdx := strings.Index(body, "Pyerite")
 	if tritaniumIdx == -1 || pyeriteIdx == -1 {
@@ -98,9 +98,10 @@ func TestIndexRendersRankedOpportunityTable(t *testing.T) {
 	}
 
 	// Values are computed via the real formula (not hardcoded): R_b=1.8%,
-	// R_t=5.025% at Broker Relations 4 / Accounting 3. π≈10.01, M=16.7%,
-	// ISK/day≈400.4, rounds to 400.
-	for _, want := range []string{"100 ISK", "120 ISK", "16.7%", "10 ISK", "400 ISK"} {
+	// R_t=5.025% at Broker Relations 4 / Accounting 3. π≈10.01; net margin
+	// = π/sell = 8.3%; ISK/day = π × 40 × 0.20 ≈ 80. Pyerite's net margin
+	// is also 8.3%, and its capture-scaled ISK/day ≈ 30.
+	for _, want := range []string{"100 ISK", "120 ISK", "8.3%", "10 ISK", "80 ISK", "30 ISK"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET / body missing computed value %q; body:\n%s", want, body)
 		}
@@ -113,10 +114,12 @@ func TestIndexRendersRankedOpportunityTable(t *testing.T) {
 		}
 	}
 
-	// Persistent header footnote states the Heimatar-region-volume
-	// approximation caveat.
-	if !strings.Contains(body, "Heimatar-region-wide") {
-		t.Errorf("GET / body missing Heimatar-region-volume footnote")
+	// Persistent header footnote states both the fee/capture assumption and
+	// the Heimatar-region-volume approximation caveat.
+	for _, want := range []string{"20%", "Heimatar-region-wide"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET / body missing footnote disclosure %q", want)
+		}
 	}
 }
 
@@ -162,10 +165,10 @@ func TestOpportunitiesPartialResortsByColumn(t *testing.T) {
 	}{
 		{"buy", "Pyerite", "Tritanium"},     // Buy 50 < 100
 		{"sell", "Pyerite", "Tritanium"},    // Sell 60 < 120
-		{"margin", "Tritanium", "Pyerite"},  // both ~16.7%, stable order preserved
+		{"margin", "Tritanium", "Pyerite"},  // both net ≈8.3%, stable order preserved
 		{"iskunit", "Tritanium", "Pyerite"}, // profit/unit 10.01 > 5.005
 		{"volday", "Tritanium", "Pyerite"},  // 40 > 30
-		{"iskday", "Tritanium", "Pyerite"},  // ≈400.4 > ≈150.15 (default rank)
+		{"iskday", "Tritanium", "Pyerite"},  // ≈80 > ≈30 (default rank)
 	}
 	for _, tc := range cases {
 		t.Run(tc.sort, func(t *testing.T) {

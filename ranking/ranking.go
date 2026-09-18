@@ -22,20 +22,28 @@ const (
 	// MinVolumePerDay is the minimum average daily volume (V_d) an
 	// opportunity must clear to be shown.
 	MinVolumePerDay = 10.0
+
+	// CaptureRate is the fixed fraction of an item's average daily
+	// Heimatar-region volume a single trader is assumed to capture when
+	// computing ISK/day. It is a deliberate v1.1 assumption (EVE station
+	// trading cannot capture the whole market) and deliberately not
+	// user-configurable; per-unit profit and the displayed Vol/day stay raw.
+	CaptureRate = 0.20
 )
 
 // Opportunity is one ranked row: an item currently tradable at Rens, with
 // its computed profitability figures under the trading character's
 // current skills.
 type Opportunity struct {
-	TypeID        int
-	Name          string
-	Buy           float64 // P_b -- best (highest) current Rens buy order price
-	Sell          float64 // P_s -- best (lowest) current Rens sell order price
-	MarginPct     float64 // M   -- gross margin percentage
-	ProfitPerUnit float64 // π   -- profit per unit after broker fee and sales tax
-	VolumePerDay  float64 // V_d -- average daily Heimatar-region volume (approximation, see docs/spec/v1.md §3)
-	ISKPerDay     float64 // EDP -- π × V_d, the primary rank
+	TypeID         int
+	Name           string
+	Buy            float64 // P_b -- best (highest) current Rens buy order price
+	Sell           float64 // P_s -- best (lowest) current Rens sell order price
+	GrossMarginPct float64 // M   -- gross margin percentage, before fees (drives the v1 filter)
+	NetMarginPct   float64 // net margin percentage -- profit after fees as a fraction of sell price (displayed)
+	ProfitPerUnit  float64 // π   -- profit per unit after broker fee and sales tax
+	VolumePerDay   float64 // V_d -- average daily Heimatar-region volume (approximation, see docs/spec/v1.md §3)
+	ISKPerDay      float64 // EDP -- π × V_d × CaptureRate, the primary rank
 }
 
 // Skills holds the fee/tax-relevant skill levels used in the ranking
@@ -58,16 +66,18 @@ func SalesTaxRate(accountingLevel int) float64 {
 	return 0.075 * (1 - 0.11*float64(accountingLevel))
 }
 
-// compute returns the per-unit profit (π) and gross margin percentage (M)
-// for a buy/sell price pair under the given skills.
-func compute(buy, sell float64, skills Skills) (profitPerUnit, marginPct float64) {
+// compute returns the per-unit profit (π), the gross margin percentage (M),
+// and the net margin percentage (π as a fraction of sell price) for a
+// buy/sell price pair under the given skills.
+func compute(buy, sell float64, skills Skills) (profitPerUnit, grossMarginPct, netMarginPct float64) {
 	rb := BrokerFeeRate(skills.BrokerRelationsLevel)
 	rt := SalesTaxRate(skills.AccountingLevel)
 
 	profit := sell - buy - (buy * rb) - (sell * rb) - (sell * rt)
-	margin := (sell - buy) / sell * 100
+	grossMargin := (sell - buy) / sell * 100
+	netMargin := profit / sell * 100
 
-	return profit, margin
+	return profit, grossMargin, netMargin
 }
 
 // opportunityQuery derives, per item_type currently present in
@@ -113,10 +123,10 @@ func Load(ctx context.Context, db *sql.DB) ([]Opportunity, error) {
 			return nil, fmt.Errorf("scanning opportunity row: %w", err)
 		}
 
-		o.ProfitPerUnit, o.MarginPct = compute(o.Buy, o.Sell, skills)
-		o.ISKPerDay = o.ProfitPerUnit * o.VolumePerDay
+		o.ProfitPerUnit, o.GrossMarginPct, o.NetMarginPct = compute(o.Buy, o.Sell, skills)
+		o.ISKPerDay = o.ProfitPerUnit * o.VolumePerDay * CaptureRate
 
-		if o.MarginPct < MinMarginPct || o.VolumePerDay < MinVolumePerDay {
+		if o.GrossMarginPct < MinMarginPct || o.VolumePerDay < MinVolumePerDay {
 			continue
 		}
 		out = append(out, o)
@@ -147,7 +157,8 @@ func loadSkills(ctx context.Context, db *sql.DB) (Skills, error) {
 }
 
 // Sort reorders rows in place by the given column key: "buy", "sell",
-// "margin", "iskunit", "volday", or "iskday". Any other key (including
+// "margin", "iskunit", "volday", or "iskday". The "margin" key sorts by
+// net margin (the figure the column displays). Any other key (including
 // "iskday" itself) falls back to the default rank: ISK/day descending.
 func Sort(rows []Opportunity, by string) {
 	switch by {
@@ -156,7 +167,7 @@ func Sort(rows []Opportunity, by string) {
 	case "sell":
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Sell < rows[j].Sell })
 	case "margin":
-		sort.SliceStable(rows, func(i, j int) bool { return rows[i].MarginPct > rows[j].MarginPct })
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].NetMarginPct > rows[j].NetMarginPct })
 	case "iskunit":
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].ProfitPerUnit > rows[j].ProfitPerUnit })
 	case "volday":
