@@ -26,12 +26,17 @@ type Order struct {
 	Duration     int
 }
 
-// HistoryPoint is one day's Heimatar-region trading volume for a type_id,
-// as returned by GET /markets/{region_id}/history/.
+// HistoryPoint is one day's Heimatar-region trading summary for a type_id,
+// as returned by GET /markets/{region_id}/history/. Average, Highest and
+// Lowest are the day's price figures; they are not optional because ESI
+// always returns them for a day it reports at all.
 type HistoryPoint struct {
 	Date       time.Time
 	Volume     int
 	OrderCount int
+	Average    float64
+	Highest    float64
+	Lowest     float64
 }
 
 // Skills holds the fee/tax-relevant skill levels for a character: the

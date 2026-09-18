@@ -73,9 +73,9 @@ func compute(buy, sell float64, skills Skills) (profitPerUnit, marginPct float64
 // opportunityQuery derives, per item_type currently present in
 // market_order, the best (highest) current buy order price, the best
 // (lowest) current sell order price, and the average daily volume over
-// whatever market_history window is retained (the 14-day rolling window
-// itself is maintained by the poller that writes market_history, not by
-// this query). Items with no buy order or no sell order on the book are
+// whatever market_history window is retained (the rolling window is
+// maintained by the poller that writes market_history, not by this
+// query). Items with no buy order or no sell order on the book are
 // excluded -- there is no spread to compute.
 const opportunityQuery = `
 SELECT

@@ -139,9 +139,12 @@ func (g *HTTPGateway) get(ctx context.Context, endpoint string, target any) (*ht
 // FetchHistory returns Heimatar's daily market history for typeID.
 func (g *HTTPGateway) FetchHistory(ctx context.Context, typeID int) ([]HistoryPoint, error) {
 	var raw []struct {
-		Date       string `json:"date"`
-		Volume     int    `json:"volume"`
-		OrderCount int    `json:"order_count"`
+		Date       string  `json:"date"`
+		Volume     int     `json:"volume"`
+		OrderCount int     `json:"order_count"`
+		Average    float64 `json:"average"`
+		Highest    float64 `json:"highest"`
+		Lowest     float64 `json:"lowest"`
 	}
 	_, err := g.get(ctx, fmt.Sprintf("%s/markets/%d/history/?type_id=%d", g.base(), regionHeimatar, typeID), &raw)
 	if err != nil {
@@ -153,7 +156,14 @@ func (g *HTTPGateway) FetchHistory(ctx context.Context, typeID int) ([]HistoryPo
 		if err != nil {
 			return nil, fmt.Errorf("parsing history date %q for type %d: %w", point.Date, typeID, err)
 		}
-		out[i] = HistoryPoint{Date: date, Volume: point.Volume, OrderCount: point.OrderCount}
+		out[i] = HistoryPoint{
+			Date:       date,
+			Volume:     point.Volume,
+			OrderCount: point.OrderCount,
+			Average:    point.Average,
+			Highest:    point.Highest,
+			Lowest:     point.Lowest,
+		}
 	}
 	return out, nil
 }

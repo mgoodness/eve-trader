@@ -34,7 +34,7 @@ func TestFakeFetchRensOrdersReturnsSeededError(t *testing.T) {
 }
 
 func TestFakeFetchHistoryReturnsSeededPointsByTypeID(t *testing.T) {
-	pts := []esi.HistoryPoint{{Date: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), Volume: 42, OrderCount: 3}}
+	pts := []esi.HistoryPoint{{Date: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), Volume: 42, OrderCount: 3, Average: 5.5, Highest: 6.0, Lowest: 5.0}}
 	fake := &esi.Fake{History: map[int][]esi.HistoryPoint{34: pts}}
 
 	got, err := fake.FetchHistory(t.Context(), 34)

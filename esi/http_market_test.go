@@ -146,6 +146,26 @@ func TestHTTPGatewayFetchHistorySurfacesHTTPError(t *testing.T) {
 	}
 }
 
+func TestHTTPGatewayFetchHistoryCarriesPriceFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[{"date":"2026-09-16","volume":100,"order_count":7,"average":12.5,"highest":15.0,"lowest":10.25}]`)
+	}))
+	defer server.Close()
+
+	got, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchHistory(context.Background(), 34)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("FetchHistory() = %+v, want one point", got)
+	}
+	point := got[0]
+	want := esi.HistoryPoint{Date: time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC), Volume: 100, OrderCount: 7, Average: 12.5, Highest: 15.0, Lowest: 10.25}
+	if point != want {
+		t.Fatalf("FetchHistory()[0] = %+v, want %+v", point, want)
+	}
+}
+
 func TestHTTPGatewayFetchHistoryRejectsMalformedDate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `[{"date":"not-a-date","volume":1,"order_count":1}]`)

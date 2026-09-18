@@ -15,7 +15,7 @@ import (
 
 const (
 	// HistoryRetention is the number of calendar days retained in market_history.
-	HistoryRetention = 14
+	HistoryRetention = 30
 	// HistoryResetHour and HistoryResetMinute are ESI's approximate daily cache
 	// reset time. Refreshes are scheduled just after this point.
 	HistoryResetHour   = 11
@@ -302,9 +302,9 @@ func (p *HistoryPoller) writeHistory(ctx context.Context, history map[int][]esi.
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO market_history (type_id, date, volume, order_count) VALUES (?, ?, ?, ?)
-				ON CONFLICT(type_id, date) DO UPDATE SET volume=excluded.volume, order_count=excluded.order_count`,
-				typeID, date, point.Volume, point.OrderCount); err != nil {
+				INSERT INTO market_history (type_id, date, volume, order_count, average, highest, lowest) VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(type_id, date) DO UPDATE SET volume=excluded.volume, order_count=excluded.order_count, average=excluded.average, highest=excluded.highest, lowest=excluded.lowest`,
+				typeID, date, point.Volume, point.OrderCount, point.Average, point.Highest, point.Lowest); err != nil {
 				return fmt.Errorf("upserting history for type %d on %s: %w", typeID, date, err)
 			}
 		}
