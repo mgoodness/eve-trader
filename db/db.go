@@ -41,36 +41,25 @@ func Open(dsn string) (*sql.DB, error) {
 	return sqlDB, nil
 }
 
-// column is a column added to an existing table after the initial v1
-// schema, with the SQL type to declare it as.
-type column struct {
-	name string
-	typ  string
-}
-
 // migrate applies the additive schema changes made since the initial v1
 // schema, so an existing database upgrades in place with no data loss.
-// SQLite has no ADD COLUMN IF NOT EXISTS, so each table's current columns
+// SQLite has no ADD COLUMN IF NOT EXISTS, so the table's current columns
 // are read and only the missing ones are added; the call is idempotent.
 func migrate(sqlDB *sql.DB) error {
-	return addMissingColumns(sqlDB, "market_history", []column{
-		{name: "average", typ: "REAL"},
-		{name: "highest", typ: "REAL"},
-		{name: "lowest", typ: "REAL"},
-	})
-}
-
-func addMissingColumns(sqlDB *sql.DB, table string, columns []column) error {
-	existing, err := tableColumns(sqlDB, table)
+	existing, err := tableColumns(sqlDB, "market_history")
 	if err != nil {
 		return err
 	}
-	for _, col := range columns {
+	for _, col := range []struct{ name, typ string }{
+		{"average", "REAL"},
+		{"highest", "REAL"},
+		{"lowest", "REAL"},
+	} {
 		if existing[col.name] {
 			continue
 		}
-		if _, err := sqlDB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, col.name, col.typ)); err != nil {
-			return fmt.Errorf("adding %s.%s: %w", table, col.name, err)
+		if _, err := sqlDB.Exec(fmt.Sprintf("ALTER TABLE market_history ADD COLUMN %s %s", col.name, col.typ)); err != nil {
+			return fmt.Errorf("adding market_history.%s: %w", col.name, err)
 		}
 	}
 	return nil

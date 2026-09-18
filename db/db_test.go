@@ -32,10 +32,10 @@ func TestOpenAddsMarketHistoryPriceColumns(t *testing.T) {
 	}
 	defer sqlDB.Close()
 
-	for _, column := range []string{"average", "highest", "lowest"} {
-		if !hasColumn(t, sqlDB, "market_history", column) {
-			t.Errorf("market_history column %q missing", column)
-		}
+	// Referencing the columns makes a missing one a query error.
+	var count int
+	if err := sqlDB.QueryRow(`SELECT COUNT(average) + COUNT(highest) + COUNT(lowest) FROM market_history`).Scan(&count); err != nil {
+		t.Fatalf("market_history price columns missing: %v", err)
 	}
 }
 
@@ -69,14 +69,9 @@ func TestOpenMigratesV1MarketHistoryWithoutDataLoss(t *testing.T) {
 	}
 	defer sqlDB.Close()
 
-	for _, column := range []string{"average", "highest", "lowest"} {
-		if !hasColumn(t, sqlDB, "market_history", column) {
-			t.Errorf("market_history column %q missing after migration", column)
-		}
-	}
-
 	// The pre-existing row survives, with the new price columns NULL until
-	// its next history refresh.
+	// its next history refresh. Selecting the columns also proves the
+	// migration added them.
 	var (
 		volume  int
 		average sql.NullFloat64
@@ -106,32 +101,6 @@ func TestOpenMigratesV1MarketHistoryWithoutDataLoss(t *testing.T) {
 		t.Fatalf("second Open() error = %v", err)
 	}
 	defer reopened.Close()
-}
-
-func hasColumn(t *testing.T, sqlDB *sql.DB, table, column string) bool {
-	t.Helper()
-	rows, err := sqlDB.Query("PRAGMA table_info(" + table + ")")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			cid          int
-			name         string
-			typ          string
-			notNull      int
-			defaultValue sql.NullString
-			primaryKey   int
-		)
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
-			t.Fatal(err)
-		}
-		if name == column {
-			return true
-		}
-	}
-	return false
 }
 
 func TestOpenIsIdempotent(t *testing.T) {
