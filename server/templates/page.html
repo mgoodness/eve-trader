@@ -13,16 +13,28 @@
   .sidebar { flex: 0 0 18rem; }
   .results { flex: 1 1 auto; min-width: 0; }
   .card { background: #0f172a; border: 1px solid #1e293b; border-radius: .6rem; padding: 1rem; }
+  .card + .card { margin-top: 1rem; }
   .card h2 { margin: 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; }
   .card-note { color: #94a3b8; font-size: .8rem; margin: .5rem 0 0; }
   .card-note strong { color: #e2e8f0; }
   .rules { list-style: disc; padding-left: 1.1rem; margin: .5rem 0 0; color: #cbd5e1; font-size: .8rem; }
   .rules li { margin: .25rem 0; }
+  .control { display: block; margin: .75rem 0 0; color: #cbd5e1; font-size: .8rem; }
+  .control input { display: block; margin-top: .3rem; width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #1e293b; border-radius: .35rem; color: #e2e8f0; padding: .4rem .5rem; font-size: .85rem; }
+  .control .help { display: inline-block; margin-left: .25rem; width: 1rem; height: 1rem; line-height: 1rem; text-align: center; border-radius: 50%; background: #1e293b; color: #94a3b8; font-size: .7rem; cursor: help; }
+  .actions { display: flex; align-items: center; gap: .5rem; margin-top: 1rem; }
+  .actions button { flex: 1 1 auto; background: #34d399; color: #06251b; border: 0; border-radius: .35rem; font-weight: 600; padding: .5rem .75rem; cursor: pointer; }
+  .actions a { color: #94a3b8; font-size: .8rem; text-decoration: none; padding: .5rem .25rem; }
+  .actions a:hover { color: #e2e8f0; }
+  .summary { color: #94a3b8; font-size: .8rem; margin: 0 0 .75rem; }
+  .summary strong { color: #e2e8f0; }
   table { width: 100%; border-collapse: collapse; font-size: .9rem; }
   th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid #1e293b; }
   th { color: #94a3b8; font-weight: 600; }
   th[hx-get] { cursor: pointer; }
   th[hx-get]:hover { color: #e2e8f0; }
+  th.active { color: #e2e8f0; }
+  td.empty { color: #94a3b8; padding: 2rem .75rem; text-align: center; }
   td.iskday { font-weight: 600; color: #34d399; }
   .reauth { min-height: 60vh; display: grid; place-items: center; text-align: center; }
   .reauth a { display: inline-block; margin-top: 1rem; padding: .75rem 1.25rem; border-radius: .35rem; background: #34d399; color: #06251b; font-weight: 700; text-decoration: none; }
@@ -43,34 +55,8 @@
     </div>
   </section>
   {{else}}
-  <div class="layout">
-    <aside class="sidebar">
-      <section class="card" aria-labelledby="realism-title">
-        <h2 id="realism-title">Always-on realism filters</h2>
-        <p class="card-note">Cannot be turned off. Hidden by realism filters: <strong>{{.HiddenByRealism}}</strong>.</p>
-        <ul class="rules">
-          {{range .RealismRules}}<li>{{.}}</li>{{end}}
-        </ul>
-      </section>
-    </aside>
-    <section class="results">
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th hx-get="/opportunities?sort=buy" hx-target="#rows" hx-swap="innerHTML">Buy</th>
-            <th hx-get="/opportunities?sort=sell" hx-target="#rows" hx-swap="innerHTML">Sell</th>
-            <th hx-get="/opportunities?sort=margin" hx-target="#rows" hx-swap="innerHTML">Net margin</th>
-            <th hx-get="/opportunities?sort=iskunit" hx-target="#rows" hx-swap="innerHTML">ISK/unit</th>
-            <th hx-get="/opportunities?sort=volday" hx-target="#rows" hx-swap="innerHTML">Vol/day</th>
-            <th hx-get="/opportunities?sort=iskday" hx-target="#rows" hx-swap="innerHTML">ISK/day</th>
-          </tr>
-        </thead>
-        <tbody id="rows">
-          {{template "rows" .Opportunities}}
-        </tbody>
-      </table>
-    </section>
+  <div id="layout">
+    {{template "layout" .}}
   </div>
   {{end}}
 </main>
