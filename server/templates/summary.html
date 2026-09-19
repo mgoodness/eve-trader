@@ -1,1 +1,1 @@
-{{define "summary"}}Showing <strong>{{.Shown}}</strong> of {{.Total}} items &middot; <strong>{{.HiddenByRealism}}</strong> hidden by realism filters &middot; <strong>{{.HiddenByFilters}}</strong> outside your filters.{{end}}
+{{define "summary"}}Showing <strong>{{.Shown}}</strong> of {{.Total}} items &middot; <strong>{{.HiddenByRealism}}</strong> hidden by realism filters &middot; <strong>{{.HiddenByFilters}}</strong> outside your filters{{if .ActiveFilterSummary}} &middot; filtering by {{.ActiveFilterSummary}}{{end}}.{{end}}

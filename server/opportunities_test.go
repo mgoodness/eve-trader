@@ -28,8 +28,8 @@ func seedCandidate(t *testing.T, sqlDB *sql.DB, typeID int, name string, buy, se
 }
 
 // seedOpportunityFixtures seeds the same four items used throughout: two
-// above the v1 filter thresholds (Tritanium ranks higher than Pyerite by
-// ISK/day), and two below threshold (one on margin, one on volume). All
+// above the user-filter defaults (Tritanium ranks higher than Pyerite by
+// ISK/day), and two below the defaults (one on margin, one on volume). All
 // four clear the always-on realism filters.
 func seedOpportunityFixtures(t *testing.T, sqlDB *sql.DB) {
 	t.Helper()

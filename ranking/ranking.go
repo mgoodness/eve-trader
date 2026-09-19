@@ -49,7 +49,7 @@ type Opportunity struct {
 	Name           string
 	Buy            float64 // P_b -- best (highest) current Rens buy order price
 	Sell           float64 // P_s -- best (lowest) current Rens sell order price
-	GrossMarginPct float64 // M   -- gross margin percentage, before fees (drives the v1 filter)
+	GrossMarginPct float64 // M   -- gross margin percentage, before fees (drives the minimum-margin filter)
 	NetMarginPct   float64 // net margin percentage -- profit after fees as a fraction of sell price (displayed)
 	ProfitPerUnit  float64 // π   -- profit per unit after broker fee and sales tax
 	VolumePerDay   float64 // V_d -- average daily Heimatar-region volume (approximation, see docs/spec/v1.md §3)

@@ -22,7 +22,7 @@ func v1Thresholds() ranking.Filters {
 // seedRealisticItem seeds a candidate that clears every always-on realism
 // filter: priced trade-days (the caller supplies at least 7), and two
 // orders inside the near-best band on each side, so the item is hidden only
-// by the v1 thresholds a test is exercising.
+// by the user-filter bounds a test is exercising.
 func seedRealisticItem(t *testing.T, sqlDB *sql.DB, typeID int, name string, buy, sell float64, volumes ...int) {
 	t.Helper()
 	dbtest.SeedItem(t, sqlDB, typeID, name)

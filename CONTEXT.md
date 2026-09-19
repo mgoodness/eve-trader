@@ -5,12 +5,12 @@ A single-user tool that finds station-trading opportunities at Rens in EVE Onlin
 ## Language
 
 **Opportunity**:
-An item that has both a best buy order and a best sell order at Rens, clears the always-on realism filters, and whose margin and volume clear the v1 thresholds.
+An item that has both a best buy order and a best sell order at Rens, clears the always-on realism filters, and clears the active user filters.
 _Avoid_: trade, deal, flip
 
-**v1 thresholds**:
-The fixed filters an Opportunity must clear: 5% minimum margin and 10 units/day minimum average volume.
-_Avoid_: filters, criteria
+**User filter**:
+One of the four trader-adjustable bounds applied after the realism filters: minimum daily volume, minimum and maximum gross margin %, and maximum sell price. Bounds are inclusive and a blank control means no bound.
+_Avoid_: filters, criteria, v1 thresholds
 
 **Rens**:
 The NPC station in the Heimatar region where every trade in scope takes place.

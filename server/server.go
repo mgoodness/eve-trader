@@ -86,6 +86,7 @@ type pageData struct {
 	RealismRules    []string
 
 	FilterForm          filterForm
+	FilterControls      []controlView
 	Sort                string
 	Columns             []sortColumn
 	ActiveFilterSummary string
@@ -171,6 +172,7 @@ func (s *Server) buildPageData(r *http.Request) (pageData, error) {
 		Shown:               len(result.Opportunities),
 		RealismRules:        realismRules,
 		FilterForm:          form,
+		FilterControls:      form.controlsView(),
 		Sort:                sortKey,
 		Columns:             buildColumns(form, sortKey),
 		ActiveFilterSummary: form.activeSummary(),

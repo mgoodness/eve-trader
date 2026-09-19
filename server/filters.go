@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -17,28 +19,90 @@ const (
 	defaultMaxMargin = 60.0
 )
 
-// maxSellDefault is deliberately "no default": the max-sell control starts
-// blank, meaning no cap.
-var maxSellDefault *float64
-
-// filterForm is the parsed user-filter state for one request: the concrete
-// bounds handed to the ranking query and the raw strings the form inputs
-// render. present records which controls appeared in the request URL at
-// all, so links can round-trip exactly the state the user asked for without
-// embedding untouched defaults.
-type filterForm struct {
-	Bounds ranking.Filters
-
-	MinVolume string
-	MinMargin string
-	MaxMargin string
-	MaxSell   string
-
-	present map[string]bool
+// filterSpec describes one user-filter control: its URL param, sidebar
+// label, hover help, default bound (nil = no default bound), validity range,
+// and the bits the summary copy needs. Keeping the four controls in one
+// table means the parser, the rendered form, and the round-trip links cannot
+// disagree about them.
+type filterSpec struct {
+	name         string
+	label        string
+	summaryLabel string
+	unit         string
+	placeholder  string
+	help         string
+	def          *float64
+	valid        func(float64) bool
 }
 
-// filteredParamNames are the four user-filter controls, in form order.
-var filteredParamNames = []string{"minvol", "minmargin", "maxmargin", "maxsell"}
+var filterSpecs = []filterSpec{
+	{
+		name:         "minvol",
+		label:        "Minimum daily volume",
+		summaryLabel: "minimum daily volume",
+		help:         fmt.Sprintf("Hide items whose average daily Heimatar volume is below this. Default %s keeps dead markets out; clear it for no lower bound.", formatNumber(defaultMinVolume)),
+		def:          float64Ptr(defaultMinVolume),
+		valid:        nonNegative,
+	},
+	{
+		name:         "minmargin",
+		label:        "Minimum gross margin %",
+		summaryLabel: "minimum gross margin",
+		unit:         "%",
+		help:         fmt.Sprintf("Hide items whose gross margin is below this. Gross margin is (sell - buy) / sell. Default %s%%; clear it for no lower bound.", formatNumber(defaultMinMargin)),
+		def:          float64Ptr(defaultMinMargin),
+		valid:        percentage,
+	},
+	{
+		name:         "maxmargin",
+		label:        "Maximum gross margin %",
+		summaryLabel: "maximum gross margin",
+		unit:         "%",
+		help:         fmt.Sprintf("Hide items whose gross margin is above this - usually a stale or manipulated price. Default %s%%; clear it for no upper bound.", formatNumber(defaultMaxMargin)),
+		def:          float64Ptr(defaultMaxMargin),
+		valid:        percentage,
+	},
+	{
+		name:         "maxsell",
+		label:        "Maximum sell price",
+		summaryLabel: "maximum sell price",
+		unit:         " ISK",
+		placeholder:  "no cap",
+		help:         "Hide items whose sell price is above this, to cap what you must spend to acquire them. Blank means no cap.",
+		def:          nil,
+		valid:        nonNegative,
+	},
+}
+
+// controlView is one control as the sidebar renders it: the label, the
+// current value, and the shared hover help.
+type controlView struct {
+	Name        string
+	Label       string
+	Help        string
+	Value       string
+	Placeholder string
+}
+
+// filterControl is one parsed control: the concrete bound handed to ranking
+// (nil = no bound), the raw string the input renders, and whether the param
+// appeared in the request at all.
+type filterControl struct {
+	spec    filterSpec
+	bound   *float64
+	raw     string
+	present bool
+}
+
+// filterForm is the parsed user-filter state for one request: the concrete
+// bounds handed to the ranking query and the per-control raw values the form
+// renders. present records which controls appeared in the request URL at
+// all, so generated links round-trip exactly the state the user asked for
+// without embedding untouched defaults.
+type filterForm struct {
+	Bounds   ranking.Filters
+	controls map[string]*filterControl
+}
 
 // parseFilterForm applies the stateless URL contract to q:
 //
@@ -50,19 +114,28 @@ var filteredParamNames = []string{"minvol", "minmargin", "maxmargin", "maxsell"}
 // and min margin greater than max margin falls both back to defaults. It
 // never errors: a typo degrades to a default rather than an error page.
 func parseFilterForm(q url.Values) filterForm {
-	f := filterForm{present: map[string]bool{}}
-	for _, name := range filteredParamNames {
-		f.present[name] = q.Has(name)
+	f := filterForm{controls: make(map[string]*filterControl, len(filterSpecs))}
+	for _, spec := range filterSpecs {
+		bound, raw := parseBound(q, spec.name, spec.def, spec.valid)
+		f.controls[spec.name] = &filterControl{
+			spec:    spec,
+			bound:   bound,
+			raw:     raw,
+			present: q.Has(spec.name),
+		}
 	}
 
-	f.Bounds.MinVolume, f.MinVolume = parseBound(q, "minvol", float64Ptr(defaultMinVolume), nonNegative)
-	f.Bounds.MinMargin, f.MinMargin = parseBound(q, "minmargin", float64Ptr(defaultMinMargin), percentage)
-	f.Bounds.MaxMargin, f.MaxMargin = parseBound(q, "maxmargin", float64Ptr(defaultMaxMargin), percentage)
-	f.Bounds.MaxSell, f.MaxSell = parseBound(q, "maxsell", maxSellDefault, nonNegative)
+	min, max := f.controls["minmargin"], f.controls["maxmargin"]
+	if min.bound != nil && max.bound != nil && *min.bound > *max.bound {
+		min.reset()
+		max.reset()
+	}
 
-	if f.Bounds.MinMargin != nil && f.Bounds.MaxMargin != nil && *f.Bounds.MinMargin > *f.Bounds.MaxMargin {
-		f.Bounds.MinMargin, f.MinMargin = float64Ptr(defaultMinMargin), formatNumber(defaultMinMargin)
-		f.Bounds.MaxMargin, f.MaxMargin = float64Ptr(defaultMaxMargin), formatNumber(defaultMaxMargin)
+	f.Bounds = ranking.Filters{
+		MinVolume: f.controls["minvol"].bound,
+		MinMargin: min.bound,
+		MaxMargin: max.bound,
+		MaxSell:   f.controls["maxsell"].bound,
 	}
 	return f
 }
@@ -73,9 +146,9 @@ func parseFilterForm(q url.Values) filterForm {
 // round-trip as present-but-empty so "no bound" stays "no bound".
 func (f filterForm) values(sortKey string) url.Values {
 	q := url.Values{}
-	for _, name := range filteredParamNames {
-		if f.present[name] {
-			q.Set(name, f.raw(name))
+	for _, spec := range filterSpecs {
+		if c := f.controls[spec.name]; c.present {
+			q.Set(spec.name, c.raw)
 		}
 	}
 	if sortKey != "" {
@@ -84,18 +157,32 @@ func (f filterForm) values(sortKey string) url.Values {
 	return q
 }
 
-func (f filterForm) raw(name string) string {
-	switch name {
-	case "minvol":
-		return f.MinVolume
-	case "minmargin":
-		return f.MinMargin
-	case "maxmargin":
-		return f.MaxMargin
-	case "maxsell":
-		return f.MaxSell
+// controlsView returns the four controls in form order.
+func (f filterForm) controlsView() []controlView {
+	views := make([]controlView, len(filterSpecs))
+	for i, spec := range filterSpecs {
+		views[i] = controlView{
+			Name:        spec.name,
+			Label:       spec.label,
+			Help:        spec.help,
+			Value:       f.controls[spec.name].raw,
+			Placeholder: spec.placeholder,
+		}
 	}
-	return ""
+	return views
+}
+
+// activeSummary names the controls that currently impose a bound, for the
+// summary line and empty state. A blank (no-bound) control contributes
+// nothing, so copy can never hardcode a threshold the user has cleared.
+func (f filterForm) activeSummary() string {
+	var parts []string
+	for _, spec := range filterSpecs {
+		if c := f.controls[spec.name]; c.raw != "" {
+			parts = append(parts, spec.summaryLabel+" "+c.raw+spec.unit)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // parseBound reads one control. def is the value used when the param is
@@ -111,10 +198,16 @@ func parseBound(q url.Values, name string, def *float64, valid func(float64) boo
 		return nil, ""
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || !valid(v) {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || !valid(v) {
 		return def, formatDefault(def)
 	}
 	return float64Ptr(v), raw
+}
+
+// reset restores a control to its default (or no bound when it has none).
+func (c *filterControl) reset() {
+	c.bound = c.spec.def
+	c.raw = formatDefault(c.spec.def)
 }
 
 func float64Ptr(v float64) *float64 { return &v }
@@ -131,23 +224,3 @@ func formatNumber(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64)
 func nonNegative(v float64) bool { return v >= 0 }
 
 func percentage(v float64) bool { return v >= 0 && v <= 100 }
-
-// activeSummary names the controls that currently impose a bound, for the
-// empty state. A blank (no-bound) control contributes nothing, so copy can
-// never hardcode a threshold that the user has since cleared.
-func (f filterForm) activeSummary() string {
-	var parts []string
-	if f.MinVolume != "" {
-		parts = append(parts, "minimum daily volume "+f.MinVolume)
-	}
-	if f.MinMargin != "" {
-		parts = append(parts, "minimum gross margin "+f.MinMargin+"%")
-	}
-	if f.MaxMargin != "" {
-		parts = append(parts, "maximum gross margin "+f.MaxMargin+"%")
-	}
-	if f.MaxSell != "" {
-		parts = append(parts, "maximum sell price "+f.MaxSell+" ISK")
-	}
-	return strings.Join(parts, "; ")
-}
