@@ -1,6 +1,7 @@
 package ranking_test
 
 import (
+	"database/sql"
 	"math"
 	"testing"
 
@@ -9,6 +10,17 @@ import (
 )
 
 func approxEqual(a, b float64) bool { return math.Abs(a-b) < 0.001 }
+
+// seedRealisticItem seeds a candidate that clears every always-on realism
+// filter: priced trade-days (the caller supplies at least 7), and two
+// orders inside the near-best band on each side, so the item is hidden only
+// by the v1 thresholds a test is exercising.
+func seedRealisticItem(t *testing.T, sqlDB *sql.DB, typeID int, name string, buy, sell float64, volumes ...int) {
+	t.Helper()
+	dbtest.SeedItem(t, sqlDB, typeID, name)
+	dbtest.SeedBook(t, sqlDB, typeID, buy, sell)
+	dbtest.SeedHistory(t, sqlDB, typeID, volumes...)
+}
 
 // TestLoadFiltersAndRanksByISKPerDayDescending seeds two above-threshold
 // items and two below-threshold items (one under the margin floor, one
@@ -20,33 +32,22 @@ func TestLoadFiltersAndRanksByISKPerDayDescending(t *testing.T) {
 	dbtest.SeedSkills(t, sqlDB, 1, 4, 3) // Broker Relations 4, Accounting 3
 
 	// Item A: high EDP. Buy 100 / Sell 120, avg volume 50.
-	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
-	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 2, 34, false, 120)
-	dbtest.SeedHistory(t, sqlDB, 34, 40, 60) // avg 50
+	seedRealisticItem(t, sqlDB, 34, "Tritanium", 100, 120, 50, 50, 50, 50, 50, 50, 50)
 
 	// Item D: lower EDP than A, still above threshold. Buy 50 / Sell 60, avg volume 30.
-	dbtest.SeedItem(t, sqlDB, 35, "Pyerite")
-	dbtest.SeedOrder(t, sqlDB, 3, 35, true, 50)
-	dbtest.SeedOrder(t, sqlDB, 4, 35, false, 60)
-	dbtest.SeedHistory(t, sqlDB, 35, 20, 40) // avg 30
+	seedRealisticItem(t, sqlDB, 35, "Pyerite", 50, 60, 30, 30, 30, 30, 30, 30, 30)
 
 	// Item B: below margin threshold (2.9% < 5%). Buy 100 / Sell 103.
-	dbtest.SeedItem(t, sqlDB, 36, "Below Margin Ore")
-	dbtest.SeedOrder(t, sqlDB, 5, 36, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 6, 36, false, 103)
-	dbtest.SeedHistory(t, sqlDB, 36, 100, 100) // avg 100, plenty of volume
+	seedRealisticItem(t, sqlDB, 36, "Below Margin Ore", 100, 103, 100, 100, 100, 100, 100, 100, 100)
 
 	// Item C: below volume threshold (5 < 10). Buy 200 / Sell 240 (healthy margin).
-	dbtest.SeedItem(t, sqlDB, 37, "Below Volume Ore")
-	dbtest.SeedOrder(t, sqlDB, 7, 37, true, 200)
-	dbtest.SeedOrder(t, sqlDB, 8, 37, false, 240)
-	dbtest.SeedHistory(t, sqlDB, 37, 5, 5) // avg 5
+	seedRealisticItem(t, sqlDB, 37, "Below Volume Ore", 200, 240, 5, 5, 5, 5, 5, 5, 5)
 
-	got, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
+	got := result.Opportunities
 
 	if len(got) != 2 {
 		t.Fatalf("Load() returned %d opportunities, want 2 (got %+v)", len(got), got)
@@ -89,25 +90,21 @@ func TestLoadFiltersAndRanksByISKPerDayDescending(t *testing.T) {
 func TestLoadUsesCharacterSkillLevels(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	dbtest.SeedSkills(t, sqlDB, 1, 0, 0) // unskilled
+	seedRealisticItem(t, sqlDB, 34, "Tritanium", 100, 120, 50, 50, 50, 50, 50, 50, 50)
 
-	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
-	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 2, 34, false, 120)
-	dbtest.SeedHistory(t, sqlDB, 34, 50, 50)
-
-	got, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("Load() returned %d opportunities, want 1", len(got))
+	if len(result.Opportunities) != 1 {
+		t.Fatalf("Load() returned %d opportunities, want 1", len(result.Opportunities))
 	}
 
 	// R_b = 3%, R_t = 7.5% at level 0.
 	// π = 120 - 100 - (100*0.03) - (120*0.03) - (120*0.075) = 4.4
 	wantProfit := 4.4
-	if !approxEqual(got[0].ProfitPerUnit, wantProfit) {
-		t.Errorf("unskilled ProfitPerUnit = %v, want %v", got[0].ProfitPerUnit, wantProfit)
+	if !approxEqual(result.Opportunities[0].ProfitPerUnit, wantProfit) {
+		t.Errorf("unskilled ProfitPerUnit = %v, want %v", result.Opportunities[0].ProfitPerUnit, wantProfit)
 	}
 }
 
@@ -116,23 +113,19 @@ func TestLoadUsesCharacterSkillLevels(t *testing.T) {
 // erroring, mirroring ESIGateway's "missing skill = level 0" convention.
 func TestLoadTreatsMissingCharacterSkillRowAsZeroLevels(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
+	seedRealisticItem(t, sqlDB, 34, "Tritanium", 100, 120, 50, 50, 50, 50, 50, 50, 50)
 
-	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
-	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 2, 34, false, 120)
-	dbtest.SeedHistory(t, sqlDB, 34, 50, 50)
-
-	got, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("Load() returned %d opportunities, want 1", len(got))
+	if len(result.Opportunities) != 1 {
+		t.Fatalf("Load() returned %d opportunities, want 1", len(result.Opportunities))
 	}
 
 	wantProfit := 4.4
-	if !approxEqual(got[0].ProfitPerUnit, wantProfit) {
-		t.Errorf("ProfitPerUnit = %v, want %v (level-0 default)", got[0].ProfitPerUnit, wantProfit)
+	if !approxEqual(result.Opportunities[0].ProfitPerUnit, wantProfit) {
+		t.Errorf("ProfitPerUnit = %v, want %v (level-0 default)", result.Opportunities[0].ProfitPerUnit, wantProfit)
 	}
 }
 
@@ -145,14 +138,15 @@ func TestLoadExcludesItemsMissingEitherSideOfTheBook(t *testing.T) {
 
 	dbtest.SeedItem(t, sqlDB, 34, "Buy Only")
 	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
-	dbtest.SeedHistory(t, sqlDB, 34, 50, 50)
+	dbtest.SeedOrder(t, sqlDB, 2, 34, true, 99)
+	dbtest.SeedHistory(t, sqlDB, 34, 50, 50, 50, 50, 50, 50, 50)
 
-	got, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("Load() = %+v, want empty (no sell side)", got)
+	if len(result.Opportunities) != 0 {
+		t.Fatalf("Load() = %+v, want empty (no sell side)", result.Opportunities)
 	}
 }
 

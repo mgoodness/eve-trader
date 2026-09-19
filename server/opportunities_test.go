@@ -13,37 +13,40 @@ import (
 	"github.com/mgoodness/eve-trader/server"
 )
 
+// seedCandidate seeds an item, a priced 7-trade-day history at the given
+// daily volume, and a two-orders-per-side book, so the item clears every
+// always-on realism filter.
+func seedCandidate(t *testing.T, sqlDB *sql.DB, typeID int, name string, buy, sell, volume float64) {
+	t.Helper()
+	dbtest.SeedItem(t, sqlDB, typeID, name)
+	dbtest.SeedBook(t, sqlDB, typeID, buy, sell)
+	volumes := make([]int, 7)
+	for i := range volumes {
+		volumes[i] = int(volume)
+	}
+	dbtest.SeedHistory(t, sqlDB, typeID, volumes...)
+}
+
 // seedOpportunityFixtures seeds the same four items used throughout: two
 // above the v1 filter thresholds (Tritanium ranks higher than Pyerite by
-// ISK/day), and two below threshold (one on margin, one on volume).
+// ISK/day), and two below threshold (one on margin, one on volume). All
+// four clear the always-on realism filters.
 func seedOpportunityFixtures(t *testing.T, sqlDB *sql.DB) {
 	t.Helper()
 	dbtest.SeedSkills(t, sqlDB, 1, 4, 3) // Broker Relations 4, Accounting 3
 	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
 
-	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
-	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 2, 34, false, 120)
 	// avg 40. Deliberately not a volume that lands the resulting ISK/day
 	// exactly on a rounding half-boundary (e.g. avg 50 -> exactly 500.5),
 	// which is sensitive to floating-point-arithmetic-order differences
 	// across platforms/compilers and made this fixture flaky in CI.
-	dbtest.SeedHistory(t, sqlDB, 34, 38, 42)
+	seedCandidate(t, sqlDB, 34, "Tritanium", 100, 120, 40)
 
-	dbtest.SeedItem(t, sqlDB, 35, "Pyerite")
-	dbtest.SeedOrder(t, sqlDB, 3, 35, true, 50)
-	dbtest.SeedOrder(t, sqlDB, 4, 35, false, 60)
-	dbtest.SeedHistory(t, sqlDB, 35, 20, 40) // avg 30
+	seedCandidate(t, sqlDB, 35, "Pyerite", 50, 60, 30) // avg 30
 
-	dbtest.SeedItem(t, sqlDB, 36, "Below Margin Ore")
-	dbtest.SeedOrder(t, sqlDB, 5, 36, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 6, 36, false, 103) // margin 2.9% < 5%
-	dbtest.SeedHistory(t, sqlDB, 36, 100, 100)
+	seedCandidate(t, sqlDB, 36, "Below Margin Ore", 100, 103, 100) // margin 2.9% < 5%
 
-	dbtest.SeedItem(t, sqlDB, 37, "Below Volume Ore")
-	dbtest.SeedOrder(t, sqlDB, 7, 37, true, 200)
-	dbtest.SeedOrder(t, sqlDB, 8, 37, false, 240) // healthy margin
-	dbtest.SeedHistory(t, sqlDB, 37, 5, 5)        // avg 5 < 10 units/day
+	seedCandidate(t, sqlDB, 37, "Below Volume Ore", 200, 240, 5) // avg 5 < 10 units/day
 }
 
 func getBody(t *testing.T, url string) (int, string) {
@@ -130,10 +133,7 @@ func TestIndexOmitsAllRowsBelowThresholdWithNoQualifyingItems(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	dbtest.SeedSkills(t, sqlDB, 1, 0, 0)
 	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
-	dbtest.SeedItem(t, sqlDB, 36, "Below Margin Ore")
-	dbtest.SeedOrder(t, sqlDB, 1, 36, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 2, 36, false, 103)
-	dbtest.SeedHistory(t, sqlDB, 36, 100, 100)
+	seedCandidate(t, sqlDB, 36, "Below Margin Ore", 100, 103, 100)
 
 	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB, testAuthConfig()))
 	defer srv.Close()

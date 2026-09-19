@@ -49,10 +49,22 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	database := dbtest.OpenDB(t)
 	issued := time.Now().UTC()
 	gateway := &historyGateway{
-		orders: []esi.Order{{OrderID: 1, TypeID: 34, IsBuyOrder: true, Price: 5, Issued: issued}, {OrderID: 2, TypeID: 34, Price: 8, Issued: issued}},
+		orders: []esi.Order{
+			{OrderID: 1, TypeID: 34, IsBuyOrder: true, Price: 5, Issued: issued},
+			{OrderID: 2, TypeID: 34, Price: 8, Issued: issued},
+			// Second order inside the near-best band on each side, so the
+			// seeded book is not a single-order spread.
+			{OrderID: 3, TypeID: 34, IsBuyOrder: true, Price: 4.9, Issued: issued},
+			{OrderID: 4, TypeID: 34, Price: 8.4, Issued: issued},
+		},
 		history: map[int][]esi.HistoryPoint{34: {
 			{Date: time.Now().UTC(), Volume: 10, OrderCount: 1, Average: 1.5, Highest: 2, Lowest: 1},
 			{Date: time.Now().UTC().AddDate(0, 0, -1), Volume: 20, OrderCount: 2, Average: 3.5, Highest: 4, Lowest: 3},
+			{Date: time.Now().UTC().AddDate(0, 0, -2), Volume: 15, OrderCount: 3, Average: 2, Highest: 2, Lowest: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -3), Volume: 15, OrderCount: 3, Average: 2, Highest: 2, Lowest: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -4), Volume: 15, OrderCount: 3, Average: 2, Highest: 2, Lowest: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -5), Volume: 15, OrderCount: 3, Average: 2, Highest: 2, Lowest: 2},
+			{Date: time.Now().UTC().AddDate(0, 0, -6), Volume: 15, OrderCount: 3, Average: 2, Highest: 2, Lowest: 2},
 			{Date: time.Now().UTC().AddDate(0, 0, -30), Volume: 999, OrderCount: 9, Average: 9, Highest: 9, Lowest: 9},
 		}},
 	}
@@ -68,8 +80,8 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM market_history`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatalf("history row count = %d, want 2", count)
+	if count != 7 {
+		t.Fatalf("history row count = %d, want 7", count)
 	}
 	var volume float64
 	if err := database.QueryRow(`SELECT AVG(volume) FROM market_history WHERE type_id = 34`).Scan(&volume); err != nil {
@@ -92,8 +104,8 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].VolumePerDay != 15 {
-		t.Fatalf("ranking volume = %+v, want one opportunity at 15", got)
+	if len(got.Opportunities) != 1 || got.Opportunities[0].VolumePerDay != 15 {
+		t.Fatalf("ranking volume = %+v, want one opportunity at 15", got.Opportunities)
 	}
 	if len(gateway.calls) != 1 || gateway.calls[0] != 34 {
 		t.Fatalf("FetchHistory calls = %v, want [34]", gateway.calls)

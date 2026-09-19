@@ -64,11 +64,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// realismRules are the always-on filters the sidebar names, built from
+// ranking's thresholds so the displayed copy cannot drift from the code.
+var realismRules = []string{
+	fmt.Sprintf("At least %d days of recent trade history", ranking.MinTradeDays),
+	fmt.Sprintf("No manipulated history (fewer than %d trade-days with a greater-than-%gx high/low swing)", ranking.ManipulatedTradeDays, ranking.ManipulatedSwingRatio),
+	fmt.Sprintf("No single-order spreads (one or fewer orders within %g%% of best on either side)", ranking.NearBookBand*100),
+	"Complete price history (items not yet re-fetched are hidden)",
+}
+
 // pageData is the data handed to the "page.html" template.
 type pageData struct {
-	Opportunities []ranking.Opportunity
-	Reauth        bool
-	FirstBoot     bool
+	Opportunities   []ranking.Opportunity
+	HiddenByRealism int
+	RealismRules    []string
+	Reauth          bool
+	FirstBoot       bool
 }
 
 // handleIndex renders the opportunity table: one row per item that clears
@@ -82,14 +93,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opportunities, err := ranking.Load(r.Context(), s.db)
+	result, err := ranking.Load(r.Context(), s.db)
 	if err != nil {
 		slog.Error("loading opportunities", "err", err)
 		http.Error(w, "loading opportunities", http.StatusInternalServerError)
 		return
 	}
 
-	s.renderIndex(w, pageData{Opportunities: opportunities})
+	s.renderIndex(w, pageData{
+		Opportunities:   result.Opportunities,
+		HiddenByRealism: result.HiddenByRealism,
+		RealismRules:    realismRules,
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -198,16 +213,16 @@ func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 // iskunit|volday|iskday), and returns just the re-ordered <tr> rows for
 // an innerHTML swap into <tbody id="rows">.
 func (s *Server) handleOpportunities(w http.ResponseWriter, r *http.Request) {
-	opportunities, err := ranking.Load(r.Context(), s.db)
+	result, err := ranking.Load(r.Context(), s.db)
 	if err != nil {
 		slog.Error("loading opportunities", "err", err)
 		http.Error(w, "loading opportunities", http.StatusInternalServerError)
 		return
 	}
-	ranking.Sort(opportunities, r.URL.Query().Get("sort"))
+	ranking.Sort(result.Opportunities, r.URL.Query().Get("sort"))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "rows", opportunities); err != nil {
+	if err := tmpl.ExecuteTemplate(w, "rows", result.Opportunities); err != nil {
 		slog.Error("rendering opportunities partial", "err", err)
 	}
 }
