@@ -31,6 +31,28 @@ const (
 	CaptureRate = 0.20
 )
 
+// Always-on realism filter thresholds. Unlike the v1 thresholds these are
+// not user-adjustable: an item that fails any of them is excluded from the
+// list entirely, silently and with no reveal toggle.
+const (
+	// MinTradeDays is the fewest recent trade-days (history days with
+	// order_count > 0) an item must have over the retained window.
+	MinTradeDays = 7
+
+	// ManipulatedTradeDays is the trade-day count below which a wide
+	// high/low swing marks an item's history as manipulated.
+	ManipulatedTradeDays = 14
+
+	// ManipulatedSwingRatio is the max(highest)/min(lowest) ratio above
+	// which a sub-ManipulatedTradeDays window is treated as manipulated.
+	ManipulatedSwingRatio = 20.0
+
+	// NearBookBand is how close to the best price an order must sit to
+	// count toward the "real" side of a spread. A side with one or fewer
+	// orders inside the band is a single-order spread.
+	NearBookBand = 0.05
+)
+
 // Opportunity is one ranked row: an item currently tradable at Rens, with
 // its computed profitability figures under the trading character's
 // current skills.
@@ -80,47 +102,139 @@ func compute(buy, sell float64, skills Skills) (profitPerUnit, grossMarginPct, n
 	return profit, grossMargin, netMargin
 }
 
-// opportunityQuery derives, per item_type currently present in
-// market_order, the best (highest) current buy order price, the best
-// (lowest) current sell order price, and the average daily volume over
-// whatever market_history window is retained (the rolling window is
-// maintained by the poller that writes market_history, not by this
-// query). Items with no buy order or no sell order on the book are
-// excluded -- there is no spread to compute.
+// Result is one ranking pass: the opportunities that clear both the
+// always-on realism filters and the v1 thresholds, plus how many candidate
+// items (an item with a buy and a sell side on the book) the realism
+// filters hid. The hidden count lets the page make the automatic
+// exclusions visible without revealing the excluded rows.
+type Result struct {
+	Opportunities   []Opportunity
+	HiddenByRealism int
+}
+
+// historyStats is the realism evidence gathered for one candidate item:
+// aggregates over its retained market_history window and per-side order
+// counts near the current best prices.
+type historyStats struct {
+	historyDays  int
+	tradeDays    int
+	unpricedDays int
+	maxHigh      sql.NullFloat64
+	minLow       sql.NullFloat64
+	buyNear      int
+	sellNear     int
+}
+
+// realismPasses reports whether the item clears every always-on realism
+// filter. An incomplete history window is rejected before its aggregates
+// are trusted; thin history and single-order spreads are rejected outright;
+// a wide swing only condemns an already-thin window.
+func (h historyStats) realismPasses() bool {
+	if h.historyDays == 0 || h.unpricedDays > 0 {
+		return false // incomplete history (not yet re-fetched after migration)
+	}
+	if h.tradeDays < MinTradeDays {
+		return false // thin history
+	}
+	if h.tradeDays < ManipulatedTradeDays && h.swing() > ManipulatedSwingRatio {
+		return false // manipulated history
+	}
+	if h.buyNear <= 1 || h.sellNear <= 1 {
+		return false // single-order spread
+	}
+	return true
+}
+
+// swing is max(highest)/min(lowest) over the retained window, or 0 when
+// the window carries no usable low price.
+func (h historyStats) swing() float64 {
+	if !h.maxHigh.Valid || !h.minLow.Valid || h.minLow.Float64 <= 0 {
+		return 0
+	}
+	return h.maxHigh.Float64 / h.minLow.Float64
+}
+
+// opportunityQuery derives, per candidate item, its best (highest) buy and
+// best (lowest) sell price, its retained-window volume and realism
+// aggregates (trade-day count, incomplete-price count, high/low swing),
+// and the number of orders within the near-best band on each side. Items
+// with no buy order or no sell order on the book are excluded -- there is
+// no spread to compute. The window itself is maintained by the poller that
+// writes market_history, not by this query.
 const opportunityQuery = `
+WITH book AS (
+	SELECT
+		type_id,
+		MAX(CASE WHEN is_buy_order = 1 THEN price END) AS buy_price,
+		MIN(CASE WHEN is_buy_order = 0 THEN price END) AS sell_price
+	FROM market_order
+	GROUP BY type_id
+),
+hist AS (
+	SELECT
+		type_id,
+		AVG(volume) AS avg_volume,
+		COUNT(*) AS history_days,
+		SUM(CASE WHEN order_count > 0 THEN 1 ELSE 0 END) AS trade_days,
+		SUM(CASE WHEN average IS NULL OR highest IS NULL OR lowest IS NULL THEN 1 ELSE 0 END) AS unpriced_days,
+		MAX(highest) AS max_high,
+		MIN(lowest) AS min_low
+	FROM market_history
+	GROUP BY type_id
+)
 SELECT
 	it.type_id,
 	it.name,
-	MAX(CASE WHEN mo.is_buy_order = 1 THEN mo.price END) AS buy_price,
-	MIN(CASE WHEN mo.is_buy_order = 0 THEN mo.price END) AS sell_price,
-	COALESCE((SELECT AVG(mh.volume) FROM market_history mh WHERE mh.type_id = it.type_id), 0) AS avg_volume
+	b.buy_price,
+	b.sell_price,
+	COALESCE(h.avg_volume, 0) AS avg_volume,
+	COALESCE(h.history_days, 0) AS history_days,
+	COALESCE(h.trade_days, 0) AS trade_days,
+	COALESCE(h.unpriced_days, 0) AS unpriced_days,
+	h.max_high,
+	h.min_low,
+	(SELECT COUNT(*) FROM market_order o WHERE o.type_id = it.type_id AND o.is_buy_order = 1 AND o.price >= ? * b.buy_price) AS buy_near,
+	(SELECT COUNT(*) FROM market_order o WHERE o.type_id = it.type_id AND o.is_buy_order = 0 AND o.price <= ? * b.sell_price) AS sell_near
 FROM item_type it
-JOIN market_order mo ON mo.type_id = it.type_id
-GROUP BY it.type_id, it.name
-HAVING buy_price IS NOT NULL AND sell_price IS NOT NULL
+JOIN book b ON b.type_id = it.type_id
+LEFT JOIN hist h ON h.type_id = it.type_id
+WHERE b.buy_price IS NOT NULL AND b.sell_price IS NOT NULL
 `
 
-// Load computes every opportunity that clears the v1 filter thresholds
-// from the current database state, sorted by ISK/day descending (the
-// default rank). Below-threshold items are excluded entirely, not just
-// hidden.
-func Load(ctx context.Context, db *sql.DB) ([]Opportunity, error) {
+// Load computes every opportunity that clears the always-on realism
+// filters and the v1 filter thresholds from the current database state,
+// sorted by ISK/day descending (the default rank). Excluded items are
+// dropped entirely, not just hidden, and the count of realism exclusions is
+// reported alongside the survivors.
+func Load(ctx context.Context, db *sql.DB) (Result, error) {
 	skills, err := loadSkills(ctx, db)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
-	rows, err := db.QueryContext(ctx, opportunityQuery)
+	rows, err := db.QueryContext(ctx, opportunityQuery, 1-NearBookBand, 1+NearBookBand)
 	if err != nil {
-		return nil, fmt.Errorf("querying opportunities: %w", err)
+		return Result{}, fmt.Errorf("querying opportunities: %w", err)
 	}
 	defer rows.Close()
 
-	var out []Opportunity
+	var result Result
 	for rows.Next() {
-		var o Opportunity
-		if err := rows.Scan(&o.TypeID, &o.Name, &o.Buy, &o.Sell, &o.VolumePerDay); err != nil {
-			return nil, fmt.Errorf("scanning opportunity row: %w", err)
+		var (
+			o Opportunity
+			h historyStats
+		)
+		if err := rows.Scan(
+			&o.TypeID, &o.Name, &o.Buy, &o.Sell, &o.VolumePerDay,
+			&h.historyDays, &h.tradeDays, &h.unpricedDays,
+			&h.maxHigh, &h.minLow, &h.buyNear, &h.sellNear,
+		); err != nil {
+			return Result{}, fmt.Errorf("scanning opportunity row: %w", err)
+		}
+
+		if !h.realismPasses() {
+			result.HiddenByRealism++
+			continue
 		}
 
 		o.ProfitPerUnit, o.GrossMarginPct, o.NetMarginPct = compute(o.Buy, o.Sell, skills)
@@ -129,14 +243,14 @@ func Load(ctx context.Context, db *sql.DB) ([]Opportunity, error) {
 		if o.GrossMarginPct < MinMarginPct || o.VolumePerDay < MinVolumePerDay {
 			continue
 		}
-		out = append(out, o)
+		result.Opportunities = append(result.Opportunities, o)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("reading opportunity rows: %w", err)
+		return Result{}, fmt.Errorf("reading opportunity rows: %w", err)
 	}
 
-	Sort(out, "iskday")
-	return out, nil
+	Sort(result.Opportunities, "iskday")
+	return result, nil
 }
 
 // loadSkills reads the single character_skill row. A missing row (no

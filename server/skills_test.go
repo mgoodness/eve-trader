@@ -21,10 +21,7 @@ func TestSkillPollerUpdatesSkillsAndNextRender(t *testing.T) {
 		Skills:            esi.Skills{BrokerRelationsLevel: 0, AccountingLevel: 0},
 	}
 	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh")
-	dbtest.SeedItem(t, sqlDB, 34, "Tritanium")
-	dbtest.SeedOrder(t, sqlDB, 1, 34, true, 100)
-	dbtest.SeedOrder(t, sqlDB, 2, 34, false, 120)
-	dbtest.SeedHistory(t, sqlDB, 34, 50, 50)
+	seedCandidate(t, sqlDB, 34, "Tritanium", 100, 120, 50)
 
 	srv := server.New(fake, sqlDB, testAuthConfig())
 	poller := srv.NewSkillPoller(server.CharacterSkillsInterval)
