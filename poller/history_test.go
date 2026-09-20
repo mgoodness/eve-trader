@@ -100,7 +100,7 @@ func TestHistoryPollStoresRollingWindowAndRankingUsesAverage(t *testing.T) {
 	if avg != 1.5 || high != 2 || low != 1 {
 		t.Fatalf("stored prices = average %v highest %v lowest %v, want 1.5/2/1", avg, high, low)
 	}
-	got, err := ranking.Load(t.Context(), database)
+	got, err := ranking.Load(t.Context(), database, ranking.Filters{})
 	if err != nil {
 		t.Fatal(err)
 	}

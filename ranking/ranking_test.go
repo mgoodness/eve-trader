@@ -11,10 +11,18 @@ import (
 
 func approxEqual(a, b float64) bool { return math.Abs(a-b) < 0.001 }
 
+func bound(v float64) *float64 { return &v }
+
+// v1Thresholds reproduces the pre-v1.1 hardcoded thresholds as explicit
+// user filters, so formula tests keep their historic fixture expectations.
+func v1Thresholds() ranking.Filters {
+	return ranking.Filters{MinVolume: bound(10), MinMargin: bound(5)}
+}
+
 // seedRealisticItem seeds a candidate that clears every always-on realism
 // filter: priced trade-days (the caller supplies at least 7), and two
 // orders inside the near-best band on each side, so the item is hidden only
-// by the v1 thresholds a test is exercising.
+// by the user-filter bounds a test is exercising.
 func seedRealisticItem(t *testing.T, sqlDB *sql.DB, typeID int, name string, buy, sell float64, volumes ...int) {
 	t.Helper()
 	dbtest.SeedItem(t, sqlDB, typeID, name)
@@ -43,7 +51,7 @@ func TestLoadFiltersAndRanksByISKPerDayDescending(t *testing.T) {
 	// Item C: below volume threshold (5 < 10). Buy 200 / Sell 240 (healthy margin).
 	seedRealisticItem(t, sqlDB, 37, "Below Volume Ore", 200, 240, 5, 5, 5, 5, 5, 5, 5)
 
-	result, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB, v1Thresholds())
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -92,7 +100,7 @@ func TestLoadUsesCharacterSkillLevels(t *testing.T) {
 	dbtest.SeedSkills(t, sqlDB, 1, 0, 0) // unskilled
 	seedRealisticItem(t, sqlDB, 34, "Tritanium", 100, 120, 50, 50, 50, 50, 50, 50, 50)
 
-	result, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB, ranking.Filters{})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -115,7 +123,7 @@ func TestLoadTreatsMissingCharacterSkillRowAsZeroLevels(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	seedRealisticItem(t, sqlDB, 34, "Tritanium", 100, 120, 50, 50, 50, 50, 50, 50, 50)
 
-	result, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB, ranking.Filters{})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -141,7 +149,7 @@ func TestLoadExcludesItemsMissingEitherSideOfTheBook(t *testing.T) {
 	dbtest.SeedOrder(t, sqlDB, 2, 34, true, 99)
 	dbtest.SeedHistory(t, sqlDB, 34, 50, 50, 50, 50, 50, 50, 50)
 
-	result, err := ranking.Load(t.Context(), sqlDB)
+	result, err := ranking.Load(t.Context(), sqlDB, ranking.Filters{})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

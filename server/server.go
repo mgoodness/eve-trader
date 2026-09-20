@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -73,38 +74,131 @@ var realismRules = []string{
 	"Complete price history (items not yet re-fetched are hidden)",
 }
 
-// pageData is the data handed to the "page.html" template.
+// pageData is the data handed to the "page.html" template and to the
+// htmx-sorted "layout" partial. Shown/Total and the two hidden counts drive
+// the summary line; FilterForm and Columns carry the stateless URL state.
 type pageData struct {
 	Opportunities   []ranking.Opportunity
 	HiddenByRealism int
+	HiddenByFilters int
+	Total           int
+	Shown           int
 	RealismRules    []string
-	Reauth          bool
-	FirstBoot       bool
+
+	FilterForm          filterForm
+	FilterControls      []controlView
+	Sort                string
+	Columns             []sortColumn
+	ActiveFilterSummary string
+
+	Reauth    bool
+	FirstBoot bool
+}
+
+// sortColumn is one sortable table header. Href is the htmx partial request
+// (which carries the current filters); Push is the canonical full-page URL
+// the browser address bar keeps so a refresh or bookmark reproduces the
+// exact filtered, sorted view.
+type sortColumn struct {
+	Key    string
+	Label  string
+	Href   string
+	Push   string
+	Active bool
+}
+
+// sortableColumns are the table columns the user can sort by, in display
+// order. "margin" sorts by the displayed net margin.
+var sortableColumns = []struct {
+	key   string
+	label string
+}{
+	{"buy", "Buy"},
+	{"sell", "Sell"},
+	{"margin", "Net margin"},
+	{"iskunit", "ISK/unit"},
+	{"volday", "Vol/day"},
+	{"iskday", "ISK/day"},
+}
+
+// parseSort resolves the ?sort param to a known column key. An absent or
+// unrecognised value falls back to the default rank, ISK/day descending.
+func parseSort(q url.Values) string {
+	for _, c := range sortableColumns {
+		if q.Get("sort") == c.key {
+			return c.key
+		}
+	}
+	return "iskday"
+}
+
+// buildColumns renders each sortable header's links with the current filter
+// state preserved, so sorting never drops the filters.
+func buildColumns(form filterForm, sortKey string) []sortColumn {
+	cols := make([]sortColumn, len(sortableColumns))
+	for i, c := range sortableColumns {
+		encoded := form.values(c.key).Encode()
+		cols[i] = sortColumn{
+			Key:    c.key,
+			Label:  c.label,
+			Href:   "/opportunities?" + encoded,
+			Push:   "/?" + encoded,
+			Active: sortKey == c.key,
+		}
+	}
+	return cols
+}
+
+// buildPageData is the one place filters, sort, and the ranking pass compose:
+// it parses the URL contract, loads the realism survivors, applies the user
+// filters, sorts the survivors, and assembles the view model both the index
+// page and the htmx partial render.
+func (s *Server) buildPageData(r *http.Request) (pageData, error) {
+	query := r.URL.Query()
+	form := parseFilterForm(query)
+	sortKey := parseSort(query)
+
+	result, err := ranking.Load(r.Context(), s.db, form.Bounds)
+	if err != nil {
+		return pageData{}, err
+	}
+	ranking.Sort(result.Opportunities, sortKey)
+
+	return pageData{
+		Opportunities:       result.Opportunities,
+		HiddenByRealism:     result.HiddenByRealism,
+		HiddenByFilters:     result.HiddenByFilters,
+		Total:               result.Total(),
+		Shown:               len(result.Opportunities),
+		RealismRules:        realismRules,
+		FilterForm:          form,
+		FilterControls:      form.controlsView(),
+		Sort:                sortKey,
+		Columns:             buildColumns(form, sortKey),
+		ActiveFilterSummary: form.activeSummary(),
+	}, nil
 }
 
 // handleIndex renders the opportunity table: one row per item that clears
-// the v1 filter thresholds, ranked ISK/day descending by default (see
-// docs/spec/v1.md §4/§7). Market data, item names, and character skills
-// are read directly from SQLite -- no ESIGateway call is made here (that
-// arrives with live polling in a later ticket).
+// the always-on realism filters and the user's filters, ranked ISK/day
+// descending by default (see docs/spec/v1.md §4/§7). Market data, item
+// names, and character skills are read directly from SQLite -- no
+// ESIGateway call is made here (that arrives with live polling in a later
+// ticket).
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if failed, firstBoot := s.authenticationFailed(r.Context()); failed {
 		s.renderIndex(w, pageData{Reauth: true, FirstBoot: firstBoot})
 		return
 	}
 
-	result, err := ranking.Load(r.Context(), s.db)
+	data, err := s.buildPageData(r)
 	if err != nil {
 		slog.Error("loading opportunities", "err", err)
 		http.Error(w, "loading opportunities", http.StatusInternalServerError)
 		return
 	}
 
-	s.renderIndex(w, pageData{
-		Opportunities:   result.Opportunities,
-		HiddenByRealism: result.HiddenByRealism,
-		RealismRules:    realismRules,
-	})
+	s.renderIndex(w, data)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -209,20 +303,20 @@ func (s *Server) resetAuthentication() {
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // handleOpportunities serves the htmx sort partial: it re-runs the same
-// ranking query, re-sorts by the requested column (?sort=buy|sell|margin|
-// iskunit|volday|iskday), and returns just the re-ordered <tr> rows for
-// an innerHTML swap into <tbody id="rows">.
+// filter+ranking pass, re-sorts by the requested column (?sort=buy|sell|
+// margin|iskunit|volday|iskday), and returns the re-rendered layout so the
+// sidebar's hidden sort and the summary stay in step. htmx pushes the
+// canonical full-page URL so the address bar stays bookmarkable.
 func (s *Server) handleOpportunities(w http.ResponseWriter, r *http.Request) {
-	result, err := ranking.Load(r.Context(), s.db)
+	data, err := s.buildPageData(r)
 	if err != nil {
 		slog.Error("loading opportunities", "err", err)
 		http.Error(w, "loading opportunities", http.StatusInternalServerError)
 		return
 	}
-	ranking.Sort(result.Opportunities, r.URL.Query().Get("sort"))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "rows", result.Opportunities); err != nil {
+	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		slog.Error("rendering opportunities partial", "err", err)
 	}
 }

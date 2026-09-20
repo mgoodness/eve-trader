@@ -12,28 +12,16 @@ import (
 	"sort"
 )
 
-// v1 filter thresholds (hardcoded constants — see docs/spec/v1.md §4). Not
-// user-configurable in v1.
-const (
-	// MinMarginPct is the minimum gross margin percentage (M) an
-	// opportunity must clear to be shown.
-	MinMarginPct = 5.0
+// CaptureRate is the fixed fraction of an item's average daily
+// Heimatar-region volume a single trader is assumed to capture when
+// computing ISK/day. It is a deliberate v1.1 assumption (EVE station
+// trading cannot capture the whole market) and deliberately not
+// user-configurable; per-unit profit and the displayed Vol/day stay raw.
+const CaptureRate = 0.20
 
-	// MinVolumePerDay is the minimum average daily volume (V_d) an
-	// opportunity must clear to be shown.
-	MinVolumePerDay = 10.0
-
-	// CaptureRate is the fixed fraction of an item's average daily
-	// Heimatar-region volume a single trader is assumed to capture when
-	// computing ISK/day. It is a deliberate v1.1 assumption (EVE station
-	// trading cannot capture the whole market) and deliberately not
-	// user-configurable; per-unit profit and the displayed Vol/day stay raw.
-	CaptureRate = 0.20
-)
-
-// Always-on realism filter thresholds. Unlike the v1 thresholds these are
-// not user-adjustable: an item that fails any of them is excluded from the
-// list entirely, silently and with no reveal toggle.
+// Always-on realism filter thresholds. Unlike the user-adjustable filters
+// in Filters these are not adjustable: an item that fails any of them is
+// excluded from the list entirely, silently and with no reveal toggle.
 const (
 	// MinTradeDays is the fewest recent trade-days (history days with
 	// order_count > 0) an item must have over the retained window.
@@ -61,7 +49,7 @@ type Opportunity struct {
 	Name           string
 	Buy            float64 // P_b -- best (highest) current Rens buy order price
 	Sell           float64 // P_s -- best (lowest) current Rens sell order price
-	GrossMarginPct float64 // M   -- gross margin percentage, before fees (drives the v1 filter)
+	GrossMarginPct float64 // M   -- gross margin percentage, before fees (drives the minimum-margin filter)
 	NetMarginPct   float64 // net margin percentage -- profit after fees as a fraction of sell price (displayed)
 	ProfitPerUnit  float64 // π   -- profit per unit after broker fee and sales tax
 	VolumePerDay   float64 // V_d -- average daily Heimatar-region volume (approximation, see docs/spec/v1.md §3)
@@ -102,14 +90,52 @@ func compute(buy, sell float64, skills Skills) (profitPerUnit, grossMarginPct, n
 	return profit, grossMargin, netMargin
 }
 
+// Filters are the user-adjustable bounds from the v1.1 filter form. Each
+// field is optional: a nil pointer means the control was submitted blank,
+// which removes that bound. Bounds are inclusive, and a filter only ever
+// excludes a row -- it never rewrites a price. An absent control is filled
+// in with its default by the URL-parsing layer, so ranking always receives
+// concrete bounds here.
+type Filters struct {
+	MinVolume *float64 // minimum average daily volume (V_d), inclusive
+	MinMargin *float64 // minimum gross margin percentage, inclusive
+	MaxMargin *float64 // maximum gross margin percentage, inclusive
+	MaxSell   *float64 // maximum sell price, inclusive
+}
+
+// Passes reports whether o clears every active user filter. A nil bound is
+// no bound.
+func (f Filters) Passes(o Opportunity) bool {
+	if f.MinVolume != nil && o.VolumePerDay < *f.MinVolume {
+		return false
+	}
+	if f.MinMargin != nil && o.GrossMarginPct < *f.MinMargin {
+		return false
+	}
+	if f.MaxMargin != nil && o.GrossMarginPct > *f.MaxMargin {
+		return false
+	}
+	if f.MaxSell != nil && o.Sell > *f.MaxSell {
+		return false
+	}
+	return true
+}
+
 // Result is one ranking pass: the opportunities that clear both the
-// always-on realism filters and the v1 thresholds, plus how many candidate
-// items (an item with a buy and a sell side on the book) the realism
-// filters hid. The hidden count lets the page make the automatic
-// exclusions visible without revealing the excluded rows.
+// always-on realism filters and the user filters, plus how many candidate
+// items (an item with a buy and a sell side on the book) each tier hid.
+// The hidden counts let the page make the exclusions visible without
+// revealing the excluded rows.
 type Result struct {
 	Opportunities   []Opportunity
 	HiddenByRealism int
+	HiddenByFilters int
+}
+
+// Total is the candidate set the filters ran over: every item with both a
+// buy and a sell side on the Rens book, whether shown or hidden.
+func (r Result) Total() int {
+	return len(r.Opportunities) + r.HiddenByRealism + r.HiddenByFilters
 }
 
 // historyStats is the realism evidence gathered for one candidate item:
@@ -202,11 +228,11 @@ WHERE b.buy_price IS NOT NULL AND b.sell_price IS NOT NULL
 `
 
 // Load computes every opportunity that clears the always-on realism
-// filters and the v1 filter thresholds from the current database state,
-// sorted by ISK/day descending (the default rank). Excluded items are
-// dropped entirely, not just hidden, and the count of realism exclusions is
-// reported alongside the survivors.
-func Load(ctx context.Context, db *sql.DB) (Result, error) {
+// filters and then the caller's user filters from the current database
+// state, sorted by ISK/day descending (the default rank). Excluded items
+// are dropped entirely, not just hidden, and the tier that excluded each is
+// counted so the page can report both.
+func Load(ctx context.Context, db *sql.DB, filters Filters) (Result, error) {
 	skills, err := loadSkills(ctx, db)
 	if err != nil {
 		return Result{}, err
@@ -240,7 +266,8 @@ func Load(ctx context.Context, db *sql.DB) (Result, error) {
 		o.ProfitPerUnit, o.GrossMarginPct, o.NetMarginPct = compute(o.Buy, o.Sell, skills)
 		o.ISKPerDay = o.ProfitPerUnit * o.VolumePerDay * CaptureRate
 
-		if o.GrossMarginPct < MinMarginPct || o.VolumePerDay < MinVolumePerDay {
+		if !filters.Passes(o) {
+			result.HiddenByFilters++
 			continue
 		}
 		result.Opportunities = append(result.Opportunities, o)

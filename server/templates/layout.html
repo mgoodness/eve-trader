@@ -1,0 +1,40 @@
+{{define "layout"}}<div class="layout">
+  <aside class="sidebar">
+    <section class="card" aria-labelledby="filters-title">
+      <h2 id="filters-title">Your filters</h2>
+      <form id="filterform" method="get" action="/">
+        <input type="hidden" name="sort" value="{{.Sort}}">
+        {{range .FilterControls}}<label class="control">{{.Label}}<span class="help" title="{{.Help}}">?</span>
+          <input type="text" inputmode="decimal" name="{{.Name}}" value="{{.Value}}"{{if .Placeholder}} placeholder="{{.Placeholder}}"{{end}} title="{{.Help}}">
+        </label>
+        {{end}}        <div class="actions">
+          <button type="submit">Apply</button>
+          <a href="/">Reset</a>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="realism-title">
+      <h2 id="realism-title">Always-on realism filters</h2>
+      <p class="card-note">Cannot be turned off. Hidden by realism filters: <strong>{{.HiddenByRealism}}</strong>.</p>
+      <ul class="rules">
+        {{range .RealismRules}}<li>{{.}}</li>{{end}}
+      </ul>
+    </section>
+  </aside>
+
+  <section class="results" id="results">
+    <p class="summary">{{template "summary" .}}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          {{range .Columns}}<th class="{{if .Active}}active{{end}}" hx-get="{{.Href}}" hx-target="#layout" hx-swap="innerHTML" hx-push-url="{{.Push}}">{{.Label}}</th>{{end}}
+        </tr>
+      </thead>
+      <tbody id="rows">
+        {{template "rows" .}}
+      </tbody>
+    </table>
+  </section>
+</div>{{end}}
