@@ -63,3 +63,83 @@ _Avoid_: shallow book, illiquid spread
 **Incomplete history**:
 A retained window that lacks the price fields (average/highest/lowest), typically because the type has not been re-fetched since the migration that added them. Hidden automatically until complete.
 _Avoid_: stale history, missing history
+
+**Portfolio**:
+The view that tracks the trading character's own market activity and profit/loss, kept beside the Opportunity list.
+_Avoid_: wallet, account
+
+**Position**:
+The quantity of one item held at one location, together with its average cost. The unit of the Portfolio's rows.
+_Avoid_: holding, lot, stock
+
+**Disposition**:
+How a position leaves: a sale (market) or a transfer (off-market).
+_Avoid_: exit, closure
+
+**Transfer**:
+Goods that leave the character without a market sale — detected from item-exchange contracts, or recorded manually when ESI cannot see them.
+_Avoid_: sale, giveaway, handoff
+
+**Average cost**:
+The weighted-average cost of the units held in a position, per (item, location), including buy-side fees.
+_Avoid_: FIFO cost, cost basis
+
+**Realized P/L**:
+Profit or loss on units that have left a position, net of broker fees and sales tax.
+_Avoid_: profit, gains
+
+**Unrealized P/L**:
+Profit or loss on units still held or listed, valued at the Rens best sell net of estimated sell fees.
+_Avoid_: paper profit, open P/L
+
+**Unattributed fees**:
+The gap between the journal's actual broker fees and sales tax and the per-item estimated fees; mostly re-lists, which ESI does not link to an order.
+_Avoid_: unallocated costs, missing fees
+
+**Sunk fees**:
+Broker fees paid on orders that yielded no position (cancelled or zero-fill), and the unfilled remainder of partially filled orders.
+_Avoid_: dead costs, write-offs
+
+**Re-list**:
+Changing a resting order's price, either by an in-place modify or by cancelling and recreating it.
+_Avoid_: bump, update, amend
+
+**In-place modify**:
+A re-list that keeps the order's `order_id` and moves its `issued` time; distinct from a cancel-and-recreate, which makes a new order.
+_Avoid_: edit, price change
+
+**Resting order**:
+One of the character's own open market orders, as opposed to the public Rens book.
+_Avoid_: live order, listing
+
+**Relist gain**:
+The net increase from raising a resting sell order to the current best sell, after the re-list fee and extra sales tax. Computed only when positive.
+_Avoid_: relist profit, bump gain
+
+**Break-even price**:
+The list price at which a position's net proceeds cover its average cost and allocated estimated fees — zero profit.
+_Avoid_: floor price, minimum price
+
+**Target price**:
+The break-even price plus the target net margin.
+_Avoid_: ask price, goal price
+
+**Market-implied net margin**:
+The net margin a position would actually realize at the current Rens best sell.
+_Avoid_: current margin, market margin
+
+**Ledger**:
+The append-only local store of the character's raw ESI wallet, order, and contract records, from which positions and P/L are derived.
+_Avoid_: history, database, cache
+
+**Manual transfer**:
+A user-entered transfer record for goods ESI cannot see leave the character (in-game direct trades).
+_Avoid_: manual entry, adjustment
+
+**Broker-fee rate (R_b)**:
+The fraction of an order's value charged as a broker fee, derived from the Broker Relations skill (and, in the standings fast-follow, faction and corporation standings).
+_Avoid_: broker tax, commission
+
+**Standing**:
+The character's unmodified NPC faction or corporation reputation, used by the standings fast-follow to reduce the broker-fee rate.
+_Avoid_: reputation, faction standing
