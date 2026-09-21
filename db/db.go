@@ -1,5 +1,6 @@
-// Package db opens the eve-trader SQLite database and ensures the v1
-// schema (see docs/spec/v1.md §5) is present.
+// Package db opens the eve-trader SQLite database and ensures the schema
+// (v1's tables, see docs/spec/v1.md §5, plus the v2 ledger tables added
+// in schema.sql, see docs/spec/v2.md §5) is present.
 package db
 
 import (

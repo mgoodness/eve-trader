@@ -21,6 +21,12 @@ type Fake struct {
 	Skills         Skills
 	FetchSkillsErr error
 
+	WalletTransactions         []WalletTransaction
+	FetchWalletTransactionsErr error
+
+	WalletJournal         []WalletJournalEntry
+	FetchWalletJournalErr error
+
 	ExchangeCodeToken Token
 	ExchangeCodeErr   error
 
@@ -66,6 +72,38 @@ func (f *Fake) FetchCharacterSkills(ctx context.Context, characterID int, access
 		return Skills{}, f.FetchSkillsErr
 	}
 	return f.Skills, nil
+}
+
+// FetchWalletTransactions returns the seeded WalletTransactions, or
+// FetchWalletTransactionsErr if set. It mimics ESI's inclusive from_id
+// boundary: a non-zero fromID returns only the seeded transactions with
+// TransactionID <= fromID (including fromID's own transaction again, if
+// seeded), so callers walking backward exercise the same duplicate-drop
+// logic they need against the real API. fromID of zero returns every
+// seeded transaction.
+func (f *Fake) FetchWalletTransactions(ctx context.Context, characterID int, accessToken string, fromID int64) ([]WalletTransaction, error) {
+	if f.FetchWalletTransactionsErr != nil {
+		return nil, f.FetchWalletTransactionsErr
+	}
+	if fromID == 0 {
+		return f.WalletTransactions, nil
+	}
+	var out []WalletTransaction
+	for _, tx := range f.WalletTransactions {
+		if tx.TransactionID <= fromID {
+			out = append(out, tx)
+		}
+	}
+	return out, nil
+}
+
+// FetchWalletJournal returns the seeded WalletJournal, or
+// FetchWalletJournalErr if set.
+func (f *Fake) FetchWalletJournal(ctx context.Context, characterID int, accessToken string) ([]WalletJournalEntry, error) {
+	if f.FetchWalletJournalErr != nil {
+		return nil, f.FetchWalletJournalErr
+	}
+	return f.WalletJournal, nil
 }
 
 // ExchangeCode returns the seeded ExchangeCodeToken, or ExchangeCodeErr if

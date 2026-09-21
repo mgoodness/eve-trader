@@ -40,7 +40,15 @@ type AuthConfig struct {
 
 const (
 	ssoAuthorizeEndpoint = "https://login.eveonline.com/v2/oauth/authorize"
-	ssoScope             = "esi-skills.read_skills.v1"
+	// ssoScope is v2's expanded scope set (docs/spec/v2.md §6): v1's
+	// character-skills scope, plus wallet, orders, and contracts read
+	// access for the ledger. Because the scope set changed after v1
+	// shipped, any refresh token stored before this change was granted
+	// under the narrower v1 scope and stays that way -- refreshing a token
+	// does not widen its scope. The owner must visit /auth/login once
+	// more (the "Re-authenticate with EVE" banner's link) to re-consent
+	// and mint a token that actually carries the new scopes.
+	ssoScope = "esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-markets.read_character_orders.v1 esi-contracts.read_character_contracts.v1"
 
 	pkceCookieName = "eve_trader_pkce"
 	pkceCookiePath = "/auth"
@@ -60,8 +68,8 @@ type pkceState struct {
 }
 
 // handleAuthLogin redirects to EVE SSO's authorization endpoint,
-// requesting only the esi-skills.read_skills.v1 scope, with a PKCE (S256)
-// challenge. The matching state/code_verifier are held in a short-lived,
+// requesting the v2 scope set (ssoScope), with a PKCE (S256) challenge.
+// The matching state/code_verifier are held in a short-lived,
 // HMAC-signed cookie -- there is no server-side session store.
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	verifier, challenge, err := generatePKCE()
@@ -190,8 +198,8 @@ func (s *Server) upsertCharacterSkill(ctx context.Context, characterID int, skil
 }
 
 // ssoAuthorizeURL builds the EVE SSO v2 authorization-endpoint URL for
-// state/challenge, requesting only the esi-skills.read_skills.v1 scope
-// with a PKCE S256 challenge.
+// state/challenge, requesting the ssoScope scope set with a PKCE S256
+// challenge.
 func (s *Server) ssoAuthorizeURL(state, challenge string) string {
 	v := url.Values{}
 	v.Set("response_type", "code")
