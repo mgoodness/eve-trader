@@ -48,6 +48,40 @@ func TestHTTPGatewayFetchRensOrdersPaginatesWithoutNameLookups(t *testing.T) {
 	}
 }
 
+// TestHTTPGatewayFetchRensOrdersKeepsOnlyRensStation feeds a region page
+// carrying orders at Rens's station alongside orders at other stations and
+// asserts only Rens's 60004588 orders survive. The region endpoint is
+// station-agnostic, so this filter is what makes the book Rens-specific.
+func TestHTTPGatewayFetchRensOrdersKeepsOnlyRensStation(t *testing.T) {
+	const otherStation = 60004589
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/latest/markets/10000030/orders/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("X-Pages", "1")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"order_id": 1, "type_id": 34, "location_id": 60004588, "issued": "2026-09-16T00:00:00Z"},
+			{"order_id": 2, "type_id": 35, "location_id": otherStation, "issued": "2026-09-16T00:00:00Z"},
+			{"order_id": 3, "type_id": 36, "location_id": 60004588, "issued": "2026-09-16T00:00:00Z"},
+		})
+	}))
+	defer server.Close()
+
+	got, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchRensOrders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("FetchRensOrders() = %+v, want only the two Rens-station orders", got)
+	}
+	for _, order := range got {
+		if order.OrderID == 2 {
+			t.Fatalf("order 2 from station %d leaked into the Rens book: %+v", otherStation, got)
+		}
+	}
+}
+
 func TestHTTPGatewayFetchTypeNamesBatchesRequests(t *testing.T) {
 	const wantBatchLimit = 1000
 	const idCount = 2500
