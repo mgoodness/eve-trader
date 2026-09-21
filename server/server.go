@@ -155,7 +155,15 @@ func buildColumns(form filterForm, sortKey string) []sortColumn {
 // page and the htmx partial render.
 func (s *Server) buildPageData(r *http.Request) (pageData, error) {
 	query := r.URL.Query()
-	form := parseFilterForm(query)
+
+	// The minimum-margin default is the character's fee break-even, so the
+	// default list is fee-positive at any skill level. Load the skills once
+	// per request for it; ranking.Load re-reads the same single row.
+	skills, err := ranking.LoadSkills(r.Context(), s.db)
+	if err != nil {
+		return pageData{}, err
+	}
+	form := parseFilterForm(query, ranking.BreakEvenGrossMargin(skills))
 	sortKey := parseSort(query)
 
 	result, err := ranking.Load(r.Context(), s.db, form.Bounds)

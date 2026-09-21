@@ -10,20 +10,25 @@ import (
 	"github.com/mgoodness/eve-trader/ranking"
 )
 
-// Filter form defaults (v1.1). The minimum gross margin default is a static
-// placeholder for this ticket; the next ticket derives it from the
-// character's fee break-even.
+// Filter form defaults (v1.1). The minimum-volume and maximum-margin
+// defaults are constants; the minimum-margin default is derived per request
+// from the character's skills (see minMarginParam and
+// ranking.BreakEvenGrossMargin), so it has no constant here.
 const (
 	defaultMinVolume = 20.0
-	defaultMinMargin = 7.0
 	defaultMaxMargin = 60.0
 )
 
+// minMarginParam names the one control whose default is not a constant: it
+// is the character's fee break-even, computed per request.
+const minMarginParam = "minmargin"
+
 // filterSpec describes one user-filter control: its URL param, sidebar
-// label, hover help, default bound (nil = no default bound), validity range,
-// and the bits the summary copy needs. Keeping the four controls in one
-// table means the parser, the rendered form, and the round-trip links cannot
-// disagree about them.
+// label, hover help, default bound (nil = no default bound; the skills-derived
+// minimum-margin default is injected per request in filterSpecsWithDefaults),
+// validity range, and the bits the summary copy needs. Keeping the four
+// controls in one table means the parser, the rendered form, and the
+// round-trip links cannot disagree about them.
 type filterSpec struct {
 	name         string
 	label        string
@@ -45,12 +50,12 @@ var filterSpecs = []filterSpec{
 		valid:        nonNegative,
 	},
 	{
-		name:         "minmargin",
+		name:         minMarginParam,
 		label:        "Minimum gross margin %",
 		summaryLabel: "minimum gross margin",
 		unit:         "%",
-		help:         fmt.Sprintf("Hide items whose gross margin is below this. Gross margin is (sell - buy) / sell. Default %s%%; clear it for no lower bound.", formatNumber(defaultMinMargin)),
-		def:          float64Ptr(defaultMinMargin),
+		help:         "Hide items whose gross margin is below this. Gross margin is (sell - buy) / sell. The default is your character's fee break-even, so the list starts fee-positive; clear it for no lower bound.",
+		def:          nil, // skills-derived; filled in by filterSpecsWithDefaults
 		valid:        percentage,
 	},
 	{
@@ -86,7 +91,8 @@ type controlView struct {
 
 // filterControl is one parsed control: the concrete bound handed to ranking
 // (nil = no bound), the raw string the input renders, and whether the param
-// appeared in the request at all.
+// appeared in the request at all. Its spec carries the effective default for
+// this request (minmargin's is skills-derived).
 type filterControl struct {
 	spec    filterSpec
 	bound   *float64
@@ -98,13 +104,32 @@ type filterControl struct {
 // bounds handed to the ranking query and the per-control raw values the form
 // renders. present records which controls appeared in the request URL at
 // all, so generated links round-trip exactly the state the user asked for
-// without embedding untouched defaults.
+// without embedding untouched defaults. specs is the control table with the
+// skills-derived minimum-margin default already filled in, so the table
+// stays the single source of truth for every control.
 type filterForm struct {
 	Bounds   ranking.Filters
+	specs    []filterSpec
 	controls map[string]*filterControl
 }
 
-// parseFilterForm applies the stateless URL contract to q:
+// filterSpecsWithDefaults copies the control table with the per-request
+// minimum-margin default substituted, so callers can keep reading defaults
+// from the spec rather than carrying a parallel copy.
+func filterSpecsWithDefaults(minMarginDefault float64) []filterSpec {
+	specs := make([]filterSpec, len(filterSpecs))
+	copy(specs, filterSpecs)
+	for i := range specs {
+		if specs[i].name == minMarginParam {
+			specs[i].def = float64Ptr(minMarginDefault)
+		}
+	}
+	return specs
+}
+
+// parseFilterForm applies the stateless URL contract to q. minMarginDefault
+// is the skills-derived default for the minimum-margin control; the other
+// controls carry their own constant defaults in filterSpecs.
 //
 //   - an absent param uses the control's default;
 //   - a present-but-empty param means "no bound";
@@ -113,9 +138,13 @@ type filterForm struct {
 // A non-numeric or out-of-range value falls back to the control's default,
 // and min margin greater than max margin falls both back to defaults. It
 // never errors: a typo degrades to a default rather than an error page.
-func parseFilterForm(q url.Values) filterForm {
-	f := filterForm{controls: make(map[string]*filterControl, len(filterSpecs))}
-	for _, spec := range filterSpecs {
+func parseFilterForm(q url.Values, minMarginDefault float64) filterForm {
+	specs := filterSpecsWithDefaults(minMarginDefault)
+	f := filterForm{
+		specs:    specs,
+		controls: make(map[string]*filterControl, len(specs)),
+	}
+	for _, spec := range specs {
 		bound, raw := parseBound(q, spec.name, spec.def, spec.valid)
 		f.controls[spec.name] = &filterControl{
 			spec:    spec,
@@ -146,7 +175,7 @@ func parseFilterForm(q url.Values) filterForm {
 // round-trip as present-but-empty so "no bound" stays "no bound".
 func (f filterForm) values(sortKey string) url.Values {
 	q := url.Values{}
-	for _, spec := range filterSpecs {
+	for _, spec := range f.specs {
 		if c := f.controls[spec.name]; c.present {
 			q.Set(spec.name, c.raw)
 		}
@@ -159,8 +188,8 @@ func (f filterForm) values(sortKey string) url.Values {
 
 // controlsView returns the four controls in form order.
 func (f filterForm) controlsView() []controlView {
-	views := make([]controlView, len(filterSpecs))
-	for i, spec := range filterSpecs {
+	views := make([]controlView, len(f.specs))
+	for i, spec := range f.specs {
 		views[i] = controlView{
 			Name:        spec.name,
 			Label:       spec.label,
@@ -177,7 +206,7 @@ func (f filterForm) controlsView() []controlView {
 // nothing, so copy can never hardcode a threshold the user has cleared.
 func (f filterForm) activeSummary() string {
 	var parts []string
-	for _, spec := range filterSpecs {
+	for _, spec := range f.specs {
 		if c := f.controls[spec.name]; c.raw != "" {
 			parts = append(parts, spec.summaryLabel+" "+c.raw+spec.unit)
 		}

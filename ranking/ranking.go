@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -74,6 +75,22 @@ func BrokerFeeRate(brokerRelationsLevel int) float64 {
 // given Accounting skill level.
 func SalesTaxRate(accountingLevel int) float64 {
 	return 0.075 * (1 - 0.11*float64(accountingLevel))
+}
+
+// BreakEvenGrossMargin is the gross margin percentage at which a trade
+// exactly clears the broker fee charged on both sides and the sales tax on
+// the sell side, for the given skills:
+//
+//	g* = (2·R_b + R_t) / (1 + R_b)
+//
+// It is rounded up to one decimal place, so a default set to it never dips
+// below break-even. A missing character_skill row has already resolved to
+// level-0 skills by the caller (see LoadSkills), so no separate fallback is
+// needed here.
+func BreakEvenGrossMargin(skills Skills) float64 {
+	rb := BrokerFeeRate(skills.BrokerRelationsLevel)
+	rt := SalesTaxRate(skills.AccountingLevel)
+	return math.Ceil((2*rb+rt)/(1+rb)*100*10) / 10
 }
 
 // compute returns the per-unit profit (π), the gross margin percentage (M),
@@ -233,7 +250,7 @@ WHERE b.buy_price IS NOT NULL AND b.sell_price IS NOT NULL
 // are dropped entirely, not just hidden, and the tier that excluded each is
 // counted so the page can report both.
 func Load(ctx context.Context, db *sql.DB, filters Filters) (Result, error) {
-	skills, err := loadSkills(ctx, db)
+	skills, err := LoadSkills(ctx, db)
 	if err != nil {
 		return Result{}, err
 	}
@@ -280,10 +297,12 @@ func Load(ctx context.Context, db *sql.DB, filters Filters) (Result, error) {
 	return result, nil
 }
 
-// loadSkills reads the single character_skill row. A missing row (no
+// LoadSkills reads the single character_skill row. A missing row (no
 // character seeded yet) resolves to level-0 skills rather than an error,
-// mirroring ESIGateway's "missing skill ID = level 0" convention.
-func loadSkills(ctx context.Context, db *sql.DB) (Skills, error) {
+// mirroring ESIGateway's "missing skill ID = level 0" convention. Callers
+// that need the fee-relevant skills outside a ranking pass -- e.g. the
+// skills-derived minimum-margin default -- use it directly.
+func LoadSkills(ctx context.Context, db *sql.DB) (Skills, error) {
 	var s Skills
 	err := db.QueryRowContext(ctx,
 		`SELECT broker_relations_level, accounting_level FROM character_skill ORDER BY character_id LIMIT 1`,

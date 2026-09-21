@@ -186,3 +186,50 @@ func TestSortReordersByColumn(t *testing.T) {
 		})
 	}
 }
+
+// TestBreakEvenGrossMarginRoundsUpToAvoidFeeNegativeDefaults pins the
+// skills-derived minimum-margin default: g* = (2·R_b + R_t) / (1 + R_b),
+// rounded up to one decimal so a trade exactly at the default clears fees.
+func TestBreakEvenGrossMarginRoundsUpToAvoidFeeNegativeDefaults(t *testing.T) {
+	cases := []struct {
+		broker, accounting int
+		want               float64
+	}{
+		{5, 5, 6.3},  // g* ≈ 6.2808%
+		{4, 3, 8.5},  // g* ≈ 8.4725%
+		{0, 0, 13.2}, // g* ≈ 13.1068% at level 0
+	}
+	for _, tc := range cases {
+		got := ranking.BreakEvenGrossMargin(ranking.Skills{
+			BrokerRelationsLevel: tc.broker,
+			AccountingLevel:      tc.accounting,
+		})
+		if !approxEqual(got, tc.want) {
+			t.Errorf("BreakEvenGrossMargin(Broker %d, Accounting %d) = %v, want %v",
+				tc.broker, tc.accounting, got, tc.want)
+		}
+	}
+}
+
+// TestBreakEvenGrossMarginIsAtOrAboveTrueBreakEven guards the rounding
+// direction: the rounded default must never fall below the exact break-even
+// gross margin.
+func TestBreakEvenGrossMarginIsAtOrAboveTrueBreakEven(t *testing.T) {
+	for broker := 0; broker <= 5; broker++ {
+		for accounting := 0; accounting <= 5; accounting++ {
+			skills := ranking.Skills{BrokerRelationsLevel: broker, AccountingLevel: accounting}
+			rb := ranking.BrokerFeeRate(broker)
+			rt := ranking.SalesTaxRate(accounting)
+			exact := (2*rb + rt) / (1 + rb) * 100
+			got := ranking.BreakEvenGrossMargin(skills)
+			if got < exact {
+				t.Errorf("BreakEvenGrossMargin(Broker %d, Accounting %d) = %v below exact %v",
+					broker, accounting, got, exact)
+			}
+			if got-exact >= 0.1 {
+				t.Errorf("BreakEvenGrossMargin(Broker %d, Accounting %d) = %v, more than one rounding step above exact %v",
+					broker, accounting, got, exact)
+			}
+		}
+	}
+}

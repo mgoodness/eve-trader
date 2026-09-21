@@ -30,7 +30,7 @@ func newTestServer(t *testing.T, sqlDB *sql.DB) string {
 //	Wide Margin Ore    25      66.7%        300
 //	Pricey Ore         25      16.7%       1200
 //
-// At the defaults (min volume 20, gross margin 7-60%, no sell cap) the
+// At the defaults (min volume 20, gross margin 8.5-60%, no sell cap) the
 // first, second, and sixth show; the other three are outside the filters.
 // Every candidate clears the always-on realism filters.
 func seedFilterFixtures(t *testing.T, sqlDB *sql.DB) {
@@ -53,6 +53,59 @@ func inputValue(name, value string) string {
 	return `name="` + name + `" value="` + value + `"`
 }
 
+// TestMinMarginDefaultFollowsCharacterSkills is the ticket's headline
+// acceptance test: the rendered minimum-margin default is the character's
+// fee break-even, rounded up to one decimal, so it moves with the
+// character's Broker Relations and Accounting levels and a missing
+// character_skill row follows the level-0 convention.
+func TestMinMarginDefaultFollowsCharacterSkills(t *testing.T) {
+	cases := []struct {
+		name       string
+		broker     int
+		accounting int
+		seedSkills bool
+		want       string
+	}{
+		{name: "max skills", broker: 5, accounting: 5, seedSkills: true, want: "6.3"},
+		{name: "mid skills", broker: 4, accounting: 3, seedSkills: true, want: "8.5"},
+		{name: "level zero", broker: 0, accounting: 0, seedSkills: true, want: "13.2"},
+		// The level-0 break-even is 13.1068%, rounding up to 13.2; a missing
+		// row follows the same level-0 convention.
+		{name: "missing skill row follows level zero", seedSkills: false, want: "13.2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sqlDB := dbtest.OpenDB(t)
+			dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
+			if tc.seedSkills {
+				dbtest.SeedSkills(t, sqlDB, 1, tc.broker, tc.accounting)
+			}
+			seedCandidate(t, sqlDB, 34, "Tritanium", 100, 120, 40)
+
+			body := renderIndex(t, sqlDB)
+			if !strings.Contains(body, inputValue("minmargin", tc.want)) {
+				t.Errorf("rendered min margin default, want %q; body:\n%s", tc.want, body)
+			}
+		})
+	}
+}
+
+// TestExplicitMinMarginIsUnaffectedBySkills pins the absent-param contract:
+// an explicit minmargin in the URL wins over the skills-derived default, and
+// changing the character's skills does not touch it.
+func TestExplicitMinMarginIsUnaffectedBySkills(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
+	dbtest.SeedSkills(t, sqlDB, 1, 5, 5)
+	seedCandidate(t, sqlDB, 34, "Tritanium", 100, 120, 40)
+
+	srv := newTestServer(t, sqlDB)
+	_, body := getBody(t, srv+"/?minmargin=12.5")
+	if !strings.Contains(body, inputValue("minmargin", "12.5")) {
+		t.Errorf("explicit minmargin not preserved; body:\n%s", body)
+	}
+}
+
 func TestFilterFormRendersControlsDefaultsAndTooltips(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	seedFilterFixtures(t, sqlDB)
@@ -61,7 +114,7 @@ func TestFilterFormRendersControlsDefaultsAndTooltips(t *testing.T) {
 
 	for _, want := range []string{
 		inputValue("minvol", "20"),
-		inputValue("minmargin", "7"),
+		inputValue("minmargin", "8.5"),
 		inputValue("maxmargin", "60"),
 		inputValue("maxsell", ""),
 		`name="sort" value="iskday"`,
@@ -76,6 +129,8 @@ func TestFilterFormRendersControlsDefaultsAndTooltips(t *testing.T) {
 	for _, want := range []string{
 		"average daily Heimatar volume is below this",
 		"gross margin is below this",
+		"The default is your character",
+		"fee break-even, so the list starts fee-positive",
 		"gross margin is above this",
 		"Blank means no cap",
 	} {
@@ -100,7 +155,7 @@ func TestFilterParamMatrix(t *testing.T) {
 		{
 			name:   "absent params use defaults",
 			query:  "/",
-			inputs: map[string]string{"minvol": "20", "minmargin": "7", "maxmargin": "60", "maxsell": ""},
+			inputs: map[string]string{"minvol": "20", "minmargin": "8.5", "maxmargin": "60", "maxsell": ""},
 			shown:  []string{"Tritanium", "Pyerite", "Pricey Ore"},
 			absent: []string{"Thin Margin Ore", "Low Volume Ore", "Wide Margin Ore"},
 		},
@@ -170,7 +225,7 @@ func TestFilterParamMatrix(t *testing.T) {
 		{
 			name:   "out-of-range minmargin falls back to default",
 			query:  "/?minmargin=999",
-			inputs: map[string]string{"minmargin": "7"},
+			inputs: map[string]string{"minmargin": "8.5"},
 			shown:  []string{"Tritanium"},
 			absent: []string{"Thin Margin Ore"},
 		},
@@ -191,7 +246,7 @@ func TestFilterParamMatrix(t *testing.T) {
 		{
 			name:   "non-numeric minmargin falls back to default",
 			query:  "/?minmargin=xyz",
-			inputs: map[string]string{"minmargin": "7"},
+			inputs: map[string]string{"minmargin": "8.5"},
 			shown:  []string{"Tritanium"},
 			absent: []string{"Thin Margin Ore"},
 		},
@@ -219,14 +274,14 @@ func TestFilterParamMatrix(t *testing.T) {
 		{
 			name:   "NaN minmargin falls back to default",
 			query:  "/?minmargin=NaN",
-			inputs: map[string]string{"minmargin": "7"},
+			inputs: map[string]string{"minmargin": "8.5"},
 			shown:  []string{"Tritanium"},
 			absent: []string{"Thin Margin Ore"},
 		},
 		{
 			name:   "min margin over max margin resets both",
 			query:  "/?minmargin=80&maxmargin=50",
-			inputs: map[string]string{"minmargin": "7", "maxmargin": "60"},
+			inputs: map[string]string{"minmargin": "8.5", "maxmargin": "60"},
 			shown:  []string{"Tritanium"},
 			absent: []string{"Thin Margin Ore", "Wide Margin Ore"},
 		},
