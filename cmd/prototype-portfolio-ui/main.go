@@ -19,49 +19,55 @@ import (
 )
 
 type Position struct {
-	Name        string
-	Location    string
-	Qty         int
-	AvgCost     float64
-	BestBuy     float64
-	BestSell    float64
-	Realized    float64
-	Relists     int
-	FeesAlloc   float64
-	FeesUnattr  float64
-	RelistLow   float64
-	RelistHigh  float64
-	Status      string // Clears | Relist to clear | No market | Closed | Transferred
-	Disposition string // open | closed | transferred | no-market
-	Note        string
+	Name          string
+	Location      string
+	Qty           int
+	AvgCost       float64
+	BestBuy       float64
+	BestSell      float64
+	Realized      float64
+	RelistsBuy    int
+	RelistsSell   int
+	FeesAlloc     float64
+	FeesUnattr    float64
+	BreakEvenLow  float64
+	BreakEvenHigh float64
+	TargetLow     float64
+	TargetHigh    float64
+	Status        string // At target now | Below target | No market | Closed | Transferred
+	Disposition   string // open | closed | transferred | no-market
+	Note          string
 
 	// Precomputed for the templates.
 	UnitPnL    float64
 	Unrealized float64
 	CostPct    int
 	MktPct     int
-	HasRelist  bool
+	HasPrices  bool
 	StatusCls  string
 }
 
-// Mock data chosen to exercise the hard cases: a relist-heavy winner, an
-// underwater position needing a relist, a realised winner and loser, a
-// no-market position, and a priced transfer.
+// Mock data chosen to exercise the hard cases: a re-list-heavy winner, an
+// underwater position below target, a realised winner and loser, a no-market
+// position, and a priced transfer.
 var positions = []Position{
 	{Name: "Tritanium", Location: "Rens", Qty: 50000, AvgCost: 4.80, BestBuy: 5.10, BestSell: 5.41,
-		Relists: 3, FeesAlloc: 12000, FeesUnattr: 3000, RelistLow: 5.33, RelistHigh: 5.36, Status: "Clears", Disposition: "open"},
+		RelistsBuy: 1, RelistsSell: 3, FeesAlloc: 12000, FeesUnattr: 3000,
+		BreakEvenLow: 5.27, BreakEvenHigh: 5.30, TargetLow: 5.33, TargetHigh: 5.36, Status: "At target now", Disposition: "open"},
 	{Name: "Pyerite", Location: "Rens", Qty: 30000, AvgCost: 6.12, BestBuy: 5.80, BestSell: 6.05,
-		Relists: 5, FeesAlloc: 9500, FeesUnattr: 2500, RelistLow: 6.44, RelistHigh: 6.49, Status: "Relist to clear", Disposition: "open"},
-	{Name: "Heavy Water", Location: "Rens", Qty: 8000, AvgCost: 420, BestBuy: 430, BestSell: 455,
-		Relists: 47, FeesAlloc: 250000, FeesUnattr: 96000, RelistLow: 468, RelistHigh: 481, Status: "Clears", Disposition: "open"},
+		RelistsBuy: 3, RelistsSell: 5, FeesAlloc: 9500, FeesUnattr: 2500,
+		BreakEvenLow: 6.38, BreakEvenHigh: 6.43, TargetLow: 6.44, TargetHigh: 6.49, Status: "Below target", Disposition: "open"},
+	{Name: "Heavy Water", Location: "Rens", Qty: 8000, AvgCost: 420, BestBuy: 430, BestSell: 469,
+		RelistsBuy: 12, RelistsSell: 47, FeesAlloc: 250000, FeesUnattr: 96000,
+		BreakEvenLow: 455, BreakEvenHigh: 468, TargetLow: 468, TargetHigh: 481, Status: "At target now", Disposition: "open"},
 	{Name: "Isogen", Location: "Rens", Qty: 12000, AvgCost: 91.20,
-		Relists: 1, FeesAlloc: 4000, FeesUnattr: 500, Status: "No market", Disposition: "no-market", Note: "nothing on the Rens book"},
+		RelistsBuy: 1, RelistsSell: 0, FeesAlloc: 4000, FeesUnattr: 500, Status: "No market", Disposition: "no-market", Note: "nothing on the Rens book"},
 	{Name: "Mexallon", Location: "Rens", Qty: 0, Realized: 1234567,
-		Relists: 11, FeesAlloc: 80000, FeesUnattr: 21000, Status: "Closed", Disposition: "closed"},
+		RelistsBuy: 4, RelistsSell: 7, FeesAlloc: 80000, FeesUnattr: 21000, Status: "Closed", Disposition: "closed"},
 	{Name: "Morphite", Location: "Rens", Qty: 0, Realized: -45000,
-		Relists: 4, FeesAlloc: 22000, FeesUnattr: 4000, Status: "Closed", Disposition: "closed"},
+		RelistsBuy: 1, RelistsSell: 3, FeesAlloc: 22000, FeesUnattr: 4000, Status: "Closed", Disposition: "closed"},
 	{Name: "Nocxium", Location: "Transferred to alt", Qty: 2000, AvgCost: 780, Realized: 240000,
-		Relists: 0, FeesAlloc: 0, Status: "Transferred", Disposition: "transferred", Note: "item-exchange contract @ 900 ISK"},
+		RelistsBuy: 0, RelistsSell: 0, FeesAlloc: 0, Status: "Transferred", Disposition: "transferred", Note: "item-exchange contract @ 900 ISK"},
 }
 
 type totals struct {
@@ -99,9 +105,9 @@ func money(v float64) string { return fmt.Sprintf("%.2f", v) }
 
 func statusCls(s string) string {
 	switch s {
-	case "Clears":
+	case "At target now":
 		return "ok"
-	case "Relist to clear", "Underwater":
+	case "Below target":
 		return "warn"
 	case "Transferred":
 		return "transferred"
@@ -130,12 +136,13 @@ var funcs = template.FuncMap{
 	"add": func(a, b float64) float64 { return a + b },
 }
 
-func buildViewData() (viewData, []Position) {
+func buildViewData() viewData {
 	ps := make([]Position, len(positions))
 	copy(ps, positions)
 	for i := range ps {
 		p := &ps[i]
 		p.StatusCls = statusCls(p.Status)
+		p.HasPrices = p.TargetHigh > 0
 		if p.Disposition == "open" {
 			p.UnitPnL = p.BestSell - p.AvgCost
 			p.Unrealized = float64(p.Qty) * p.UnitPnL
@@ -143,7 +150,6 @@ func buildViewData() (viewData, []Position) {
 			p.CostPct = pctOf(p.AvgCost, max)
 			p.MktPct = pctOf(p.BestSell-p.AvgCost, max)
 		}
-		p.HasRelist = p.RelistHigh > 0
 	}
 
 	var t totals
@@ -156,7 +162,7 @@ func buildViewData() (viewData, []Position) {
 		case "open":
 			t.Open++
 			t.Unrealized += p.Unrealized
-			if p.Status == "Clears" {
+			if p.Status == "At target now" {
 				d.Clears = append(d.Clears, p)
 			} else {
 				d.Relist = append(d.Relist, p)
@@ -175,7 +181,7 @@ func buildViewData() (viewData, []Position) {
 	d.T = t
 	d.P = ps
 	d.ClearsN, d.RelistN, d.TransferredN, d.NoMarketN = len(d.Clears), len(d.Relist), len(d.Transferred), len(d.NoMarket)
-	return d, ps
+	return d
 }
 
 type viewData struct {
@@ -194,6 +200,7 @@ const sharedDefs = `
   <div class="stat"><span class="muted">Unattributed fees</span><strong class="warnc">{{isk .T.FeesUnattr}}</strong></div>
 </div>
 {{end}}
+{{define "legend"}}<p class="legend"><strong>Break-even</strong> — net proceeds cover cost + allocated estimated fees (zero profit). <strong>Target</strong> — break-even plus your target net margin. <strong>Re-lists</strong> are inferred from order snapshots and may undercount. Ranges span the confident vs unattributed-fee assumptions.</p>{{end}}
 {{define "footnote"}}<p class="footnote">Profit figures are net of estimated broker fees and sales tax; per-item fees are estimates because ESI does not link a fee to an order or item. Unattributed fees are mostly re-lists. Portfolio data can be up to an hour stale.</p>{{end}}
 `
 
@@ -205,7 +212,7 @@ const variantATmpl = `{{define "variantA"}}<section class="results">
     <span class="tab">Transfers ({{.T.Transferred}})</span>
   </div>
   <table>
-    <thead><tr><th>Item</th><th>Qty</th><th>Avg cost</th><th>Mkt sell</th><th>Unreal P/L</th><th>Realized</th><th>Relists</th><th>Est. fees</th><th>Relist clears at</th><th>Status</th></tr></thead>
+    <thead><tr><th>Item</th><th>Qty</th><th>Avg cost</th><th>Mkt sell</th><th>Unreal P/L</th><th>Realized</th><th>Buy / sell re-lists</th><th>Est. fees</th><th>Break-even</th><th>Target</th><th>Status</th></tr></thead>
     <tbody>
     {{range .P}}
       <tr>
@@ -215,12 +222,12 @@ const variantATmpl = `{{define "variantA"}}<section class="results">
         {{else if eq .Disposition "closed"}}
           <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="{{if lt .Realized 0.0}}neg{{else}}pos{{end}}">{{signed .Realized}}</td>
         {{else}}
-          <td>{{.Qty}}</td><td>{{money .AvgCost}}</td><td>{{if .HasRelist}}{{money .BestSell}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td>{{.Qty}}</td><td>{{money .AvgCost}}</td><td>{{if .HasPrices}}{{money .BestSell}}{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="{{if lt .Unrealized 0.0}}neg{{else}}pos{{end}}">{{signed .Unrealized}}</td><td class="muted">—</td>
         {{end}}
-        <td>{{.Relists}}</td>
+        <td>{{.RelistsBuy}} / {{.RelistsSell}}<span class="est"> inf</span></td>
         <td>{{vol .FeesAlloc}}<span class="est"> est</span></td>
-        {{if .HasRelist}}<td><strong>{{money .RelistLow}}–{{money .RelistHigh}}</strong></td>{{else}}<td class="muted">—</td>{{end}}
+        {{if .HasPrices}}<td>{{money .BreakEvenLow}}–{{money .BreakEvenHigh}}</td><td><strong>{{money .TargetLow}}–{{money .TargetHigh}}</strong></td>{{else}}<td class="muted">—</td><td class="muted">—</td>{{end}}
         <td><span class="badge {{.StatusCls}}">{{.Status}}</span></td>
       </tr>
     {{end}}
@@ -252,11 +259,12 @@ const variantBTmpl = `{{define "variantB"}}<section class="results">
         <div class="meter"><span class="cost" style="width:{{.CostPct}}%"></span><span class="mkt" style="width:{{.MktPct}}%"></span></div>
         <div class="row"><span class="muted">cost {{money .AvgCost}}</span><span class="muted">mkt {{money .BestSell}}</span></div>
         <div class="{{if lt .UnitPnL 0.0}}neg{{else}}pos{{end}}">{{signed .UnitPnL}} / unit</div>
-        <div class="relist">relists {{.Relists}} &middot; clears at <strong>{{money .RelistLow}}–{{money .RelistHigh}}</strong></div>
+        <div class="relist">target <strong>{{money .TargetLow}}–{{money .TargetHigh}}</strong> &middot; break-even {{money .BreakEvenLow}}–{{money .BreakEvenHigh}}</div>
+        <div class="muted">{{.RelistsBuy}} buy / {{.RelistsSell}} sell re-lists <span class="est">inf</span></div>
       {{else if eq .Disposition "closed"}}
         <div class="muted">closed position</div>
         <div class="{{if lt .Realized 0.0}}neg{{else}}pos{{end}} big">{{signed .Realized}}</div>
-        <div class="muted">{{.Relists}} re-lists &middot; {{vol .FeesAlloc}} fees est</div>
+        <div class="muted">{{.RelistsBuy}} buy / {{.RelistsSell}} sell re-lists &middot; {{vol .FeesAlloc}} fees est</div>
       {{else if eq .Disposition "transferred"}}
         <div class="badge transferred">Transferred</div>
         <div class="muted">{{.Note}}</div>
@@ -275,18 +283,18 @@ const variantBTmpl = `{{define "variantB"}}<section class="results">
 const variantCTmpl = `{{define "variantC"}}<section class="results">
   {{template "stats" .}}
   <div class="queue">
-    <h2>List now — clears fees <span class="count">{{.ClearsN}}</span></h2>
+    <h2>At target now <span class="count">{{.ClearsN}}</span></h2>
     {{range .Clears}}<div class="act">
       <div><strong>{{.Name}}</strong> <span class="muted">{{.Qty}} @ {{.Location}}</span></div>
-      <div class="act-cta">list above <strong>{{money .RelistLow}} ISK</strong></div>
-      <div class="muted">{{.Relists}} re-lists &middot; fees {{vol .FeesAlloc}} est</div>
+      <div class="act-cta">list above <strong>{{money .TargetLow}} ISK</strong> <span class="muted">(break-even {{money .BreakEvenLow}})</span></div>
+      <div class="muted">{{.RelistsBuy}} buy / {{.RelistsSell}} sell re-lists <span class="est">inf</span> &middot; fees {{vol .FeesAlloc}} est</div>
     </div>{{end}}
 
-    <h2>Relist to clear <span class="count">{{.RelistN}}</span></h2>
+    <h2>Below target <span class="count">{{.RelistN}}</span></h2>
     {{range .Relist}}<div class="act warn">
       <div><strong>{{.Name}}</strong> <span class="muted">{{.Qty}} @ {{.Location}}</span></div>
-      <div class="act-cta">market {{money .BestSell}} &rarr; clears at <strong>{{money .RelistLow}}–{{money .RelistHigh}}</strong></div>
-      <div class="muted">underwater at the current book; {{.Relists}} re-lists &middot; fees {{vol .FeesAlloc}} est</div>
+      <div class="act-cta">market {{money .BestSell}} &rarr; target <strong>{{money .TargetLow}}–{{money .TargetHigh}}</strong></div>
+      <div class="muted">break-even {{money .BreakEvenLow}}–{{money .BreakEvenHigh}} &middot; {{.RelistsBuy}} buy / {{.RelistsSell}} sell re-lists <span class="est">inf</span></div>
     </div>{{end}}
 
     <h2>Transfers <span class="count">{{.TransferredN}}</span></h2>
@@ -315,6 +323,8 @@ const pageTmpl = `{{define "page"}}<!doctype html>
   h1 { margin: 0 0 .25rem; font-size: 1.15rem; }
   .nav { display:flex; gap:1rem; margin-top:.5rem; font-size:.85rem; }
   .nav a { color:#64748b; text-decoration:none; } .nav a.active { color:#34d399; font-weight:600; }
+  .legend { color:#94a3b8; font-size:.75rem; margin:.8rem 0 0; background:#0f172a; border:1px solid #1e293b; border-radius:.4rem; padding:.5rem .7rem; }
+  .legend strong { color:#e2e8f0; }
   .footnote { color: #94a3b8; font-size: .75rem; margin: 1rem 0 0; }
   .stats { display:grid; grid-template-columns: repeat(4,1fr); gap:.75rem; margin:1rem 0; }
   .stat { background:#0f172a; border:1px solid #1e293b; border-radius:.5rem; padding:.6rem .8rem; font-size:.8rem; }
@@ -354,6 +364,7 @@ const pageTmpl = `{{define "page"}}<!doctype html>
 <header>
   <h1>Rens Station Trading Opportunities</h1>
   <div class="nav"><a href="#">Opportunities</a><a href="#" class="active">Portfolio</a></div>
+  {{template "legend" .}}
   <p class="footnote">Prototype — variant {{.Variant}} ({{.VariantName}}): UI-only, mock data, no persistence.</p>
 </header>
 {{.Body}}
@@ -392,7 +403,7 @@ func main() {
 				idx = i
 			}
 		}
-		d, _ := buildViewData()
+		d := buildViewData()
 		var body strings.Builder
 		if err := tmpl.ExecuteTemplate(&body, variants[idx].Tmpl, d); err != nil {
 			http.Error(w, err.Error(), 500)
