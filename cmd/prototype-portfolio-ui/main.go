@@ -34,8 +34,9 @@ type Position struct {
 	BreakEvenHigh float64
 	TargetLow     float64
 	TargetHigh    float64
-	Status        string // At target now | Below target | No market | Closed | Transferred
-	Disposition   string // open | closed | transferred | no-market
+	MarketMargin  float64 // net margin achievable at the current best sell, where positive
+	Status        string  // At target now | Below target | No market | Closed | Transferred
+	Disposition   string  // open | closed | transferred | no-market
 	Note          string
 
 	// Precomputed for the templates.
@@ -53,13 +54,13 @@ type Position struct {
 var positions = []Position{
 	{Name: "Tritanium", Location: "Rens", Qty: 50000, AvgCost: 4.80, BestBuy: 5.10, BestSell: 5.41,
 		RelistsBuy: 1, RelistsSell: 3, FeesAlloc: 12000, FeesUnattr: 3000,
-		BreakEvenLow: 5.27, BreakEvenHigh: 5.30, TargetLow: 5.33, TargetHigh: 5.36, Status: "At target now", Disposition: "open"},
+		BreakEvenLow: 5.27, BreakEvenHigh: 5.30, TargetLow: 5.33, TargetHigh: 5.36, MarketMargin: 2.4, Status: "At target now", Disposition: "open"},
 	{Name: "Pyerite", Location: "Rens", Qty: 30000, AvgCost: 6.12, BestBuy: 5.80, BestSell: 6.05,
 		RelistsBuy: 3, RelistsSell: 5, FeesAlloc: 9500, FeesUnattr: 2500,
 		BreakEvenLow: 6.38, BreakEvenHigh: 6.43, TargetLow: 6.44, TargetHigh: 6.49, Status: "Below target", Disposition: "open"},
 	{Name: "Heavy Water", Location: "Rens", Qty: 8000, AvgCost: 420, BestBuy: 430, BestSell: 469,
 		RelistsBuy: 12, RelistsSell: 47, FeesAlloc: 250000, FeesUnattr: 96000,
-		BreakEvenLow: 455, BreakEvenHigh: 468, TargetLow: 468, TargetHigh: 481, Status: "At target now", Disposition: "open"},
+		BreakEvenLow: 455, BreakEvenHigh: 468, TargetLow: 468, TargetHigh: 481, MarketMargin: 1.1, Status: "At target now", Disposition: "open"},
 	{Name: "Isogen", Location: "Rens", Qty: 12000, AvgCost: 91.20,
 		RelistsBuy: 1, RelistsSell: 0, FeesAlloc: 4000, FeesUnattr: 500, Status: "No market", Disposition: "no-market", Note: "nothing on the Rens book"},
 	{Name: "Mexallon", Location: "Rens", Qty: 0, Realized: 1234567,
@@ -134,6 +135,7 @@ var funcs = template.FuncMap{
 	"isk": isk, "signed": signed, "money": money, "vol": isk,
 	"statusCls": statusCls, "pctOf": pctOf,
 	"add": func(a, b float64) float64 { return a + b },
+	"gt":  func(a, b float64) bool { return a > b },
 }
 
 func buildViewData() viewData {
@@ -200,7 +202,7 @@ const sharedDefs = `
   <div class="stat"><span class="muted">Unattributed fees</span><strong class="warnc">{{isk .T.FeesUnattr}}</strong></div>
 </div>
 {{end}}
-{{define "legend"}}<p class="legend"><strong>Break-even</strong> — net proceeds cover cost + allocated estimated fees (zero profit). <strong>Target</strong> — break-even plus your target net margin. <strong>Re-lists</strong> are inferred from order snapshots and may undercount. Ranges span the confident vs unattributed-fee assumptions.</p>{{end}}
+{{define "legend"}}<p class="legend"><strong>Break-even</strong> — net proceeds cover cost + allocated estimated fees (zero profit). <strong>Target</strong> — break-even plus your target net margin (default 0% net, so target = break-even). <strong>Mkt net margin</strong> — the net margin the current best sell would actually yield. <strong>Re-lists</strong> are inferred from order snapshots and may undercount. Ranges span the confident vs unattributed-fee assumptions.</p>{{end}}
 {{define "footnote"}}<p class="footnote">Profit figures are net of estimated broker fees and sales tax; per-item fees are estimates because ESI does not link a fee to an order or item. Unattributed fees are mostly re-lists. Portfolio data can be up to an hour stale.</p>{{end}}
 `
 
@@ -212,7 +214,7 @@ const variantATmpl = `{{define "variantA"}}<section class="results">
     <span class="tab">Transfers ({{.T.Transferred}})</span>
   </div>
   <table>
-    <thead><tr><th>Item</th><th>Qty</th><th>Avg cost</th><th>Mkt sell</th><th>Unreal P/L</th><th>Realized</th><th>Buy / sell re-lists</th><th>Est. fees</th><th>Break-even</th><th>Target</th><th>Status</th></tr></thead>
+    <thead><tr><th>Item</th><th>Qty</th><th>Avg cost</th><th>Mkt sell</th><th>Unreal P/L</th><th>Realized</th><th>Buy / sell re-lists</th><th>Est. fees</th><th>Break-even</th><th>Target</th><th>Mkt net margin</th><th>Status</th></tr></thead>
     <tbody>
     {{range .P}}
       <tr>
@@ -227,7 +229,7 @@ const variantATmpl = `{{define "variantA"}}<section class="results">
         {{end}}
         <td>{{.RelistsBuy}} / {{.RelistsSell}}<span class="est"> inf</span></td>
         <td>{{vol .FeesAlloc}}<span class="est"> est</span></td>
-        {{if .HasPrices}}<td>{{money .BreakEvenLow}}–{{money .BreakEvenHigh}}</td><td><strong>{{money .TargetLow}}–{{money .TargetHigh}}</strong></td>{{else}}<td class="muted">—</td><td class="muted">—</td>{{end}}
+        {{if .HasPrices}}<td>{{money .BreakEvenLow}}–{{money .BreakEvenHigh}}</td><td><strong>{{money .TargetLow}}–{{money .TargetHigh}}</strong></td><td>{{if gt .MarketMargin 0.0}}<span class="pos">+{{money .MarketMargin}}% net</span>{{else}}<span class="muted">—</span>{{end}}</td>{{else}}<td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>{{end}}
         <td><span class="badge {{.StatusCls}}">{{.Status}}</span></td>
       </tr>
     {{end}}
@@ -260,6 +262,7 @@ const variantBTmpl = `{{define "variantB"}}<section class="results">
         <div class="row"><span class="muted">cost {{money .AvgCost}}</span><span class="muted">mkt {{money .BestSell}}</span></div>
         <div class="{{if lt .UnitPnL 0.0}}neg{{else}}pos{{end}}">{{signed .UnitPnL}} / unit</div>
         <div class="relist">target <strong>{{money .TargetLow}}–{{money .TargetHigh}}</strong> &middot; break-even {{money .BreakEvenLow}}–{{money .BreakEvenHigh}}</div>
+        {{if gt .MarketMargin 0.0}}<div class="pos">market implies +{{money .MarketMargin}}% net</div>{{end}}
         <div class="muted">{{.RelistsBuy}} buy / {{.RelistsSell}} sell re-lists <span class="est">inf</span></div>
       {{else if eq .Disposition "closed"}}
         <div class="muted">closed position</div>
@@ -286,7 +289,7 @@ const variantCTmpl = `{{define "variantC"}}<section class="results">
     <h2>At target now <span class="count">{{.ClearsN}}</span></h2>
     {{range .Clears}}<div class="act">
       <div><strong>{{.Name}}</strong> <span class="muted">{{.Qty}} @ {{.Location}}</span></div>
-      <div class="act-cta">list above <strong>{{money .TargetLow}} ISK</strong> <span class="muted">(break-even {{money .BreakEvenLow}})</span></div>
+      <div class="act-cta">list above <strong>{{money .TargetLow}} ISK</strong> {{if gt .MarketMargin 0.0}}<span class="pos">(market implies +{{money .MarketMargin}}% net)</span>{{else}}<span class="muted">(break-even {{money .BreakEvenLow}})</span>{{end}}</div>
       <div class="muted">{{.RelistsBuy}} buy / {{.RelistsSell}} sell re-lists <span class="est">inf</span> &middot; fees {{vol .FeesAlloc}} est</div>
     </div>{{end}}
 
