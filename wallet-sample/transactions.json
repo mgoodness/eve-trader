@@ -1,0 +1,122 @@
+[
+  {
+    "client_id": 900000001,
+    "date": "2026-09-12T22:47:40Z",
+    "is_buy": false,
+    "is_personal": true,
+    "journal_ref_id": 26032611480,
+    "location_id": 60004588,
+    "quantity": 1,
+    "transaction_id": 6873053845,
+    "type_id": 37459,
+    "unit_price": 15000000
+  },
+  {
+    "client_id": 900000002,
+    "date": "2026-09-06T00:42:07Z",
+    "is_buy": false,
+    "is_personal": true,
+    "journal_ref_id": 26007238589,
+    "location_id": 60004588,
+    "quantity": 1,
+    "transaction_id": 6868742034,
+    "type_id": 599,
+    "unit_price": 129300
+  },
+  {
+    "client_id": 900000003,
+    "date": "2026-08-30T21:43:57Z",
+    "is_buy": false,
+    "is_personal": true,
+    "journal_ref_id": 25981637572,
+    "location_id": 60004588,
+    "quantity": 1,
+    "transaction_id": 6864968040,
+    "type_id": 37460,
+    "unit_price": 15000000
+  },
+  {
+    "client_id": 900000004,
+    "date": "2026-08-26T22:34:31Z",
+    "is_buy": true,
+    "is_personal": true,
+    "journal_ref_id": 25966550781,
+    "location_id": 60004462,
+    "quantity": 1,
+    "transaction_id": 6862348445,
+    "type_id": 3444,
+    "unit_price": 125000
+  },
+  {
+    "client_id": 900000004,
+    "date": "2026-08-26T22:34:08Z",
+    "is_buy": true,
+    "is_personal": true,
+    "journal_ref_id": 25966550286,
+    "location_id": 60004462,
+    "quantity": 1,
+    "transaction_id": 6862348374,
+    "type_id": 3447,
+    "unit_price": 7500000
+  },
+  {
+    "client_id": 900000004,
+    "date": "2026-08-26T22:33:37Z",
+    "is_buy": true,
+    "is_personal": true,
+    "journal_ref_id": 25966549295,
+    "location_id": 60004462,
+    "quantity": 1,
+    "transaction_id": 6862348178,
+    "type_id": 3444,
+    "unit_price": 125000
+  },
+  {
+    "client_id": 900000005,
+    "date": "2026-08-22T05:06:56Z",
+    "is_buy": false,
+    "is_personal": true,
+    "journal_ref_id": 25948972210,
+    "location_id": 60004588,
+    "quantity": 1,
+    "transaction_id": 6859307594,
+    "type_id": 11978,
+    "unit_price": 140000000
+  },
+  {
+    "client_id": 900000006,
+    "date": "2026-08-21T01:29:36Z",
+    "is_buy": true,
+    "is_personal": true,
+    "journal_ref_id": 25945111162,
+    "location_id": 60014599,
+    "quantity": 1,
+    "transaction_id": 6858643528,
+    "type_id": 16594,
+    "unit_price": 1500000
+  },
+  {
+    "client_id": 900000006,
+    "date": "2026-08-21T01:29:32Z",
+    "is_buy": true,
+    "is_personal": true,
+    "journal_ref_id": 25945111072,
+    "location_id": 60014599,
+    "quantity": 1,
+    "transaction_id": 6858643516,
+    "type_id": 16595,
+    "unit_price": 15000000
+  },
+  {
+    "client_id": 900000006,
+    "date": "2026-08-21T01:29:21Z",
+    "is_buy": true,
+    "is_personal": true,
+    "journal_ref_id": 25945110772,
+    "location_id": 60014599,
+    "quantity": 1,
+    "transaction_id": 6858643476,
+    "type_id": 16597,
+    "unit_price": 20000000
+  }
+]

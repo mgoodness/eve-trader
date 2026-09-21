@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-09-21T20:43:18Z",
+  "character_redacted": true,
+  "counts": {
+    "contract_items": 1,
+    "contracts": 4,
+    "journal": 16,
+    "order_history": 99,
+    "orders": 1,
+    "transactions": 10
+  },
+  "scopes": "esi-wallet.read_character_wallet.v1 esi-markets.read_character_orders.v1 esi-contracts.read_character_contracts.v1"
+}

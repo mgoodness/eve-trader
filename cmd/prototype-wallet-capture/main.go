@@ -59,6 +59,15 @@ var sensitiveKeys = map[string]bool{
 	"character_id":          true,
 }
 
+// freeTextKeys are fields whose values embed player names (journal descriptions
+// read "Market: <buyer> bought stuff from <seller>"). They are blanked so the
+// sample carries no personal names.
+var freeTextKeys = map[string]bool{
+	"description": true,
+	"title":       true,
+	"reason":      true,
+}
+
 func main() {
 	clientID := flag.String("client-id", os.Getenv("EVE_TRADER_ESI_CLIENT_ID"), "EVE developer app client ID (or EVE_TRADER_ESI_CLIENT_ID)")
 	callback := flag.String("callback", "http://localhost:8098/callback", "redirect URI registered on the app; its host:port is where this listens")
@@ -343,6 +352,10 @@ func (r *redactor) redact(v any) any {
 					t[k] = r.alias(int64(f))
 					continue
 				}
+			}
+			if freeTextKeys[k] {
+				t[k] = "<redacted>"
+				continue
 			}
 			t[k] = r.redact(val)
 		}

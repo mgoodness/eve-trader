@@ -1,0 +1,15 @@
+[
+  {
+    "duration": 90,
+    "is_corporation": false,
+    "issued": "2026-08-19T02:33:27Z",
+    "location_id": 60003760,
+    "order_id": 7403691403,
+    "price": 619000,
+    "range": "region",
+    "region_id": 10000002,
+    "type_id": 1565,
+    "volume_remain": 1,
+    "volume_total": 1
+  }
+]
