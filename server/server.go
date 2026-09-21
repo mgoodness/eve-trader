@@ -302,6 +302,22 @@ func (s *Server) latchAuthFailure(err error) (esi.Token, bool, error) {
 	return esi.Token{}, false, err
 }
 
+// latchInsufficientScope latches the same re-authentication state as a
+// refresh failure, for the distinct case where the stored refresh token
+// still refreshes successfully but was granted under a narrower OAuth
+// scope than an authenticated call now needs (e.g. a v1 token after the
+// v2 scope expansion, docs/spec/v2.md §6: "the tool requires one
+// re-consent"). The "Re-authenticate with EVE" banner's link re-requests
+// ssoScope's current scope set, so following it once re-consents and
+// replaces the under-scoped token.
+func (s *Server) latchInsufficientScope(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reauthRequired = true
+	s.authChecked = true
+	slog.Error("authenticated ESI work stopped: token lacks a newly required scope, re-authentication required", "err", err)
+}
+
 func (s *Server) resetAuthentication() {
 	s.mu.Lock()
 	s.authChecked, s.reauthRequired, s.reauthFirstBoot = false, false, false

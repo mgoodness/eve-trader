@@ -86,6 +86,7 @@ func run() error {
 	addr := cmp.Or(os.Getenv("EVE_TRADER_ADDR"), ":8080")
 	serverHandler := server.New(gateway, sqlDB, authConfig)
 	go serverHandler.NewSkillPoller(server.CharacterSkillsInterval).Run(ctx)
+	go serverHandler.NewWalletPoller(server.WalletSyncInterval).Run(ctx)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           serverHandler,

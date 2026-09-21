@@ -42,6 +42,12 @@ func (*namesGateway) FetchHistory(context.Context, int) ([]esi.HistoryPoint, err
 func (*namesGateway) FetchCharacterSkills(context.Context, int, string) (esi.Skills, error) {
 	return esi.Skills{}, nil
 }
+func (*namesGateway) FetchWalletTransactions(context.Context, int, string, int64) ([]esi.WalletTransaction, error) {
+	return nil, nil
+}
+func (*namesGateway) FetchWalletJournal(context.Context, int, string) ([]esi.WalletJournalEntry, error) {
+	return nil, nil
+}
 func (*namesGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }

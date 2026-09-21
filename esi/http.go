@@ -61,7 +61,7 @@ func (g *HTTPGateway) FetchRensOrders(ctx context.Context) ([]Order, error) {
 			Duration int       `json:"duration"`
 			Location int       `json:"location_id"`
 		}
-		resp, err := g.get(ctx, u, &raw)
+		resp, err := g.get(ctx, u, "", &raw)
 		if err != nil {
 			return nil, err
 		}
@@ -114,10 +114,13 @@ func (g *HTTPGateway) FetchTypeNames(ctx context.Context, typeIDs []int) (map[in
 	return names, nil
 }
 
-func (g *HTTPGateway) get(ctx context.Context, endpoint string, target any) (*http.Response, error) {
+func (g *HTTPGateway) get(ctx context.Context, endpoint, accessToken string, target any) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
+	}
+	if accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+accessToken)
 	}
 	resp, err := g.client().Do(req)
 	if err != nil {
@@ -146,7 +149,7 @@ func (g *HTTPGateway) FetchHistory(ctx context.Context, typeID int) ([]HistoryPo
 		Highest    float64 `json:"highest"`
 		Lowest     float64 `json:"lowest"`
 	}
-	_, err := g.get(ctx, fmt.Sprintf("%s/markets/%d/history/?type_id=%d", g.base(), regionHeimatar, typeID), &raw)
+	_, err := g.get(ctx, fmt.Sprintf("%s/markets/%d/history/?type_id=%d", g.base(), regionHeimatar, typeID), "", &raw)
 	if err != nil {
 		return nil, fmt.Errorf("fetching history for type %d: %w", typeID, err)
 	}
@@ -193,6 +196,101 @@ func (g *HTTPGateway) FetchCharacterSkills(ctx context.Context, characterID int,
 		}
 	}
 	return skills, nil
+}
+
+// FetchWalletTransactions returns the character's wallet transactions.
+// fromID of zero fetches ESI's current page (the most recent
+// transactions); a non-zero fromID walks backward into older history.
+// ESI's from_id boundary is inclusive: a caller paging backward will see
+// the transaction matching fromID again as the first element of the next
+// page and must drop it.
+func (g *HTTPGateway) FetchWalletTransactions(ctx context.Context, characterID int, accessToken string, fromID int64) ([]WalletTransaction, error) {
+	endpoint := fmt.Sprintf("%s/characters/%d/wallet/transactions/", g.base(), characterID)
+	if fromID > 0 {
+		endpoint += fmt.Sprintf("?from_id=%d", fromID)
+	}
+	var raw []struct {
+		TransactionID int64     `json:"transaction_id"`
+		Date          time.Time `json:"date"`
+		TypeID        int       `json:"type_id"`
+		Quantity      int       `json:"quantity"`
+		UnitPrice     float64   `json:"unit_price"`
+		IsBuy         bool      `json:"is_buy"`
+		IsPersonal    bool      `json:"is_personal"`
+		JournalRefID  int64     `json:"journal_ref_id"`
+		LocationID    int64     `json:"location_id"`
+		ClientID      int64     `json:"client_id"`
+	}
+	if _, err := g.get(ctx, endpoint, accessToken, &raw); err != nil {
+		return nil, fmt.Errorf("fetching wallet transactions for character %d: %w", characterID, err)
+	}
+	out := make([]WalletTransaction, len(raw))
+	for i, v := range raw {
+		out[i] = WalletTransaction{
+			TransactionID: v.TransactionID,
+			Date:          v.Date,
+			TypeID:        v.TypeID,
+			Quantity:      v.Quantity,
+			UnitPrice:     v.UnitPrice,
+			IsBuy:         v.IsBuy,
+			IsPersonal:    v.IsPersonal,
+			JournalRefID:  v.JournalRefID,
+			LocationID:    v.LocationID,
+			ClientID:      v.ClientID,
+		}
+	}
+	return out, nil
+}
+
+// FetchWalletJournal returns the character's whole wallet journal, walking
+// the page/X-Pages pagination exactly like FetchRensOrders.
+func (g *HTTPGateway) FetchWalletJournal(ctx context.Context, characterID int, accessToken string) ([]WalletJournalEntry, error) {
+	var out []WalletJournalEntry
+	for page := 1; ; page++ {
+		endpoint := fmt.Sprintf("%s/characters/%d/wallet/journal/?page=%d", g.base(), characterID, page)
+		var raw []struct {
+			ID            int64     `json:"id"`
+			Date          time.Time `json:"date"`
+			RefType       string    `json:"ref_type"`
+			Amount        float64   `json:"amount"`
+			Balance       float64   `json:"balance"`
+			ContextID     int64     `json:"context_id"`
+			ContextIDType string    `json:"context_id_type"`
+			Description   string    `json:"description"`
+			FirstPartyID  int       `json:"first_party_id"`
+			SecondPartyID int       `json:"second_party_id"`
+			Reason        string    `json:"reason"`
+			Tax           float64   `json:"tax"`
+			TaxReceiverID int       `json:"tax_receiver_id"`
+		}
+		resp, err := g.get(ctx, endpoint, accessToken, &raw)
+		if err != nil {
+			return nil, fmt.Errorf("fetching wallet journal for character %d: %w", characterID, err)
+		}
+		for _, v := range raw {
+			out = append(out, WalletJournalEntry{
+				ID:            v.ID,
+				Date:          v.Date,
+				RefType:       v.RefType,
+				Amount:        v.Amount,
+				Balance:       v.Balance,
+				ContextID:     v.ContextID,
+				ContextIDType: v.ContextIDType,
+				Description:   v.Description,
+				FirstPartyID:  v.FirstPartyID,
+				SecondPartyID: v.SecondPartyID,
+				Reason:        v.Reason,
+				Tax:           v.Tax,
+				TaxReceiverID: v.TaxReceiverID,
+			})
+		}
+		pages := resp.Header.Get("X-Pages")
+		n, _ := strconv.Atoi(pages)
+		if n == 0 || page >= n {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (g *HTTPGateway) ExchangeCode(ctx context.Context, code, verifier string) (Token, error) {
