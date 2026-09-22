@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/mgoodness/eve-trader/esi"
@@ -68,14 +69,28 @@ func (p *WalletPoller) Poll(ctx context.Context) error {
 	}
 
 	if err := p.syncTransactions(ctx, characterID, token.AccessToken); err != nil {
-		p.server.latchIfInsufficientScope(err)
+		latchIfInsufficientScope(p.server, err)
 		return fmt.Errorf("syncing wallet transactions: %w", err)
 	}
 	if err := p.syncJournal(ctx, characterID, token.AccessToken); err != nil {
-		p.server.latchIfInsufficientScope(err)
+		latchIfInsufficientScope(p.server, err)
 		return fmt.Errorf("syncing wallet journal: %w", err)
 	}
 	return nil
+}
+
+// latchIfInsufficientScope recognizes ESI's 403 for a token that refreshes
+// fine but was never granted the scope a call needs -- the state a
+// pre-v2 refresh token is in after the ssoScope expansion (docs/spec/v2.md
+// §6). It latches the same "Re-authenticate with EVE" banner a refresh
+// failure does, whose link requests the current (superset) ssoScope, so
+// following it once re-consents and replaces the under-scoped token. Shared
+// by every authenticated poller.
+func latchIfInsufficientScope(server *Server, err error) {
+	var httpErr *esi.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden {
+		server.latchInsufficientScope(err)
+	}
 }
 
 // Run performs an immediate sync and then syncs on the configured cadence.
@@ -102,7 +117,7 @@ func (p *WalletPoller) Run(ctx context.Context) {
 // has been fully backfilled, walks backward with from_id to reach the edge
 // of ESI's retained history exactly once.
 func (p *WalletPoller) syncTransactions(ctx context.Context, characterID int, accessToken string) error {
-	state, err := p.loadSyncState(ctx, walletTransactionStream)
+	state, err := p.server.loadSyncState(ctx, walletTransactionStream)
 	if err != nil {
 		return err
 	}
@@ -145,7 +160,7 @@ func (p *WalletPoller) syncTransactions(ctx context.Context, characterID int, ac
 		}
 	}
 
-	return p.saveSyncState(ctx, walletTransactionStream, state)
+	return p.server.saveSyncState(ctx, walletTransactionStream, state)
 }
 
 // syncJournal fetches the character's whole wallet journal -- ESI always
@@ -160,7 +175,7 @@ func (p *WalletPoller) syncJournal(ctx context.Context, characterID int, accessT
 		return err
 	}
 
-	state, err := p.loadSyncState(ctx, walletJournalStream)
+	state, err := p.server.loadSyncState(ctx, walletJournalStream)
 	if err != nil {
 		return err
 	}
@@ -170,7 +185,7 @@ func (p *WalletPoller) syncJournal(ctx context.Context, characterID int, accessT
 	}
 	state.observeIDs(ids)
 	state.backfilled = true
-	return p.saveSyncState(ctx, walletJournalStream, state)
+	return p.server.saveSyncState(ctx, walletJournalStream, state)
 }
 
 // upsertTransactions writes txs to wallet_transaction in one transaction,
@@ -236,8 +251,8 @@ func (p *WalletPoller) upsertJournal(ctx context.Context, entries []esi.WalletJo
 	return nil
 }
 
-// walletSyncState is one stream's ledger_sync row.
-type walletSyncState struct {
+// ledgerSyncState is one stream's ledger_sync row.
+type ledgerSyncState struct {
 	oldestID   sql.NullInt64
 	newestID   sql.NullInt64
 	backfilled bool
@@ -247,7 +262,7 @@ type walletSyncState struct {
 // boundary advanced. Callers walking backward use the return value to
 // detect a stalled walk (a non-empty page that contained nothing older
 // than the cursor already recorded).
-func (s *walletSyncState) observeIDs(ids []int64) bool {
+func (s *ledgerSyncState) observeIDs(ids []int64) bool {
 	advanced := false
 	for _, id := range ids {
 		if !s.newestID.Valid || id > s.newestID.Int64 {
@@ -263,31 +278,31 @@ func (s *walletSyncState) observeIDs(ids []int64) bool {
 
 // loadSyncState reads stream's ledger_sync row, or the zero state if the
 // stream has never been synced.
-func (p *WalletPoller) loadSyncState(ctx context.Context, stream ledgerStream) (walletSyncState, error) {
+func (s *Server) loadSyncState(ctx context.Context, stream ledgerStream) (ledgerSyncState, error) {
 	var (
-		state      walletSyncState
+		state      ledgerSyncState
 		backfilled int
 	)
-	err := p.server.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(ctx,
 		`SELECT oldest_id, newest_id, backfilled FROM ledger_sync WHERE stream = ?`, stream,
 	).Scan(&state.oldestID, &state.newestID, &backfilled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return walletSyncState{}, nil
+		return ledgerSyncState{}, nil
 	}
 	if err != nil {
-		return walletSyncState{}, fmt.Errorf("loading ledger_sync for %s: %w", stream, err)
+		return ledgerSyncState{}, fmt.Errorf("loading ledger_sync for %s: %w", stream, err)
 	}
 	state.backfilled = backfilled != 0
 	return state, nil
 }
 
 // saveSyncState upserts stream's ledger_sync row.
-func (p *WalletPoller) saveSyncState(ctx context.Context, stream ledgerStream, state walletSyncState) error {
+func (s *Server) saveSyncState(ctx context.Context, stream ledgerStream, state ledgerSyncState) error {
 	backfilled := 0
 	if state.backfilled {
 		backfilled = 1
 	}
-	_, err := p.server.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO ledger_sync (stream, oldest_id, newest_id, backfilled, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(stream) DO UPDATE SET

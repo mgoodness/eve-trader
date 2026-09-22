@@ -33,7 +33,7 @@ func TestOpenCreatesLedgerTables(t *testing.T) {
 	}
 	defer sqlDB.Close()
 
-	want := []string{"wallet_transaction", "wallet_journal", "ledger_sync", "character_order"}
+	want := []string{"wallet_transaction", "wallet_journal", "ledger_sync", "contract", "contract_item", "manual_transfer", "character_order"}
 	for _, table := range want {
 		var name string
 		err := sqlDB.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
@@ -118,7 +118,7 @@ func TestOpenAddsLedgerTablesToAV1_1DatabaseWithoutDataLoss(t *testing.T) {
 	if err := sqlDB.QueryRow(`SELECT name FROM item_type WHERE type_id = 34`).Scan(&name); err != nil || name != "Tritanium" {
 		t.Fatalf("pre-existing item_type row lost: name=%q err=%v", name, err)
 	}
-	for _, table := range []string{"wallet_transaction", "wallet_journal", "ledger_sync", "character_order"} {
+	for _, table := range []string{"wallet_transaction", "wallet_journal", "ledger_sync", "contract", "contract_item", "manual_transfer", "character_order"} {
 		var count int
 		if err := sqlDB.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
 			t.Errorf("table %q not usable after migration: %v", table, err)

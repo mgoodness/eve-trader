@@ -106,6 +106,40 @@ func TestFakeFetchCharacterSkillsReturnsSeededSkills(t *testing.T) {
 	}
 }
 
+func TestFakeFetchCharacterContractsReturnsSeededContracts(t *testing.T) {
+	want := []esi.Contract{{ContractID: 1000, Type: "item_exchange", Price: 0}}
+	fake := &esi.Fake{Contracts: want}
+
+	got, err := fake.FetchCharacterContracts(t.Context(), 123, "access")
+	if err != nil {
+		t.Fatalf("FetchCharacterContracts() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("FetchCharacterContracts() = %+v, want %+v", got, want)
+	}
+}
+
+func TestFakeFetchContractItemsReturnsSeededItemsByContractID(t *testing.T) {
+	items := []esi.ContractItem{{RecordID: 1, TypeID: 34, Quantity: 500, IsIncluded: true}}
+	fake := &esi.Fake{ContractItems: map[int64][]esi.ContractItem{1000: items}}
+
+	got, err := fake.FetchContractItems(t.Context(), 123, "access", 1000)
+	if err != nil {
+		t.Fatalf("FetchContractItems() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != items[0] {
+		t.Fatalf("FetchContractItems() = %+v, want %+v", got, items)
+	}
+
+	empty, err := fake.FetchContractItems(t.Context(), 123, "access", 2000)
+	if err != nil {
+		t.Fatalf("FetchContractItems() error = %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("FetchContractItems() for unseeded contract = %+v, want empty", empty)
+	}
+}
+
 func TestFakeExchangeCodeReturnsSeededToken(t *testing.T) {
 	want := esi.Token{AccessToken: "access", RefreshToken: "refresh", CharacterID: 12345}
 	fake := &esi.Fake{ExchangeCodeToken: want}

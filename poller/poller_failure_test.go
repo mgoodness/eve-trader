@@ -34,6 +34,13 @@ func (*failingOrdersGateway) FetchWalletTransactions(context.Context, int, strin
 func (*failingOrdersGateway) FetchWalletJournal(context.Context, int, string) ([]esi.WalletJournalEntry, error) {
 	return nil, nil
 }
+
+func (*failingOrdersGateway) FetchCharacterContracts(context.Context, int, string) ([]esi.Contract, error) {
+	return nil, nil
+}
+func (*failingOrdersGateway) FetchContractItems(context.Context, int, string, int64) ([]esi.ContractItem, error) {
+	return nil, nil
+}
 func (*failingOrdersGateway) FetchCharacterOrders(context.Context, int, string) ([]esi.CharacterOrder, error) {
 	return nil, nil
 }

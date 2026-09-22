@@ -27,6 +27,12 @@ type Fake struct {
 	WalletJournal         []WalletJournalEntry
 	FetchWalletJournalErr error
 
+	Contracts                  []Contract
+	FetchCharacterContractsErr error
+
+	ContractItems         map[int64][]ContractItem
+	FetchContractItemsErr error
+
 	CharacterOrders               []CharacterOrder
 	FetchCharacterOrdersErr       error
 	CharacterOrderHistory         []CharacterOrder
@@ -109,6 +115,25 @@ func (f *Fake) FetchWalletJournal(ctx context.Context, characterID int, accessTo
 		return nil, f.FetchWalletJournalErr
 	}
 	return f.WalletJournal, nil
+}
+
+// FetchCharacterContracts returns the seeded Contracts, or
+// FetchCharacterContractsErr if set.
+func (f *Fake) FetchCharacterContracts(ctx context.Context, characterID int, accessToken string) ([]Contract, error) {
+	if f.FetchCharacterContractsErr != nil {
+		return nil, f.FetchCharacterContractsErr
+	}
+	return f.Contracts, nil
+}
+
+// FetchContractItems returns the seeded items for contractID, or
+// FetchContractItemsErr if set. An unseeded contract ID returns an empty
+// slice, not an error.
+func (f *Fake) FetchContractItems(ctx context.Context, characterID int, accessToken string, contractID int64) ([]ContractItem, error) {
+	if f.FetchContractItemsErr != nil {
+		return nil, f.FetchContractItemsErr
+	}
+	return f.ContractItems[contractID], nil
 }
 
 // FetchCharacterOrders returns the seeded CharacterOrders, or

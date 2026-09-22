@@ -127,6 +127,64 @@ CREATE TABLE IF NOT EXISTS ledger_sync (
   updated_at   TEXT    NOT NULL
 );
 
+-- The character's own contracts, keyed by ESI's contract_id, from
+-- GET /characters/{id}/contracts/ (docs/spec/v2.md §3, §5). Contracts
+-- older than ~30 days fall out of ESI's retained window; the local copy is
+-- kept indefinitely. Only type = 'item_exchange' contracts move goods and
+-- so can be a Transfer (§4.5); the rest are stored as raw records too.
+CREATE TABLE IF NOT EXISTS contract (
+  contract_id           INTEGER PRIMARY KEY,
+  issuer_id             INTEGER NOT NULL,
+  issuer_corporation_id INTEGER NOT NULL,
+  assignee_id           INTEGER NOT NULL,
+  acceptor_id           INTEGER NOT NULL,
+  type                  TEXT    NOT NULL,   -- item_exchange, auction, courier, loan, unknown
+  status                TEXT    NOT NULL,
+  price                 REAL    NOT NULL,
+  for_corporation       INTEGER NOT NULL,   -- 0/1
+  date_issued           TEXT    NOT NULL,
+  date_expired          TEXT    NOT NULL,
+  date_completed        TEXT,
+  start_location_id     INTEGER,             -- populated for couriers only
+  end_location_id       INTEGER,             -- populated for couriers only
+  title                 TEXT,
+  updated_at            TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contract_type ON contract(type);
+
+-- The goods attached to a contract, keyed by (contract_id, record_id), from
+-- GET /characters/{id}/contracts/{contract_id}/items/ (docs/spec/v2.md §3,
+-- §5). is_included is 1 for goods the issuer submitted (they leave the
+-- issuer), 0 for goods the issuer asked for (they enter the issuer) -- the
+-- direction that decides whether a contract item is a transfer.
+CREATE TABLE IF NOT EXISTS contract_item (
+  contract_id   INTEGER NOT NULL REFERENCES contract(contract_id),
+  record_id     INTEGER NOT NULL,
+  type_id       INTEGER NOT NULL,
+  quantity      INTEGER NOT NULL,
+  is_singleton  INTEGER NOT NULL,   -- 0/1
+  is_included   INTEGER NOT NULL,   -- 0/1
+  PRIMARY KEY (contract_id, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_item_type_id ON contract_item(type_id);
+
+-- User-entered transfers for goods ESI cannot see leave the character
+-- (in-game direct trades, docs/spec/v2.md §4.5). One row is one partial
+-- quantity of a position; price is the total value of that quantity (0
+-- values the transfer at average cost).
+CREATE TABLE IF NOT EXISTS manual_transfer (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  type_id       INTEGER NOT NULL,
+  location_id   INTEGER NOT NULL,
+  quantity      INTEGER NOT NULL,
+  date          TEXT    NOT NULL,
+  price         REAL    NOT NULL DEFAULT 0,
+  counterparty  TEXT,
+  note          TEXT,
+  created_at    TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_transfer_type_id ON manual_transfer(type_id);
+
 -- The character's own market orders, snapshotted by (order_id, issued) so
 -- that an in-place modify (same order_id, a new issued) survives as a new
 -- row rather than overwriting the prior snapshot, and cancel-and-recreate
