@@ -48,6 +48,13 @@ func (*namesGateway) FetchWalletTransactions(context.Context, int, string, int64
 func (*namesGateway) FetchWalletJournal(context.Context, int, string) ([]esi.WalletJournalEntry, error) {
 	return nil, nil
 }
+
+func (*namesGateway) FetchCharacterContracts(context.Context, int, string) ([]esi.Contract, error) {
+	return nil, nil
+}
+func (*namesGateway) FetchContractItems(context.Context, int, string, int64) ([]esi.ContractItem, error) {
+	return nil, nil
+}
 func (*namesGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }

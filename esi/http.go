@@ -293,6 +293,96 @@ func (g *HTTPGateway) FetchWalletJournal(ctx context.Context, characterID int, a
 	return out, nil
 }
 
+// FetchCharacterContracts returns the character's contracts, walking the
+// page/X-Pages pagination like FetchWalletJournal.
+func (g *HTTPGateway) FetchCharacterContracts(ctx context.Context, characterID int, accessToken string) ([]Contract, error) {
+	var out []Contract
+	for page := 1; ; page++ {
+		endpoint := fmt.Sprintf("%s/characters/%d/contracts/?page=%d", g.base(), characterID, page)
+		var raw []struct {
+			ContractID          int64     `json:"contract_id"`
+			IssuerID            int64     `json:"issuer_id"`
+			IssuerCorporationID int64     `json:"issuer_corporation_id"`
+			AssigneeID          int64     `json:"assignee_id"`
+			AcceptorID          int64     `json:"acceptor_id"`
+			Type                string    `json:"type"`
+			Status              string    `json:"status"`
+			Price               float64   `json:"price"`
+			ForCorporation      bool      `json:"for_corporation"`
+			DateIssued          time.Time `json:"date_issued"`
+			DateExpired         time.Time `json:"date_expired"`
+			DateCompleted       time.Time `json:"date_completed"`
+			StartLocationID     int64     `json:"start_location_id"`
+			EndLocationID       int64     `json:"end_location_id"`
+			Title               string    `json:"title"`
+		}
+		resp, err := g.get(ctx, endpoint, accessToken, &raw)
+		if err != nil {
+			return nil, fmt.Errorf("fetching contracts for character %d: %w", characterID, err)
+		}
+		for _, v := range raw {
+			out = append(out, Contract{
+				ContractID:          v.ContractID,
+				IssuerID:            v.IssuerID,
+				IssuerCorporationID: v.IssuerCorporationID,
+				AssigneeID:          v.AssigneeID,
+				AcceptorID:          v.AcceptorID,
+				Type:                v.Type,
+				Status:              v.Status,
+				Price:               v.Price,
+				ForCorporation:      v.ForCorporation,
+				DateIssued:          v.DateIssued,
+				DateExpired:         v.DateExpired,
+				DateCompleted:       v.DateCompleted,
+				StartLocationID:     v.StartLocationID,
+				EndLocationID:       v.EndLocationID,
+				Title:               v.Title,
+			})
+		}
+		pages := resp.Header.Get("X-Pages")
+		n, _ := strconv.Atoi(pages)
+		if n == 0 || page >= n {
+			break
+		}
+	}
+	return out, nil
+}
+
+// FetchContractItems returns one contract's items, walking the
+// page/X-Pages pagination like FetchWalletJournal.
+func (g *HTTPGateway) FetchContractItems(ctx context.Context, characterID int, accessToken string, contractID int64) ([]ContractItem, error) {
+	var out []ContractItem
+	for page := 1; ; page++ {
+		endpoint := fmt.Sprintf("%s/characters/%d/contracts/%d/items/?page=%d", g.base(), characterID, contractID, page)
+		var raw []struct {
+			RecordID    int64 `json:"record_id"`
+			TypeID      int   `json:"type_id"`
+			Quantity    int   `json:"quantity"`
+			IsSingleton bool  `json:"is_singleton"`
+			IsIncluded  bool  `json:"is_included"`
+		}
+		resp, err := g.get(ctx, endpoint, accessToken, &raw)
+		if err != nil {
+			return nil, fmt.Errorf("fetching items for contract %d of character %d: %w", contractID, characterID, err)
+		}
+		for _, v := range raw {
+			out = append(out, ContractItem{
+				RecordID:    v.RecordID,
+				TypeID:      v.TypeID,
+				Quantity:    v.Quantity,
+				IsSingleton: v.IsSingleton,
+				IsIncluded:  v.IsIncluded,
+			})
+		}
+		pages := resp.Header.Get("X-Pages")
+		n, _ := strconv.Atoi(pages)
+		if n == 0 || page >= n {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (g *HTTPGateway) ExchangeCode(ctx context.Context, code, verifier string) (Token, error) {
 	values := url.Values{
 		"grant_type":    {"authorization_code"},

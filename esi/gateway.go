@@ -96,6 +96,45 @@ type WalletJournalEntry struct {
 	TaxReceiverID int
 }
 
+// Contract is one entry from
+// GET /characters/{character_id}/contracts/ -- a contract the character
+// issued, accepted, or is assigned. Only Type "item_exchange" carries
+// goods and so can be a Transfer (docs/spec/v2.md §4.5); Price is the
+// ISK the contract exchanges for those goods, zero for a pure handoff.
+// StartLocationID/EndLocationID are populated for courier contracts only.
+type Contract struct {
+	ContractID          int64
+	IssuerID            int64
+	IssuerCorporationID int64
+	AssigneeID          int64
+	AcceptorID          int64
+	Type                string
+	Status              string
+	Price               float64
+	ForCorporation      bool
+	DateIssued          time.Time
+	DateExpired         time.Time
+	DateCompleted       time.Time
+	StartLocationID     int64
+	EndLocationID       int64
+	Title               string
+}
+
+// ContractItem is one entry from
+// GET /characters/{character_id}/contracts/{contract_id}/items/ -- a
+// stack of goods attached to a contract. IsIncluded distinguishes goods
+// the issuer submitted (true, they leave the issuer) from goods the
+// issuer asked for (false, they enter the issuer); IsSingleton marks a
+// non-stackable item. It is the definitive record of what an
+// item-exchange contract moved (docs/spec/v2.md §3).
+type ContractItem struct {
+	RecordID    int64
+	TypeID      int
+	Quantity    int
+	IsSingleton bool
+	IsIncluded  bool
+}
+
 // ESIGateway is the seam through which eve-trader makes every outbound
 // call to ESI and EVE SSO. All other application code is tested against
 // this interface rather than against real HTTP calls.
@@ -127,6 +166,16 @@ type ESIGateway interface {
 	// (paginated internally; ESI has no from_id equivalent here, so every
 	// call returns its full retained window).
 	FetchWalletJournal(ctx context.Context, characterID int, accessToken string) ([]WalletJournalEntry, error)
+
+	// FetchCharacterContracts returns the character's contracts -- those
+	// they issued, accepted, or are assigned -- paginated internally over
+	// ESI's ~30-day retained window (plus in-progress contracts).
+	FetchCharacterContracts(ctx context.Context, characterID int, accessToken string) ([]Contract, error)
+
+	// FetchContractItems returns one contract's items. ESI returns an
+	// empty list for a contract type that carries no items (e.g. a
+	// courier), so callers need not guard by contract type.
+	FetchContractItems(ctx context.Context, characterID int, accessToken string, contractID int64) ([]ContractItem, error)
 
 	// ExchangeCode exchanges a PKCE authorization code (and its verifier)
 	// for an EVE SSO token.

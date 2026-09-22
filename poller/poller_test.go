@@ -37,6 +37,13 @@ func (*scriptedGateway) FetchWalletTransactions(context.Context, int, string, in
 func (*scriptedGateway) FetchWalletJournal(context.Context, int, string) ([]esi.WalletJournalEntry, error) {
 	return nil, nil
 }
+
+func (*scriptedGateway) FetchCharacterContracts(context.Context, int, string) ([]esi.Contract, error) {
+	return nil, nil
+}
+func (*scriptedGateway) FetchContractItems(context.Context, int, string, int64) ([]esi.ContractItem, error) {
+	return nil, nil
+}
 func (*scriptedGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }
