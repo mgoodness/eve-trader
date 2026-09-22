@@ -186,13 +186,14 @@ func (s *Server) upsertESIToken(ctx context.Context, token esi.Token, encryptedR
 // row for characterID.
 func (s *Server) upsertCharacterSkill(ctx context.Context, characterID int, skills esi.Skills, updatedAt string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO character_skill (character_id, broker_relations_level, accounting_level, updated_at)
-		 VALUES (?, ?, ?, ?)
+		`INSERT INTO character_skill (character_id, broker_relations_level, accounting_level, advanced_broker_relations_level, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT (character_id) DO UPDATE SET
 		   broker_relations_level = excluded.broker_relations_level,
 		   accounting_level = excluded.accounting_level,
+		   advanced_broker_relations_level = excluded.advanced_broker_relations_level,
 		   updated_at = excluded.updated_at`,
-		characterID, skills.BrokerRelationsLevel, skills.AccountingLevel, updatedAt,
+		characterID, skills.BrokerRelationsLevel, skills.AccountingLevel, skills.AdvancedBrokerRelationsLevel, updatedAt,
 	)
 	return err
 }

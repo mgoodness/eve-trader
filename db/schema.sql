@@ -53,10 +53,11 @@ CREATE TABLE IF NOT EXISTS item_type (
 
 -- Single row: the one trading character's fee/tax skill levels.
 CREATE TABLE IF NOT EXISTS character_skill (
-  character_id             INTEGER PRIMARY KEY,
-  broker_relations_level   INTEGER NOT NULL,
-  accounting_level         INTEGER NOT NULL,
-  updated_at               TEXT    NOT NULL
+  character_id                     INTEGER PRIMARY KEY,
+  broker_relations_level           INTEGER NOT NULL,
+  accounting_level                 INTEGER NOT NULL,
+  advanced_broker_relations_level  INTEGER NOT NULL DEFAULT 0,
+  updated_at                       TEXT    NOT NULL
 );
 
 -- Single row: OAuth refresh token (see docs/spec/v1.md §6).

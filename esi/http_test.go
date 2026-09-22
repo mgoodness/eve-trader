@@ -22,6 +22,7 @@ func TestHTTPGatewayFetchCharacterSkillsUsesActiveLevels(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"skills": []map[string]any{
 			{"skill_id": 3446, "active_skill_level": 4, "trained_skill_level": 5},
 			{"skill_id": 16622, "active_skill_level": 3},
+			{"skill_id": 16597, "active_skill_level": 5},
 		}})
 	}))
 	defer server.Close()
@@ -30,7 +31,7 @@ func TestHTTPGatewayFetchCharacterSkillsUsesActiveLevels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (esi.Skills{BrokerRelationsLevel: 4, AccountingLevel: 3}) {
+	if got != (esi.Skills{BrokerRelationsLevel: 4, AccountingLevel: 3, AdvancedBrokerRelationsLevel: 5}) {
 		t.Fatalf("skills = %+v", got)
 	}
 }

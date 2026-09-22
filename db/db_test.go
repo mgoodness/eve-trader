@@ -124,6 +124,12 @@ func TestOpenAddsLedgerTablesToAV1_1DatabaseWithoutDataLoss(t *testing.T) {
 			t.Errorf("table %q not usable after migration: %v", table, err)
 		}
 	}
+	// The legacy character_skill table predates Advanced Broker Relations;
+	// migration must add it with a usable default.
+	var advancedBroker int
+	if err := sqlDB.QueryRow(`SELECT COUNT(advanced_broker_relations_level) FROM character_skill`).Scan(&advancedBroker); err != nil {
+		t.Errorf("advanced_broker_relations_level missing after migration: %v", err)
+	}
 
 	// Reopening applies the same (idempotent) schema again without error.
 	if err := sqlDB.Close(); err != nil {
@@ -134,6 +140,20 @@ func TestOpenAddsLedgerTablesToAV1_1DatabaseWithoutDataLoss(t *testing.T) {
 		t.Fatalf("second Open() error = %v", err)
 	}
 	defer reopened.Close()
+}
+
+func TestOpenAddsAdvancedBrokerRelationsColumn(t *testing.T) {
+	sqlDB, err := db.Open(filepath.Join(t.TempDir(), "eve-trader.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer sqlDB.Close()
+
+	// Referencing the column makes a missing one a query error.
+	var count int
+	if err := sqlDB.QueryRow(`SELECT COUNT(advanced_broker_relations_level) FROM character_skill`).Scan(&count); err != nil {
+		t.Fatalf("character_skill.advanced_broker_relations_level missing: %v", err)
+	}
 }
 
 func TestOpenAddsMarketHistoryPriceColumns(t *testing.T) {

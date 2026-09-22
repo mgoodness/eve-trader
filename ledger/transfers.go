@@ -82,52 +82,78 @@ func LoadTransfers(ctx context.Context, db *sql.DB, characterID int) ([]Transfer
 // contract in which the character gave up the goods. Contracts that are
 // still outstanding or were cancelled/rejected/failed moved no goods, so
 // they are not transfers (their items are held in escrow or came back).
+//
+// ESI prices the contract as a whole, not per item, so when a contract moves
+// several item stacks its price is split evenly across the stacks that left.
+// That keeps the total transfer value equal to the contract price instead of
+// counting it once per stack; a single-item handoff is unchanged.
 func loadContractTransfers(ctx context.Context, db *sql.DB, characterID int) ([]Transfer, error) {
+	type contractTransferRow struct {
+		contractID int64
+		typeID     int
+		locationID int64
+		quantity   int
+		dateIssued string
+		price      float64
+		issuerID   int64
+		acceptorID int64
+		isIncluded bool
+	}
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT ci.type_id, COALESCE(c.start_location_id, 0), ci.quantity, c.date_issued, c.price,
-		       c.issuer_id, c.acceptor_id, ci.is_included
+		       c.issuer_id, c.acceptor_id, ci.is_included, c.contract_id
 		FROM contract c
 		JOIN contract_item ci ON ci.contract_id = c.contract_id
 		WHERE c.type = 'item_exchange'
-		  AND c.status = 'finished'`)
+		  AND c.status = 'finished'
+		ORDER BY c.contract_id, ci.record_id`)
 	if err != nil {
 		return nil, fmt.Errorf("querying contract transfers: %w", err)
 	}
 	defer rows.Close()
 
-	var out []Transfer
+	var records []contractTransferRow
 	for rows.Next() {
-		var (
-			typeID     int
-			locationID int64
-			quantity   int
-			dateIssued string
-			price      float64
-			issuerID   int64
-			acceptorID int64
-			isIncluded bool
-		)
-		if err := rows.Scan(&typeID, &locationID, &quantity, &dateIssued, &price, &issuerID, &acceptorID, &isIncluded); err != nil {
+		var r contractTransferRow
+		if err := rows.Scan(&r.typeID, &r.locationID, &r.quantity, &r.dateIssued, &r.price,
+			&r.issuerID, &r.acceptorID, &r.isIncluded, &r.contractID); err != nil {
 			return nil, fmt.Errorf("scanning contract transfer: %w", err)
 		}
-		if !goodsLeft(issuerID, acceptorID, isIncluded, characterID) {
-			continue
-		}
-		date, err := time.Parse(time.RFC3339Nano, dateIssued)
-		if err != nil {
-			return nil, fmt.Errorf("parsing contract %s date_issued: %w", dateIssued, err)
-		}
-		out = append(out, Transfer{
-			TypeID:     typeID,
-			LocationID: locationID,
-			Quantity:   quantity,
-			Date:       date,
-			Price:      price,
-			Source:     TransferContract,
-		})
+		records = append(records, r)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("reading contract transfers: %w", err)
+	}
+
+	leavingItems := map[int64]int{}
+	for _, r := range records {
+		if goodsLeft(r.issuerID, r.acceptorID, r.isIncluded, characterID) {
+			leavingItems[r.contractID]++
+		}
+	}
+
+	var out []Transfer
+	for _, r := range records {
+		if !goodsLeft(r.issuerID, r.acceptorID, r.isIncluded, characterID) {
+			continue
+		}
+		date, err := time.Parse(time.RFC3339Nano, r.dateIssued)
+		if err != nil {
+			return nil, fmt.Errorf("parsing contract %d date_issued: %w", r.contractID, err)
+		}
+		var value float64
+		if r.price > 0 && leavingItems[r.contractID] > 0 {
+			value = r.price / float64(leavingItems[r.contractID])
+		}
+		out = append(out, Transfer{
+			TypeID:     r.typeID,
+			LocationID: r.locationID,
+			Quantity:   r.quantity,
+			Date:       date,
+			Price:      value,
+			Source:     TransferContract,
+		})
 	}
 	return out, nil
 }

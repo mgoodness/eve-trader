@@ -193,6 +193,8 @@ func (g *HTTPGateway) FetchCharacterSkills(ctx context.Context, characterID int,
 			skills.BrokerRelationsLevel = skill.Active
 		case 16622:
 			skills.AccountingLevel = skill.Active
+		case 16597:
+			skills.AdvancedBrokerRelationsLevel = skill.Active
 		}
 	}
 	return skills, nil
