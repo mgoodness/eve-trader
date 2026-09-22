@@ -117,12 +117,16 @@ The net increase from raising a resting sell order to the current best sell, aft
 _Avoid_: relist profit, bump gain
 
 **Break-even price**:
-The list price at which a position's net proceeds cover its average cost and allocated estimated fees — zero profit.
+The list price at which a position's net proceeds cover its average cost and allocated estimated fees — zero profit. Shown as a low/high range: the low uses only confidently allocated fees, the headline high also shares the unattributed-fee bucket.
 _Avoid_: floor price, minimum price
 
 **Target price**:
-The break-even price plus the target net margin.
+The break-even price plus the target net margin. Shown over the same low/high range as the break-even price.
 _Avoid_: ask price, goal price
+
+**Target net margin**:
+The view-level, URL-carried net margin a Target price must earn, defaulting to 0% net so Target equals Break-even.
+_Avoid_: desired margin, target profit
 
 **Market-implied net margin**:
 The net margin a position would actually realize at the current Rens best sell.

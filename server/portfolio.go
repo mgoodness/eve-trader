@@ -10,10 +10,38 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/mgoodness/eve-trader/ledger"
 )
+
+// targetNetMarginParam is the Portfolio's view-level target net margin
+// control: a percentage in the URL, defaulting to 0% net, so Target equals
+// Break-even (docs/spec/v2.md §4.7).
+const targetNetMarginParam = "targetmargin"
+
+// parseTargetNetMargin reads the target net margin control and returns it
+// as a fraction plus the raw percentage string the input renders. An
+// absent, blank, non-numeric, or out-of-range value falls back to the 0%
+// default rather than erroring.
+func parseTargetNetMargin(q url.Values) (margin float64, raw string) {
+	if !q.Has(targetNetMarginParam) {
+		return 0, "0"
+	}
+	raw = strings.TrimSpace(q.Get(targetNetMarginParam))
+	if raw == "" {
+		return 0, "0"
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v >= 100 {
+		return 0, "0"
+	}
+	return v / 100, raw
+}
 
 // portfolioGroup is one decision group of the Portfolio table. Count is the
 // group's full size; Positions is empty when the group has none, so the
@@ -37,10 +65,13 @@ type portfolioSummary struct {
 // FirstBoot fields let the same template serve the re-authentication
 // banner when no valid credential exists.
 type portfolioData struct {
-	Groups    []portfolioGroup
-	Summary   portfolioSummary
-	Reauth    bool
-	FirstBoot bool
+	Groups  []portfolioGroup
+	Summary portfolioSummary
+	// TargetNetMargin is the raw percentage the control renders, so the
+	// input round-trips what the user typed (default "0").
+	TargetNetMargin string
+	Reauth          bool
+	FirstBoot       bool
 }
 
 // portfolioGroupOrder is the decision order the table renders in
@@ -58,8 +89,9 @@ var portfolioGroupOrder = []struct {
 }
 
 // buildPortfolioData groups the report's positions and copies the summary
-// figures. Empty groups still render, with a count of zero.
-func buildPortfolioData(report ledger.Report) portfolioData {
+// figures. Empty groups still render, with a count of zero. targetRaw is
+// the raw target-margin percentage the control renders.
+func buildPortfolioData(report ledger.Report, targetRaw string) portfolioData {
 	byStatus := make(map[ledger.Status][]ledger.Position, len(portfolioGroupOrder))
 	for _, p := range report.Positions {
 		byStatus[p.Status] = append(byStatus[p.Status], p)
@@ -72,7 +104,8 @@ func buildPortfolioData(report ledger.Report) portfolioData {
 	}
 
 	return portfolioData{
-		Groups: groups,
+		Groups:          groups,
+		TargetNetMargin: targetRaw,
 		Summary: portfolioSummary{
 			Realized:         report.Realized,
 			Unrealized:       report.Unrealized,
@@ -97,14 +130,15 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "loading portfolio", http.StatusInternalServerError)
 		return
 	}
-	report, err := ledger.ComputePnL(r.Context(), s.db, characterID)
+	margin, targetRaw := parseTargetNetMargin(r.URL.Query())
+	report, err := ledger.ComputePnLForTarget(r.Context(), s.db, characterID, margin)
 	if err != nil {
 		slog.Error("loading portfolio", "err", err)
 		http.Error(w, "loading portfolio", http.StatusInternalServerError)
 		return
 	}
 
-	s.renderPortfolio(w, buildPortfolioData(report))
+	s.renderPortfolio(w, buildPortfolioData(report, targetRaw))
 }
 
 // characterID reads the tracked character from the single esi_token row.
