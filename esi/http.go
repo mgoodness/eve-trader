@@ -293,6 +293,73 @@ func (g *HTTPGateway) FetchWalletJournal(ctx context.Context, characterID int, a
 	return out, nil
 }
 
+func (g *HTTPGateway) FetchCharacterOrders(ctx context.Context, characterID int, accessToken string) ([]CharacterOrder, error) {
+	return g.fetchCharacterOrders(ctx, characterID, accessToken, "/characters/%d/orders/")
+}
+
+// FetchCharacterOrderHistory returns the character's cancelled and expired
+// orders, walking the page/X-Pages pagination like FetchCharacterOrders.
+func (g *HTTPGateway) FetchCharacterOrderHistory(ctx context.Context, characterID int, accessToken string) ([]CharacterOrder, error) {
+	return g.fetchCharacterOrders(ctx, characterID, accessToken, "/characters/%d/orders/history/")
+}
+
+// fetchCharacterOrders pages an authenticated character-orders route.
+// route is the unformatted path (it carries the character_id placeholder).
+// is_buy_order is decoded as a pointer because ESI omits it for sell
+// orders, where a missing field means false (docs/spec/v2.md §3).
+func (g *HTTPGateway) fetchCharacterOrders(ctx context.Context, characterID int, accessToken, route string) ([]CharacterOrder, error) {
+	var out []CharacterOrder
+	for page := 1; ; page++ {
+		endpoint := fmt.Sprintf("%s"+route+"?page=%d", g.base(), characterID, page)
+		var raw []struct {
+			OrderID       int64     `json:"order_id"`
+			TypeID        int       `json:"type_id"`
+			LocationID    int64     `json:"location_id"`
+			IsBuyOrder    *bool     `json:"is_buy_order"`
+			Price         float64   `json:"price"`
+			VolumeRemain  int       `json:"volume_remain"`
+			VolumeTotal   int       `json:"volume_total"`
+			MinVolume     int       `json:"min_volume"`
+			Issued        time.Time `json:"issued"`
+			Duration      int       `json:"duration"`
+			State         string    `json:"state"`
+			IsCorporation bool      `json:"is_corporation"`
+			RegionID      int       `json:"region_id"`
+			Range         string    `json:"range"`
+			Escrow        float64   `json:"escrow"`
+		}
+		resp, err := g.get(ctx, endpoint, accessToken, &raw)
+		if err != nil {
+			return nil, fmt.Errorf("fetching character %d orders: %w", characterID, err)
+		}
+		for _, v := range raw {
+			out = append(out, CharacterOrder{
+				OrderID:       v.OrderID,
+				TypeID:        v.TypeID,
+				LocationID:    v.LocationID,
+				IsBuyOrder:    v.IsBuyOrder != nil && *v.IsBuyOrder,
+				Price:         v.Price,
+				VolumeRemain:  v.VolumeRemain,
+				VolumeTotal:   v.VolumeTotal,
+				MinVolume:     v.MinVolume,
+				Issued:        v.Issued,
+				Duration:      v.Duration,
+				State:         v.State,
+				IsCorporation: v.IsCorporation,
+				RegionID:      v.RegionID,
+				Range:         v.Range,
+				Escrow:        v.Escrow,
+			})
+		}
+		pages := resp.Header.Get("X-Pages")
+		n, _ := strconv.Atoi(pages)
+		if n == 0 || page >= n {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (g *HTTPGateway) ExchangeCode(ctx context.Context, code, verifier string) (Token, error) {
 	values := url.Values{
 		"grant_type":    {"authorization_code"},

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/mgoodness/eve-trader/esi"
@@ -69,27 +68,14 @@ func (p *WalletPoller) Poll(ctx context.Context) error {
 	}
 
 	if err := p.syncTransactions(ctx, characterID, token.AccessToken); err != nil {
-		p.latchIfInsufficientScope(err)
+		p.server.latchIfInsufficientScope(err)
 		return fmt.Errorf("syncing wallet transactions: %w", err)
 	}
 	if err := p.syncJournal(ctx, characterID, token.AccessToken); err != nil {
-		p.latchIfInsufficientScope(err)
+		p.server.latchIfInsufficientScope(err)
 		return fmt.Errorf("syncing wallet journal: %w", err)
 	}
 	return nil
-}
-
-// latchIfInsufficientScope recognizes ESI's 403 for a token that refreshes
-// fine but was never granted the scope a call needs -- the state a
-// pre-v2 refresh token is in after the ssoScope expansion (docs/spec/v2.md
-// §6). It latches the same "Re-authenticate with EVE" banner a refresh
-// failure does, whose link requests the current (superset) ssoScope, so
-// following it once re-consents and replaces the under-scoped token.
-func (p *WalletPoller) latchIfInsufficientScope(err error) {
-	var httpErr *esi.HTTPError
-	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden {
-		p.server.latchInsufficientScope(err)
-	}
 }
 
 // Run performs an immediate sync and then syncs on the configured cadence.

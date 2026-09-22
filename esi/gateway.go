@@ -26,6 +26,34 @@ type Order struct {
 	Duration     int
 }
 
+// CharacterOrder is one of the character's own market orders, as returned
+// by GET /characters/{character_id}/orders/ (open orders; State empty) and
+// GET /characters/{character_id}/orders/history/ (cancelled and expired
+// orders; State "cancelled" or "expired", ESI retaining ~90 days). Fully
+// filled orders appear in neither route.
+//
+// ESI omits is_buy_order — and the buy-only min_volume and escrow fields —
+// for sell orders on both routes, so a missing is_buy_order means a sell
+// (false), which the gateway decodes explicitly. State, RegionID, Range and
+// Escrow are zero where the route does not carry them.
+type CharacterOrder struct {
+	OrderID       int64
+	TypeID        int
+	LocationID    int64
+	IsBuyOrder    bool
+	Price         float64
+	VolumeRemain  int
+	VolumeTotal   int
+	MinVolume     int
+	Issued        time.Time
+	Duration      int
+	State         string
+	IsCorporation bool
+	RegionID      int
+	Range         string
+	Escrow        float64
+}
+
 // HistoryPoint is one day's Heimatar-region trading summary for a type_id,
 // as returned by GET /markets/{region_id}/history/. Average, Highest and
 // Lowest are the day's price figures; they are not optional because ESI
@@ -127,6 +155,14 @@ type ESIGateway interface {
 	// (paginated internally; ESI has no from_id equivalent here, so every
 	// call returns its full retained window).
 	FetchWalletJournal(ctx context.Context, characterID int, accessToken string) ([]WalletJournalEntry, error)
+
+	// FetchCharacterOrders returns the character's open market orders.
+	// ESI caches this route for ~20 minutes.
+	FetchCharacterOrders(ctx context.Context, characterID int, accessToken string) ([]CharacterOrder, error)
+
+	// FetchCharacterOrderHistory returns the character's cancelled and
+	// expired market orders (paginated internally; ESI retains ~90 days).
+	FetchCharacterOrderHistory(ctx context.Context, characterID int, accessToken string) ([]CharacterOrder, error)
 
 	// ExchangeCode exchanges a PKCE authorization code (and its verifier)
 	// for an EVE SSO token.
