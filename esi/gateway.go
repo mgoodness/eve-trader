@@ -78,6 +78,17 @@ type Skills struct {
 	AdvancedBrokerRelationsLevel int
 }
 
+// Standing is one entry from GET /characters/{character_id}/standings/:
+// the character's unmodified standing toward one agent, NPC corporation,
+// or faction. FromType is ESI's enum value -- "agent", "npc_corp", or
+// "faction" -- and Standing is on the −10…+10 scale, a double rather than
+// a rounded percentage (docs/spec/v2.md §9).
+type Standing struct {
+	FromID   int
+	FromType string
+	Standing float64
+}
+
 // Token is an EVE SSO OAuth token response.
 type Token struct {
 	AccessToken  string
@@ -184,6 +195,19 @@ type ESIGateway interface {
 	// FetchCharacterSkills returns the fee/tax-relevant skill levels for
 	// the given character.
 	FetchCharacterSkills(ctx context.Context, characterID int, accessToken string) (Skills, error)
+
+	// FetchCharacterStandings returns the character's NPC standings, from
+	// the unpaginated GET /characters/{character_id}/standings/. The broker
+	// standings term uses the npc_corp and faction entries; the agent
+	// entries are carried through unfiltered (docs/spec/v2.md §9).
+	FetchCharacterStandings(ctx context.Context, characterID int, accessToken string) ([]Standing, error)
+
+	// FetchStationOwner returns the corporation id that owns the NPC
+	// station stationID, from the public GET /universe/stations/{id}
+	// (`owner` field). It is used to pick the corporation (and, via the
+	// vendored npcfactions table, the faction) whose standings reduce the
+	// broker fee.
+	FetchStationOwner(ctx context.Context, stationID int64) (int64, error)
 
 	// FetchWalletTransactions returns the character's wallet transactions.
 	// fromID of zero fetches the current (most recent) page. A non-zero

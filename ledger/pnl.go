@@ -13,8 +13,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/mgoodness/eve-trader/esi"
 	"github.com/mgoodness/eve-trader/internal/fees"
 	"github.com/mgoodness/eve-trader/internal/skills"
+	"github.com/mgoodness/eve-trader/internal/standings"
 )
 
 // Skills holds the fee/tax-relevant skill levels the P/L engine needs. It
@@ -112,7 +114,15 @@ func ComputePnLForTarget(ctx context.Context, db *sql.DB, characterID int, targe
 	if err != nil {
 		return Report{}, err
 	}
-	rb := fees.BrokerFeeRate(skills.BrokerRelationsLevel)
+	// The broker-fee rate folds in the Rens station owner's corp and faction
+	// standings, additively, so the portfolio and the opportunity ranking
+	// charge the same rate (docs/spec/v2.md §9). A missing station owner or
+	// standing resolves to the skills-only v2 baseline.
+	stationStandings, err := standings.Load(ctx, db, characterID, esi.RensStationID)
+	if err != nil {
+		return Report{}, err
+	}
+	rb := fees.BrokerFeeRate(skills.BrokerRelationsLevel, stationStandings.Corp, stationStandings.Faction)
 	rt := fees.SalesTaxRate(skills.AccountingLevel)
 	abr := float64(skills.AdvancedBrokerRelationsLevel)
 

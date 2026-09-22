@@ -15,7 +15,13 @@ import (
 
 const (
 	regionHeimatar = 10000030
-	rensStation    = 60004588
+
+	// RensStationID is the NPC station where every trade in scope takes
+	// place: Rens VI - Moon 8 - Brutor Tribe Treasury, in Heimatar. It is
+	// exported because the broker-fee standings term (docs/spec/v2.md §9)
+	// resolves this station's owner and marries the owner standings to the
+	// fee the ranking and portfolio both compute.
+	RensStationID = 60004588
 
 	// errorLimitedStatus is ESI's 420 "error limited" response, distinct from
 	// the standard 429. Both mean the same thing to callers.
@@ -66,7 +72,7 @@ func (g *HTTPGateway) FetchRensOrders(ctx context.Context) ([]Order, error) {
 			return nil, err
 		}
 		for _, v := range raw {
-			if v.Location == rensStation {
+			if v.Location == RensStationID {
 				out = append(out, Order{OrderID: v.OrderID, TypeID: v.TypeID, IsBuyOrder: v.IsBuy, Price: v.Price, VolumeRemain: v.Remain, VolumeTotal: v.Total, MinVolume: v.Min, Issued: v.Issued, Duration: v.Duration})
 			}
 		}
@@ -198,6 +204,38 @@ func (g *HTTPGateway) FetchCharacterSkills(ctx context.Context, characterID int,
 		}
 	}
 	return skills, nil
+}
+
+// FetchCharacterStandings returns the character's NPC standings. The
+// route returns a bare, unpaginated array (no page parameter), so one
+// request fetches the whole set (docs/spec/v2.md §9).
+func (g *HTTPGateway) FetchCharacterStandings(ctx context.Context, characterID int, accessToken string) ([]Standing, error) {
+	endpoint := fmt.Sprintf("%s/characters/%d/standings/", g.base(), characterID)
+	var raw []struct {
+		FromID   int     `json:"from_id"`
+		FromType string  `json:"from_type"`
+		Standing float64 `json:"standing"`
+	}
+	if _, err := g.get(ctx, endpoint, accessToken, &raw); err != nil {
+		return nil, fmt.Errorf("fetching standings for character %d: %w", characterID, err)
+	}
+	out := make([]Standing, len(raw))
+	for i, v := range raw {
+		out[i] = Standing{FromID: v.FromID, FromType: v.FromType, Standing: v.Standing}
+	}
+	return out, nil
+}
+
+// FetchStationOwner returns the corporation id that owns stationID, from
+// the public GET /universe/stations/{id} `owner` field.
+func (g *HTTPGateway) FetchStationOwner(ctx context.Context, stationID int64) (int64, error) {
+	var raw struct {
+		Owner int64 `json:"owner"`
+	}
+	if _, err := g.get(ctx, fmt.Sprintf("%s/universe/stations/%d/", g.base(), stationID), "", &raw); err != nil {
+		return 0, fmt.Errorf("fetching station %d owner: %w", stationID, err)
+	}
+	return raw.Owner, nil
 }
 
 // FetchWalletTransactions returns the character's wallet transactions.

@@ -184,7 +184,7 @@ func TestPortfolioRendersGroupsColumnsSummaryAndFootnote(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"estimated", "Per-item fees are estimates", "Unattributed fees are mostly re-lists"} {
+	for _, want := range []string{"estimated", "Per-item fees are estimates", "Unattributed fees are mostly re-lists", "standings toward the Rens station owner"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET /portfolio body missing footnote/legend disclosure %q", want)
 		}

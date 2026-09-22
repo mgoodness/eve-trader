@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/mgoodness/eve-trader/internal/dbtest"
+	"github.com/mgoodness/eve-trader/internal/fees"
 	"github.com/mgoodness/eve-trader/ranking"
 )
 
@@ -200,9 +201,9 @@ func TestBreakEvenGrossMarginRoundsUpToAvoidFeeNegativeDefaults(t *testing.T) {
 		{0, 0, 13.2}, // g* ≈ 13.1068% at level 0
 	}
 	for _, tc := range cases {
-		got := ranking.BreakEvenGrossMargin(ranking.Skills{
-			BrokerRelationsLevel: tc.broker,
-			AccountingLevel:      tc.accounting,
+		got := ranking.BreakEvenGrossMargin(ranking.FeeRates{
+			Broker: fees.BrokerFeeRate(tc.broker, 0, 0),
+			Tax:    fees.SalesTaxRate(tc.accounting),
 		})
 		if !approxEqual(got, tc.want) {
 			t.Errorf("BreakEvenGrossMargin(Broker %d, Accounting %d) = %v, want %v",
@@ -217,11 +218,10 @@ func TestBreakEvenGrossMarginRoundsUpToAvoidFeeNegativeDefaults(t *testing.T) {
 func TestBreakEvenGrossMarginIsAtOrAboveTrueBreakEven(t *testing.T) {
 	for broker := 0; broker <= 5; broker++ {
 		for accounting := 0; accounting <= 5; accounting++ {
-			skills := ranking.Skills{BrokerRelationsLevel: broker, AccountingLevel: accounting}
-			rb := ranking.BrokerFeeRate(broker)
-			rt := ranking.SalesTaxRate(accounting)
+			rb := fees.BrokerFeeRate(broker, 0, 0)
+			rt := fees.SalesTaxRate(accounting)
 			exact := (2*rb + rt) / (1 + rb) * 100
-			got := ranking.BreakEvenGrossMargin(skills)
+			got := ranking.BreakEvenGrossMargin(ranking.FeeRates{Broker: rb, Tax: rt})
 			if got < exact {
 				t.Errorf("BreakEvenGrossMargin(Broker %d, Accounting %d) = %v below exact %v",
 					broker, accounting, got, exact)
@@ -231,5 +231,54 @@ func TestBreakEvenGrossMarginIsAtOrAboveTrueBreakEven(t *testing.T) {
 					broker, accounting, got, exact)
 			}
 		}
+	}
+}
+
+// TestLoadAppliesStationOwnerStandings pins the standings fast-follow: a
+// positive corp and faction standing toward the Rens station owner lowers
+// R_b, so the same spread yields a higher per-unit profit than the
+// skills-only baseline (docs/spec/v2.md §9).
+func TestLoadAppliesStationOwnerStandings(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	dbtest.SeedSkills(t, sqlDB, 1, 4, 3) // Broker Relations 4, Accounting 3
+	// LoadFeeRates resolves standings for the tracked character, so a token
+	// must exist for them to apply.
+	dbtest.SeedToken(t, sqlDB, 1, "token-key", "refresh")
+	// Rens's owner Brutor Tribe (1000049), faction Minmatar Republic
+	// (500002), both at +10.
+	dbtest.SeedStationOwner(t, sqlDB, 60004588, 1000049)
+	dbtest.SeedStanding(t, sqlDB, 1, 1000049, "npc_corp", 10)
+	dbtest.SeedStanding(t, sqlDB, 1, 500002, "faction", 10)
+	seedRealisticItem(t, sqlDB, 34, "Tritanium", 100, 120, 50, 50, 50, 50, 50, 50, 50)
+
+	result, err := ranking.Load(t.Context(), sqlDB, ranking.Filters{})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(result.Opportunities) != 1 {
+		t.Fatalf("Load() returned %d opportunities, want 1", len(result.Opportunities))
+	}
+
+	// R_b = 3% - 0.3%*4 - 0.03%*10 - 0.02%*10 = 1.3%; R_t = 5.025%.
+	// π = 120 - 100 - (100*0.013) - (120*0.013) - (120*0.05025) = 11.11
+	wantProfit := 11.11
+	if !approxEqual(result.Opportunities[0].ProfitPerUnit, wantProfit) {
+		t.Errorf("standings-adjusted ProfitPerUnit = %v, want %v", result.Opportunities[0].ProfitPerUnit, wantProfit)
+	}
+}
+
+// TestLoadFeeRatesFallsBackWithoutStandings guards the pessimistic v2
+// baseline: an unresolved station owner (no poller run yet) must leave the
+// skills-only fee rate in place, not error.
+func TestLoadFeeRatesFallsBackWithoutStandings(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	dbtest.SeedSkills(t, sqlDB, 1, 4, 3)
+
+	rates, err := ranking.LoadFeeRates(t.Context(), sqlDB)
+	if err != nil {
+		t.Fatalf("LoadFeeRates() error = %v", err)
+	}
+	if !approxEqual(rates.Broker, 0.018) || !approxEqual(rates.Tax, 0.05025) {
+		t.Errorf("LoadFeeRates() = %+v, want skills-only Broker 0.018, Tax 0.05025", rates)
 	}
 }

@@ -28,6 +28,10 @@ func (g *failingHistoryGateway) FetchHistory(context.Context, int) ([]esi.Histor
 func (*failingHistoryGateway) FetchCharacterSkills(context.Context, int, string) (esi.Skills, error) {
 	return esi.Skills{}, nil
 }
+func (*failingHistoryGateway) FetchCharacterStandings(context.Context, int, string) ([]esi.Standing, error) {
+	return nil, nil
+}
+func (*failingHistoryGateway) FetchStationOwner(context.Context, int64) (int64, error) { return 0, nil }
 func (*failingHistoryGateway) FetchWalletTransactions(context.Context, int, string, int64) ([]esi.WalletTransaction, error) {
 	return nil, nil
 }

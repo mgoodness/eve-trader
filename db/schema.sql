@@ -60,6 +60,32 @@ CREATE TABLE IF NOT EXISTS character_skill (
   updated_at                       TEXT    NOT NULL
 );
 
+-- The character's NPC standings, one row per (character, entity) from
+-- GET /characters/{id}/standings/ (docs/spec/v2.md §9). from_type is
+-- 'agent', 'npc_corp', or 'faction'; standing is the unmodified value on
+-- the −10…+10 scale. Refreshed daily alongside character_skill. Only
+-- npc_corp and faction rows feed the broker-fee standings term.
+CREATE TABLE IF NOT EXISTS character_standing (
+  character_id  INTEGER NOT NULL,
+  from_id       INTEGER NOT NULL,
+  from_type     TEXT    NOT NULL,   -- agent, npc_corp, faction
+  standing      REAL    NOT NULL,
+  updated_at    TEXT    NOT NULL,
+  PRIMARY KEY (character_id, from_id, from_type)
+);
+
+-- The corporation that owns an NPC station, resolved from
+-- GET /universe/stations/{id} (docs/spec/v2.md §9). ESI omits a station
+-- owner's faction, so the faction is resolved at read time through the
+-- vendored npcfactions table (internal/npcfactions). Rens (60004588) is
+-- the only station in scope; the table is keyed by station_id so its
+-- resolution is generic.
+CREATE TABLE IF NOT EXISTS station_owner (
+  station_id     INTEGER PRIMARY KEY,
+  owner_corp_id  INTEGER NOT NULL,
+  updated_at     TEXT    NOT NULL
+);
+
 -- Single row: OAuth refresh token (see docs/spec/v1.md §6).
 CREATE TABLE IF NOT EXISTS esi_token (
   character_id              INTEGER PRIMARY KEY,

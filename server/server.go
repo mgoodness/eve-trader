@@ -158,13 +158,14 @@ func (s *Server) buildPageData(r *http.Request) (pageData, error) {
 	query := r.URL.Query()
 
 	// The minimum-margin default is the character's fee break-even, so the
-	// default list is fee-positive at any skill level. Load the skills once
-	// per request for it; ranking.Load re-reads the same single row.
-	skills, err := ranking.LoadSkills(r.Context(), s.db)
+	// default list is fee-positive at any skill level (and, after the
+	// standings fast-follow, at any standing). Load the skills-and-standings
+	// rates once per request for it; ranking.Load re-reads the same rows.
+	rates, err := ranking.LoadFeeRates(r.Context(), s.db)
 	if err != nil {
 		return pageData{}, err
 	}
-	form := parseFilterForm(query, ranking.BreakEvenGrossMargin(skills))
+	form := parseFilterForm(query, ranking.BreakEvenGrossMargin(rates))
 	sortKey := parseSort(query)
 
 	result, err := ranking.Load(r.Context(), s.db, form.Bounds)
