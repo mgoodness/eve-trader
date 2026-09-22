@@ -21,7 +21,7 @@ type namesGateway struct {
 	requested [][]int
 }
 
-func (g *namesGateway) FetchRensOrders(context.Context) ([]esi.Order, error) {
+func (g *namesGateway) FetchRegionOrders(context.Context) ([]esi.Order, error) {
 	return g.orders, nil
 }
 

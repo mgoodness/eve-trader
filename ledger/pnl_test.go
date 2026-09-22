@@ -10,7 +10,12 @@ import (
 	"github.com/mgoodness/eve-trader/ledger"
 )
 
-const rensLocation = 60004588
+const (
+	rensLocation = 60004588
+	// otherRegionStation is any other Heimatar station: the region book now
+	// spans the whole region, but the Portfolio must ignore these rows.
+	otherRegionStation = 60004589
+)
 
 // seedTx inserts a wallet_transaction row. isBuy is stored 0/1.
 func seedTx(t *testing.T, db *sql.DB, txID int64, date time.Time, typeID, quantity int, unitPrice float64, isBuy bool, locationID int64) {
@@ -342,6 +347,38 @@ func assertReport(t *testing.T, got, want ledger.Report) {
 		if !almostEqual(pair[0], pair[1]) {
 			t.Errorf("Report.%s = %v, want %v", name, pair[0], pair[1])
 		}
+	}
+}
+
+// TestComputePnLUsesRensMarketNotRegionExtrema places a better sell order
+// at another Heimatar station and asserts the position is still marked at
+// the Rens best sell: the Portfolio stays Rens-anchored even though
+// market_order now spans the region
+// (docs/adr/0005-heimatar-region-as-pricing-market.md).
+func TestComputePnLUsesRensMarketNotRegionExtrema(t *testing.T) {
+	day1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	db := dbtest.OpenDB(t)
+	dbtest.SeedItem(t, db, 34, "Tritanium")
+	dbtest.SeedSkills(t, db, 123, 0, 0)
+	seedTx(t, db, 1, day1, 34, 100, 100, true, rensLocation)
+	seedOrderSnapshot(t, db, 1, day1, 34, rensLocation, true, 100, 0, 100, "")
+	dbtest.SeedOrder(t, db, 9001, 34, true, 90)   // Rens buy
+	dbtest.SeedOrder(t, db, 9002, 34, false, 110) // Rens best sell
+	// A better sell elsewhere in the region must not mark the position.
+	dbtest.SeedOrderAt(t, db, 9003, 34, otherRegionStation, false, 150)
+
+	report, err := ledger.ComputePnL(t.Context(), db, 123)
+	if err != nil {
+		t.Fatalf("ComputePnL() error = %v", err)
+	}
+	pos, ok := positionByType(report.Positions, 34)
+	if !ok {
+		t.Fatalf("no position for type 34; got %+v", report.Positions)
+	}
+	if !pos.HasMarket || pos.MarketSell != 110 || pos.LiquidationBuy != 90 {
+		t.Errorf("position market = (has %v, sell %v, buy %v), want (true, 110, 90) -- the Rens book",
+			pos.HasMarket, pos.MarketSell, pos.LiquidationBuy)
 	}
 }
 

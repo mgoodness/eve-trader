@@ -48,8 +48,10 @@ func Open(dsn string) (*sql.DB, error) {
 // are read and only the missing ones are added; the call is idempotent.
 func migrate(sqlDB *sql.DB) error {
 	// The v1.1 market_history window predates its price columns; the v2
-	// ledger predates Advanced Broker Relations in character_skill. Each
+	// ledger predates Advanced Broker Relations in character_skill; the
+	// region-wide order book predates location_id in market_order. Each
 	// addition is applied only when missing, so migrate is idempotent.
+	const rensStationID = 60004588
 	additions := []struct {
 		table, name, typ string
 	}{
@@ -57,6 +59,9 @@ func migrate(sqlDB *sql.DB) error {
 		{"market_history", "highest", "REAL"},
 		{"market_history", "lowest", "REAL"},
 		{"character_skill", "advanced_broker_relations_level", "INTEGER NOT NULL DEFAULT 0"},
+		// Pre-region market_order held only Rens rows, so backfilling the
+		// new column with Rens is the correct default for an existing cache.
+		{"market_order", "location_id", fmt.Sprintf("INTEGER NOT NULL DEFAULT %d", rensStationID)},
 	}
 	columns := map[string]map[string]bool{}
 	for _, add := range additions {

@@ -50,8 +50,8 @@ type Fake struct {
 	RefreshTokenErr   error
 }
 
-// FetchRensOrders returns the seeded Orders, or FetchOrdersErr if set.
-func (f *Fake) FetchRensOrders(ctx context.Context) ([]Order, error) {
+// FetchRegionOrders returns the seeded Orders, or FetchOrdersErr if set.
+func (f *Fake) FetchRegionOrders(ctx context.Context) ([]Order, error) {
 	if f.FetchOrdersErr != nil {
 		return nil, f.FetchOrdersErr
 	}

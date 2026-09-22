@@ -36,13 +36,26 @@ func SeedItem(t *testing.T, sqlDB *sql.DB, typeID int, name string) {
 	}
 }
 
-// SeedOrder inserts a market_order row for typeID.
+// RensStationID is the station the character trades at, and the location
+// SeedOrder and SeedBook place their seeded orders at. The region-wide book
+// these helpers write to spans every station, but most fixtures only care
+// about the Rens-anchored consumers, so the Rens value is the default.
+const RensStationID = 60004588
+
+// SeedOrder inserts a market_order row for typeID at Rens.
 func SeedOrder(t *testing.T, sqlDB *sql.DB, orderID int64, typeID int, isBuy bool, price float64) {
 	t.Helper()
+	SeedOrderAt(t, sqlDB, orderID, typeID, RensStationID, isBuy, price)
+}
+
+// SeedOrderAt inserts a market_order row for typeID at an explicit station,
+// letting a fixture mix region stations into the same book.
+func SeedOrderAt(t *testing.T, sqlDB *sql.DB, orderID int64, typeID int, locationID int64, isBuy bool, price float64) {
+	t.Helper()
 	if _, err := sqlDB.Exec(
-		`INSERT INTO market_order (order_id, type_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
-		 VALUES (?, ?, ?, ?, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z')`,
-		orderID, typeID, isBuy, price,
+		`INSERT INTO market_order (order_id, type_id, location_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z')`,
+		orderID, typeID, locationID, isBuy, price,
 	); err != nil {
 		t.Fatalf("seeding market_order %d: %v", orderID, err)
 	}

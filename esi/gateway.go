@@ -9,14 +9,17 @@ import (
 	"time"
 )
 
-// Order is a single order in Rens's order book, as returned by
-// GET /markets/{region_id}/orders/ and filtered to Rens's location_id.
-// It carries no display name: names are resolved separately, in batch,
-// via FetchTypeNames so the order fetch stays a single pass over the
+// Order is a single order in Heimatar's order book, as returned by
+// GET /markets/{region_id}/orders/ unfiltered (every station in the
+// region). LocationID records the station the order rests at, so consumers
+// that must stay Rens-anchored (the ledger's P/L and re-list gain) can
+// filter. It carries no display name: names are resolved separately, in
+// batch, via FetchTypeNames so the order fetch stays a single pass over the
 // region pages.
 type Order struct {
 	OrderID      int64
 	TypeID       int
+	LocationID   int64
 	IsBuyOrder   bool
 	Price        float64
 	VolumeRemain int
@@ -180,8 +183,10 @@ type ContractItem struct {
 // call to ESI and EVE SSO. All other application code is tested against
 // this interface rather than against real HTTP calls.
 type ESIGateway interface {
-	// FetchRensOrders returns Rens's current order book.
-	FetchRensOrders(ctx context.Context) ([]Order, error)
+	// FetchRegionOrders returns the current Heimatar region order book:
+	// every station's orders, each carrying its location_id. It is not
+	// filtered to Rens.
+	FetchRegionOrders(ctx context.Context) ([]Order, error)
 
 	// FetchTypeNames resolves display names for the given type_ids in
 	// batched universe-names requests. IDs the gateway cannot resolve are

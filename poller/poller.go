@@ -1,4 +1,4 @@
-// Package poller keeps the current Rens order book in SQLite.
+// Package poller keeps the current Heimatar region order book in SQLite.
 package poller
 
 import (
@@ -15,8 +15,9 @@ import (
 
 const DefaultInterval = 5 * time.Minute
 
-// Poller periodically replaces the market_order cache with the latest Rens
-// snapshot. A failed fetch leaves the previous snapshot untouched.
+// Poller periodically replaces the market_order cache with the latest
+// region-wide snapshot. A failed fetch leaves the previous snapshot
+// untouched.
 type Poller struct {
 	gateway  esi.ESIGateway
 	db       *sql.DB
@@ -36,9 +37,9 @@ func (p *Poller) Poll(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	orders, err := p.gateway.FetchRensOrders(ctx)
+	orders, err := p.gateway.FetchRegionOrders(ctx)
 	if err != nil {
-		return fmt.Errorf("fetching Rens orders: %w", err)
+		return fmt.Errorf("fetching region orders: %w", err)
 	}
 
 	names, err := p.resolveTypeNames(ctx, orders)
@@ -68,10 +69,10 @@ func (p *Poller) Poll(ctx context.Context) error {
 			return fmt.Errorf("upserting item type %d: %w", order.TypeID, err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO market_order (order_id, type_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(order_id) DO UPDATE SET type_id=excluded.type_id, is_buy_order=excluded.is_buy_order, price=excluded.price, volume_remain=excluded.volume_remain, volume_total=excluded.volume_total, min_volume=excluded.min_volume, issued=excluded.issued, duration=excluded.duration, updated_at=excluded.updated_at`,
-			order.OrderID, order.TypeID, order.IsBuyOrder, order.Price, order.VolumeRemain, order.VolumeTotal, order.MinVolume, order.Issued.UTC().Format(time.RFC3339Nano), order.Duration, now); err != nil {
+			INSERT INTO market_order (order_id, type_id, location_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(order_id) DO UPDATE SET type_id=excluded.type_id, location_id=excluded.location_id, is_buy_order=excluded.is_buy_order, price=excluded.price, volume_remain=excluded.volume_remain, volume_total=excluded.volume_total, min_volume=excluded.min_volume, issued=excluded.issued, duration=excluded.duration, updated_at=excluded.updated_at`,
+			order.OrderID, order.TypeID, order.LocationID, order.IsBuyOrder, order.Price, order.VolumeRemain, order.VolumeTotal, order.MinVolume, order.Issued.UTC().Format(time.RFC3339Nano), order.Duration, now); err != nil {
 			return fmt.Errorf("upserting order %d: %w", order.OrderID, err)
 		}
 	}
@@ -149,7 +150,7 @@ func (p *Poller) cachedTypeNames(ctx context.Context) (map[int]string, error) {
 // retried at the next cadence; the last successful snapshot remains intact.
 func (p *Poller) Run(ctx context.Context) {
 	if err := p.Poll(ctx); err != nil && ctx.Err() == nil {
-		slog.Error("polling Rens orders", "err", err)
+		slog.Error("polling region orders", "err", err)
 	}
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
@@ -159,7 +160,7 @@ func (p *Poller) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := p.Poll(ctx); err != nil && ctx.Err() == nil {
-				slog.Error("polling Rens orders", "err", err)
+				slog.Error("polling region orders", "err", err)
 			}
 		}
 	}

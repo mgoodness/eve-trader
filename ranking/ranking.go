@@ -1,8 +1,9 @@
 // Package ranking computes eve-trader's opportunity list: the v1
-// profitability/ranking formula (see docs/spec/v1.md §4) applied to Rens's
-// current order book, item names, and the trading character's fee-relevant
-// skills, all read directly from SQLite (market_order, market_history,
-// item_type, character_skill).
+// profitability/ranking formula (see docs/spec/v1.md §4) applied to the
+// whole Heimatar region order book (see
+// docs/adr/0005-heimatar-region-as-pricing-market.md), item names, and the
+// trading character's fee-relevant skills, all read directly from SQLite
+// (market_order, market_history, item_type, character_skill).
 package ranking
 
 import (
@@ -48,14 +49,15 @@ const (
 	NearBookBand = 0.05
 )
 
-// Opportunity is one ranked row: an item currently tradable at Rens, with
-// its computed profitability figures under the trading character's
-// current skills.
+// Opportunity is one ranked row: an item with a region best buy and a
+// region best sell, with its computed profitability figures under the
+// trading character's current skills. The row is a region-wide pricing
+// signal; it does not require an order at Rens.
 type Opportunity struct {
 	TypeID         int
 	Name           string
-	Buy            float64 // P_b -- best (highest) current Rens buy order price
-	Sell           float64 // P_s -- best (lowest) current Rens sell order price
+	Buy            float64 // P_b -- Region best buy: highest buy order price anywhere in Heimatar
+	Sell           float64 // P_s -- Region best sell: lowest sell order price anywhere in Heimatar
 	GrossMarginPct float64 // M   -- gross margin percentage, before fees (drives the minimum-margin filter)
 	NetMarginPct   float64 // net margin percentage -- profit after fees as a fraction of sell price (displayed)
 	ProfitPerUnit  float64 // π   -- profit per unit after broker fee and sales tax
@@ -187,7 +189,7 @@ type Result struct {
 }
 
 // Total is the candidate set the filters ran over: every item with both a
-// buy and a sell side on the Rens book, whether shown or hidden.
+// Region best buy and a Region best sell, whether shown or hidden.
 func (r Result) Total() int {
 	return len(r.Opportunities) + r.HiddenByRealism + r.HiddenByFilters
 }
@@ -234,13 +236,14 @@ func (h historyStats) swing() float64 {
 	return h.maxHigh.Float64 / h.minLow.Float64
 }
 
-// opportunityQuery derives, per candidate item, its best (highest) buy and
-// best (lowest) sell price, its retained-window volume and realism
-// aggregates (trade-day count, incomplete-price count, high/low swing),
-// and the number of orders within the near-best band on each side. Items
-// with no buy order or no sell order on the book are excluded -- there is
-// no spread to compute. The window itself is maintained by the poller that
-// writes market_history, not by this query.
+// opportunityQuery derives, per candidate item, its Region best buy
+// (highest) and Region best sell (lowest) price across the whole region
+// book, its retained-window volume and realism aggregates (trade-day
+// count, incomplete-price count, high/low swing), and the number of orders
+// within the near-best band on each side. Items with no region buy order
+// or no region sell order are excluded -- there is no spread to compute.
+// The window itself is maintained by the poller that writes
+// market_history, not by this query.
 const opportunityQuery = `
 WITH book AS (
 	SELECT

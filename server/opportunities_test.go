@@ -119,7 +119,7 @@ func TestIndexRendersRankedOpportunityTable(t *testing.T) {
 
 	// Persistent header footnote states both the fee/capture assumption and
 	// the Heimatar-region-volume approximation caveat.
-	for _, want := range []string{"20%", "Heimatar-region-wide"} {
+	for _, want := range []string{"20%", "Volume figures are region-wide"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET / body missing footnote disclosure %q", want)
 		}

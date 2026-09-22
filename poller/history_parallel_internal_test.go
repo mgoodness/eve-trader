@@ -77,8 +77,8 @@ func seedOrderBook(t *testing.T, db *sql.DB, n int) {
 		if _, err := tx.Exec(`INSERT INTO item_type (type_id, name, updated_at) VALUES (?, ?, '2024-01-01T00:00:00Z')`, i, "Item"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tx.Exec(`INSERT INTO market_order (order_id, type_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
-			VALUES (?, ?, 1, 5, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z')`, i, i); err != nil {
+		if _, err := tx.Exec(`INSERT INTO market_order (order_id, type_id, location_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
+			VALUES (?, ?, 60004588, 1, 5, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z')`, i, i); err != nil {
 			t.Fatal(err)
 		}
 	}

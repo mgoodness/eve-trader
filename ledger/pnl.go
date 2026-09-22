@@ -505,13 +505,17 @@ type marketPrices struct {
 	hasSell  bool
 }
 
+// loadMarketPrices returns, per type, the best (highest) buy and best
+// (lowest) sell price in the Rens book. Positions are Rens-anchored, so
+// only Rens rows are read even though market_order spans the whole region.
 func loadMarketPrices(ctx context.Context, db *sql.DB) (map[int]marketPrices, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT type_id,
 		       MAX(CASE WHEN is_buy_order = 1 THEN price END),
 		       MIN(CASE WHEN is_buy_order = 0 THEN price END)
 		FROM market_order
-		GROUP BY type_id`)
+		WHERE location_id = ?
+		GROUP BY type_id`, esi.RensStationID)
 	if err != nil {
 		return nil, fmt.Errorf("querying market prices: %w", err)
 	}
@@ -539,12 +543,13 @@ func loadMarketPrices(ctx context.Context, db *sql.DB) (map[int]marketPrices, er
 // book among orders the character does not own. The re-list gain needs the
 // price level the character is actually competing against: including the
 // character's own best order would always make the current best sell equal
-// to that order's price, leaving nothing to raise to.
+// to that order's price, leaving nothing to raise to. Only Rens rows are
+// read: the character competes at Rens, not across the region.
 func loadOtherBestSells(ctx context.Context, db *sql.DB, own map[int64]bool) (map[int]float64, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT type_id, order_id, price
 		FROM market_order
-		WHERE is_buy_order = 0`)
+		WHERE is_buy_order = 0 AND location_id = ?`, esi.RensStationID)
 	if err != nil {
 		return nil, fmt.Errorf("querying sell orders: %w", err)
 	}

@@ -29,18 +29,18 @@ func TestFootnoteWrapsToBrowserWidth(t *testing.T) {
 	}
 }
 
-// TestFootnoteScopesPricesToRensAndVolumeToRegion guards the header footnote
-// against reading as "the whole book is region-wide": it must say the Buy/Sell
-// prices are the Rens-station order book while Vol/day and ISK/day come from
-// region-wide history.
-func TestFootnoteScopesPricesToRensAndVolumeToRegion(t *testing.T) {
+// TestFootnoteScopesPricesToRegion guards the header footnote against
+// reading as "the book is Rens-specific": it must say the Buy/Sell prices
+// are region-wide extrema and that fills happen at Rens, so the spread is
+// an upper bound rather than a guaranteed Rens trade.
+func TestFootnoteScopesPricesToRegion(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	dbtest.SeedSkills(t, sqlDB, 1, 4, 3)
 	dbtest.SeedToken(t, sqlDB, 1, testAuthConfig().TokenKey, "refresh-token")
 	seedCandidate(t, sqlDB, 34, "Passing Ore", 100, 120, 40)
 
 	body := renderIndex(t, sqlDB)
-	for _, want := range []string{"current Rens order book only", "Heimatar-region-wide"} {
+	for _, want := range []string{"Heimatar-region order book", "may rest at different stations", "placed and filled at Rens"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("footnote missing scope disclosure %q", want)
 		}

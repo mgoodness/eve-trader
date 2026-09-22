@@ -13,10 +13,10 @@ import (
 	"github.com/mgoodness/eve-trader/esi"
 )
 
-func TestHTTPGatewayFetchRensOrdersPaginatesWithoutNameLookups(t *testing.T) {
+func TestHTTPGatewayFetchRegionOrdersPaginatesWithoutNameLookups(t *testing.T) {
 	var orderPages = map[string]any{
 		"1": []map[string]any{{"order_id": 1, "type_id": 34, "location_id": 60004588, "issued": "2026-09-16T00:00:00Z"}},
-		"2": []map[string]any{{"order_id": 2, "type_id": 34, "location_id": 60004588, "issued": "2026-09-16T00:00:00Z"}},
+		"2": []map[string]any{{"order_id": 2, "type_id": 34, "location_id": 60004589, "issued": "2026-09-16T00:00:00Z"}},
 	}
 	var nameRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func TestHTTPGatewayFetchRensOrdersPaginatesWithoutNameLookups(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchRensOrders(context.Background())
+	got, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchRegionOrders(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +48,12 @@ func TestHTTPGatewayFetchRensOrdersPaginatesWithoutNameLookups(t *testing.T) {
 	}
 }
 
-// TestHTTPGatewayFetchRensOrdersKeepsOnlyRensStation feeds a region page
+// TestHTTPGatewayFetchRegionOrdersKeepsEveryStation feeds a region page
 // carrying orders at Rens's station alongside orders at other stations and
-// asserts only Rens's 60004588 orders survive. The region endpoint is
-// station-agnostic, so this filter is what makes the book Rens-specific.
-func TestHTTPGatewayFetchRensOrdersKeepsOnlyRensStation(t *testing.T) {
+// asserts every order survives, each with its own location_id. The region
+// endpoint is station-agnostic and the book is now the whole region, so no
+// filtering happens in the gateway.
+func TestHTTPGatewayFetchRegionOrdersKeepsEveryStation(t *testing.T) {
 	const otherStation = 60004589
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/latest/markets/10000030/orders/" {
@@ -68,16 +69,17 @@ func TestHTTPGatewayFetchRensOrdersKeepsOnlyRensStation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchRensOrders(context.Background())
+	got, err := (&esi.HTTPGateway{BaseURL: server.URL + "/latest"}).FetchRegionOrders(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("FetchRensOrders() = %+v, want only the two Rens-station orders", got)
+	if len(got) != 3 {
+		t.Fatalf("FetchRegionOrders() = %+v, want all three region orders", got)
 	}
+	wantLocations := map[int64]int64{1: 60004588, 2: otherStation, 3: 60004588}
 	for _, order := range got {
-		if order.OrderID == 2 {
-			t.Fatalf("order 2 from station %d leaked into the Rens book: %+v", otherStation, got)
+		if want := wantLocations[order.OrderID]; order.LocationID != want {
+			t.Errorf("order %d location_id = %d, want %d", order.OrderID, order.LocationID, want)
 		}
 	}
 }
