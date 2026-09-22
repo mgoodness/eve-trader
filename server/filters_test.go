@@ -361,27 +361,24 @@ func TestFilterAndSortCompose(t *testing.T) {
 	}
 }
 
-// TestSummaryAndEmptyStateAreDynamic asserts the summary line and empty
-// state reflect the shown/hidden counts and the active controls rather than
-// any hardcoded v1 threshold.
-func TestSummaryAndEmptyStateAreDynamic(t *testing.T) {
+// TestEmptyStateIsDynamic asserts the empty state reflects the live counts
+// and names the active controls rather than any hardcoded v1 threshold.
+func TestEmptyStateIsDynamic(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 	seedFilterFixtures(t, sqlDB)
 	srv := newTestServer(t, sqlDB)
 
 	_, body := getBody(t, srv+"/")
-	for _, want := range []string{
-		"Showing <strong>3</strong> of 6 items",
-		"<strong>0</strong> hidden by realism filters",
-		"<strong>3</strong> outside your filters",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("GET / summary missing %q; body:\n%s", want, body)
-		}
-	}
 	for _, stale := range []string{"10 units/day", "5% min margin", "v1 thresholds"} {
 		if strings.Contains(body, stale) {
 			t.Errorf("GET / body still hardcodes old threshold copy %q", stale)
+		}
+	}
+	// The old counts summary line above the table is gone; on a non-empty
+	// result set nothing above the table reports the hidden/outside counts.
+	for _, removed := range []string{"outside your filters", "hidden by realism filters", "filtering by"} {
+		if strings.Contains(body, removed) {
+			t.Errorf("GET / body still renders the removed counts summary %q; body:\n%s", removed, body)
 		}
 	}
 
@@ -390,8 +387,8 @@ func TestSummaryAndEmptyStateAreDynamic(t *testing.T) {
 	for _, want := range []string{
 		"No opportunities match your current filters",
 		"minimum daily volume 100000",
-		"Showing <strong>0</strong> of 6 items",
-		"<strong>6</strong> outside your filters",
+		"0 of 6 items shown",
+		"6 outside your filters",
 	} {
 		if !strings.Contains(empty, want) {
 			t.Errorf("empty state missing %q; body:\n%s", want, empty)
