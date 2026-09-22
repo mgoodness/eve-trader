@@ -69,11 +69,13 @@ type HistoryPoint struct {
 
 // Skills holds the fee/tax-relevant skill levels for a character: the
 // active_skill_level (not trained_skill_level) of Broker Relations
-// (skill ID 3446) and Accounting (skill ID 16622). A missing skill ID
-// resolves to level 0.
+// (skill ID 3446), Accounting (skill ID 16622), and Advanced Broker
+// Relations (skill ID 16597, the in-place re-list fee term; formerly
+// Margin Trading). A missing skill ID resolves to level 0.
 type Skills struct {
-	BrokerRelationsLevel int
-	AccountingLevel      int
+	BrokerRelationsLevel         int
+	AccountingLevel              int
+	AdvancedBrokerRelationsLevel int
 }
 
 // Token is an EVE SSO OAuth token response.

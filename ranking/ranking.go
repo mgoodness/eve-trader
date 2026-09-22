@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/mgoodness/eve-trader/internal/fees"
 )
 
 // CaptureRate is the fixed fraction of an item's average daily
@@ -68,13 +70,13 @@ type Skills struct {
 // sell side, for a given Broker Relations skill level. The standings term
 // is deliberately not modeled in v1 (see docs/spec/v1.md §4).
 func BrokerFeeRate(brokerRelationsLevel int) float64 {
-	return 0.03 - 0.003*float64(brokerRelationsLevel)
+	return fees.BrokerFeeRate(brokerRelationsLevel)
 }
 
 // SalesTaxRate is R_t, the sales tax rate charged on the sell side, for a
 // given Accounting skill level.
 func SalesTaxRate(accountingLevel int) float64 {
-	return 0.075 * (1 - 0.11*float64(accountingLevel))
+	return fees.SalesTaxRate(accountingLevel)
 }
 
 // BreakEvenGrossMargin is the gross margin percentage at which a trade

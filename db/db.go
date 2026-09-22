@@ -47,20 +47,31 @@ func Open(dsn string) (*sql.DB, error) {
 // SQLite has no ADD COLUMN IF NOT EXISTS, so the table's current columns
 // are read and only the missing ones are added; the call is idempotent.
 func migrate(sqlDB *sql.DB) error {
-	existing, err := tableColumns(sqlDB, "market_history")
-	if err != nil {
-		return err
+	// The v1.1 market_history window predates its price columns; the v2
+	// ledger predates Advanced Broker Relations in character_skill. Each
+	// addition is applied only when missing, so migrate is idempotent.
+	additions := []struct {
+		table, name, typ string
+	}{
+		{"market_history", "average", "REAL"},
+		{"market_history", "highest", "REAL"},
+		{"market_history", "lowest", "REAL"},
+		{"character_skill", "advanced_broker_relations_level", "INTEGER NOT NULL DEFAULT 0"},
 	}
-	for _, col := range []struct{ name, typ string }{
-		{"average", "REAL"},
-		{"highest", "REAL"},
-		{"lowest", "REAL"},
-	} {
-		if existing[col.name] {
+	columns := map[string]map[string]bool{}
+	for _, add := range additions {
+		if columns[add.table] == nil {
+			existing, err := tableColumns(sqlDB, add.table)
+			if err != nil {
+				return err
+			}
+			columns[add.table] = existing
+		}
+		if columns[add.table][add.name] {
 			continue
 		}
-		if _, err := sqlDB.Exec(fmt.Sprintf("ALTER TABLE market_history ADD COLUMN %s %s", col.name, col.typ)); err != nil {
-			return fmt.Errorf("adding market_history.%s: %w", col.name, err)
+		if _, err := sqlDB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", add.table, add.name, add.typ)); err != nil {
+			return fmt.Errorf("adding %s.%s: %w", add.table, add.name, err)
 		}
 	}
 	return nil

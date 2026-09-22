@@ -112,7 +112,7 @@ func TestAuthCallbackPersistsTokenAndSkills(t *testing.T) {
 			CharacterID:  12345,
 			OwnerHash:    "owner-hash-abc",
 		},
-		Skills: esi.Skills{BrokerRelationsLevel: 4, AccountingLevel: 3},
+		Skills: esi.Skills{BrokerRelationsLevel: 4, AccountingLevel: 3, AdvancedBrokerRelationsLevel: 5},
 	}
 	srv := httptest.NewServer(server.New(fake, sqlDB, testAuthConfig()))
 	defer srv.Close()
@@ -160,10 +160,10 @@ func TestAuthCallbackPersistsTokenAndSkills(t *testing.T) {
 		t.Error("esi_token.encrypted_refresh_token contains the plaintext refresh token, want it encrypted")
 	}
 
-	var broker, accounting int
+	var broker, accounting, advancedBroker int
 	if err := sqlDB.QueryRow(
-		`SELECT broker_relations_level, accounting_level FROM character_skill WHERE character_id = ?`, characterID,
-	).Scan(&broker, &accounting); err != nil {
+		`SELECT broker_relations_level, accounting_level, advanced_broker_relations_level FROM character_skill WHERE character_id = ?`, characterID,
+	).Scan(&broker, &accounting, &advancedBroker); err != nil {
 		t.Fatalf("querying character_skill: %v", err)
 	}
 	if broker != 4 {
@@ -171,6 +171,9 @@ func TestAuthCallbackPersistsTokenAndSkills(t *testing.T) {
 	}
 	if accounting != 3 {
 		t.Errorf("character_skill.accounting_level = %d, want 3", accounting)
+	}
+	if advancedBroker != 5 {
+		t.Errorf("character_skill.advanced_broker_relations_level = %d, want 5", advancedBroker)
 	}
 }
 

@@ -117,13 +117,21 @@ func SeedHistory(t *testing.T, sqlDB *sql.DB, typeID int, volumes ...int) {
 	SeedHistoryDays(t, sqlDB, typeID, days...)
 }
 
-// SeedSkills inserts the single character_skill row.
+// SeedSkills inserts the single character_skill row with Advanced Broker
+// Relations at level 0.
 func SeedSkills(t *testing.T, sqlDB *sql.DB, characterID, brokerRelations, accounting int) {
 	t.Helper()
+	SeedSkillsWithAdvancedBrokerRelations(t, sqlDB, characterID, brokerRelations, accounting, 0)
+}
+
+// SeedSkillsWithAdvancedBrokerRelations inserts the single character_skill
+// row including the in-place re-list fee skill (Advanced Broker Relations).
+func SeedSkillsWithAdvancedBrokerRelations(t *testing.T, sqlDB *sql.DB, characterID, brokerRelations, accounting, advancedBrokerRelations int) {
+	t.Helper()
 	if _, err := sqlDB.Exec(
-		`INSERT INTO character_skill (character_id, broker_relations_level, accounting_level, updated_at)
-		 VALUES (?, ?, ?, '2024-01-01T00:00:00Z')`,
-		characterID, brokerRelations, accounting,
+		`INSERT INTO character_skill (character_id, broker_relations_level, accounting_level, advanced_broker_relations_level, updated_at)
+		 VALUES (?, ?, ?, ?, '2024-01-01T00:00:00Z')`,
+		characterID, brokerRelations, accounting, advancedBrokerRelations,
 	); err != nil {
 		t.Fatalf("seeding character_skill: %v", err)
 	}
