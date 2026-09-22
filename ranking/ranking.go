@@ -8,12 +8,15 @@ package ranking
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 
+	"github.com/mgoodness/eve-trader/esi"
 	"github.com/mgoodness/eve-trader/internal/fees"
 	"github.com/mgoodness/eve-trader/internal/skills"
+	"github.com/mgoodness/eve-trader/internal/standings"
 )
 
 // CaptureRate is the fixed fraction of an item's average daily
@@ -65,43 +68,76 @@ type Opportunity struct {
 // loader agree on how a missing row resolves.
 type Skills = skills.Skills
 
-// BrokerFeeRate is R_b, the broker fee rate charged on both the buy and
-// sell side, for a given Broker Relations skill level. The standings term
-// is deliberately not modeled in v1 (see docs/spec/v1.md §4).
-func BrokerFeeRate(brokerRelationsLevel int) float64 {
-	return fees.BrokerFeeRate(brokerRelationsLevel)
+// FeeRates bundles the broker-fee rate R_b and sales-tax rate R_t that
+// apply to the tracked character at Rens, after both skills and standings
+// (docs/spec/v2.md §4.3, §9). LoadFeeRates is the one place they are
+// derived, so the opportunity ranking, the portfolio, and the derived
+// minimum-margin default never drift.
+type FeeRates struct {
+	// Broker is R_b, charged on both the buy and sell side.
+	Broker float64
+	// Tax is R_t, charged on the sell side.
+	Tax float64
 }
 
-// SalesTaxRate is R_t, the sales tax rate charged on the sell side, for a
-// given Accounting skill level.
-func SalesTaxRate(accountingLevel int) float64 {
-	return fees.SalesTaxRate(accountingLevel)
+// LoadFeeRates loads the character's skills and the Rens station owner's
+// (corp and faction) standings and computes both rates once. A missing
+// skill row or an unresolved station owner resolves to the level-0,
+// no-standings baseline rather than an error.
+func LoadFeeRates(ctx context.Context, db *sql.DB) (FeeRates, error) {
+	sk, err := LoadSkills(ctx, db)
+	if err != nil {
+		return FeeRates{}, err
+	}
+	characterID, err := trackedCharacterID(ctx, db)
+	if err != nil {
+		return FeeRates{}, err
+	}
+	st, err := standings.Load(ctx, db, characterID, esi.RensStationID)
+	if err != nil {
+		return FeeRates{}, err
+	}
+	return FeeRates{
+		Broker: fees.BrokerFeeRate(sk.BrokerRelationsLevel, st.Corp, st.Faction),
+		Tax:    fees.SalesTaxRate(sk.AccountingLevel),
+	}, nil
+}
+
+// trackedCharacterID returns the single stored character id, or 0 when no
+// token has been stored yet (the first-boot state). It mirrors how the
+// skills and standings loaders pick their single row, so all three resolve
+// the same character.
+func trackedCharacterID(ctx context.Context, db *sql.DB) (int, error) {
+	var id int
+	err := db.QueryRowContext(ctx, `SELECT character_id FROM esi_token LIMIT 1`).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("loading tracked character id: %w", err)
+	}
+	return id, nil
 }
 
 // BreakEvenGrossMargin is the gross margin percentage at which a trade
 // exactly clears the broker fee charged on both sides and the sales tax on
-// the sell side, for the given skills:
+// the sell side, for the given rates:
 //
 //	g* = (2·R_b + R_t) / (1 + R_b)
 //
 // It is rounded up to one decimal place, so a default set to it never dips
-// below break-even. A missing character_skill row has already resolved to
-// level-0 skills by the caller (see LoadSkills), so no separate fallback is
-// needed here.
-func BreakEvenGrossMargin(skills Skills) float64 {
-	rb := BrokerFeeRate(skills.BrokerRelationsLevel)
-	rt := SalesTaxRate(skills.AccountingLevel)
-	return math.Ceil((2*rb+rt)/(1+rb)*100*10) / 10
+// below break-even. A missing character_skill or station-owner row has
+// already resolved to the no-standings, level-0 baseline in LoadFeeRates,
+// so no separate fallback is needed here.
+func BreakEvenGrossMargin(rates FeeRates) float64 {
+	return math.Ceil((2*rates.Broker+rates.Tax)/(1+rates.Broker)*100*10) / 10
 }
 
 // compute returns the per-unit profit (π), the gross margin percentage (M),
 // and the net margin percentage (π as a fraction of sell price) for a
-// buy/sell price pair under the given skills.
-func compute(buy, sell float64, skills Skills) (profitPerUnit, grossMarginPct, netMarginPct float64) {
-	rb := BrokerFeeRate(skills.BrokerRelationsLevel)
-	rt := SalesTaxRate(skills.AccountingLevel)
-
-	profit := sell - buy - (buy * rb) - (sell * rb) - (sell * rt)
+// buy/sell price pair under the given fee rates.
+func compute(buy, sell float64, rates FeeRates) (profitPerUnit, grossMarginPct, netMarginPct float64) {
+	profit := sell - buy - (buy * rates.Broker) - (sell * rates.Broker) - (sell * rates.Tax)
 	grossMargin := (sell - buy) / sell * 100
 	netMargin := profit / sell * 100
 
@@ -251,7 +287,7 @@ WHERE b.buy_price IS NOT NULL AND b.sell_price IS NOT NULL
 // are dropped entirely, not just hidden, and the tier that excluded each is
 // counted so the page can report both.
 func Load(ctx context.Context, db *sql.DB, filters Filters) (Result, error) {
-	skills, err := LoadSkills(ctx, db)
+	rates, err := LoadFeeRates(ctx, db)
 	if err != nil {
 		return Result{}, err
 	}
@@ -281,7 +317,7 @@ func Load(ctx context.Context, db *sql.DB, filters Filters) (Result, error) {
 			continue
 		}
 
-		o.ProfitPerUnit, o.GrossMarginPct, o.NetMarginPct = compute(o.Buy, o.Sell, skills)
+		o.ProfitPerUnit, o.GrossMarginPct, o.NetMarginPct = compute(o.Buy, o.Sell, rates)
 		o.ISKPerDay = o.ProfitPerUnit * o.VolumePerDay * CaptureRate
 
 		if !filters.Passes(o) {

@@ -187,3 +187,35 @@ func TestOpportunitiesPartialResortsByColumn(t *testing.T) {
 		})
 	}
 }
+
+// TestIndexIncludesStationOwnerStandings renders the same spread with and
+// without the Rens owner's standings and asserts the fee-adjusted figures
+// rise. It is the end-to-end proof that the ranking uses the standings rate
+// and that the footnote is truthful about it (docs/spec/v2.md §9).
+func TestIndexIncludesStationOwnerStandings(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	seedOpportunityFixtures(t, sqlDB)
+
+	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB, testAuthConfig()))
+	defer srv.Close()
+
+	// Skills-only baseline: R_b = 1.8%, so π ≈ 10.01 → "10 ISK"/unit.
+	_, before := getBody(t, srv.URL+"/")
+	if !strings.Contains(before, "10 ISK") {
+		t.Fatalf("baseline render missing skills-only ISK/unit; body:\n%s", before)
+	}
+	if !strings.Contains(before, "standings toward the Rens station owner") {
+		t.Errorf("GET / body missing footnote standings disclosure")
+	}
+
+	// Rens owner Brutor Tribe (1000049) and faction Minmatar Republic
+	// (500002), each at +10, lower R_b to 1.3%: π ≈ 11.11 → "11 ISK"/unit.
+	dbtest.SeedStationOwner(t, sqlDB, 60004588, 1000049)
+	dbtest.SeedStanding(t, sqlDB, 1, 1000049, "npc_corp", 10)
+	dbtest.SeedStanding(t, sqlDB, 1, 500002, "faction", 10)
+
+	_, after := getBody(t, srv.URL+"/")
+	if !strings.Contains(after, "11 ISK") {
+		t.Fatalf("standings render missing standings-adjusted ISK/unit; body:\n%s", after)
+	}
+}

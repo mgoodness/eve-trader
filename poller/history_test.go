@@ -38,6 +38,10 @@ func (g *historyGateway) FetchHistory(_ context.Context, typeID int) ([]esi.Hist
 func (*historyGateway) FetchCharacterSkills(context.Context, int, string) (esi.Skills, error) {
 	return esi.Skills{}, nil
 }
+func (*historyGateway) FetchCharacterStandings(context.Context, int, string) ([]esi.Standing, error) {
+	return nil, nil
+}
+func (*historyGateway) FetchStationOwner(context.Context, int64) (int64, error) { return 0, nil }
 func (*historyGateway) FetchWalletTransactions(context.Context, int, string, int64) ([]esi.WalletTransaction, error) {
 	return nil, nil
 }

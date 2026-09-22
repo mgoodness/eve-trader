@@ -70,7 +70,7 @@ func TestAuthLoginRedirectsToEVESSO(t *testing.T) {
 		"response_type":         "code",
 		"client_id":             "test-client-id",
 		"redirect_uri":          "http://example.com/auth/callback",
-		"scope":                 "esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-markets.read_character_orders.v1 esi-contracts.read_character_contracts.v1",
+		"scope":                 "esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-markets.read_character_orders.v1 esi-contracts.read_character_contracts.v1 esi-characters.read_standings.v1",
 		"code_challenge_method": "S256",
 	} {
 		if got := q.Get(key); got != want {

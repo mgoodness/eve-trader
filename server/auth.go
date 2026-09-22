@@ -40,15 +40,17 @@ type AuthConfig struct {
 
 const (
 	ssoAuthorizeEndpoint = "https://login.eveonline.com/v2/oauth/authorize"
-	// ssoScope is v2's expanded scope set (docs/spec/v2.md §6): v1's
+	// ssoScope is v2's expanded scope set (docs/spec/v2.md §6, §9): v1's
 	// character-skills scope, plus wallet, orders, and contracts read
-	// access for the ledger. Because the scope set changed after v1
-	// shipped, any refresh token stored before this change was granted
-	// under the narrower v1 scope and stays that way -- refreshing a token
-	// does not widen its scope. The owner must visit /auth/login once
-	// more (the "Re-authenticate with EVE" banner's link) to re-consent
-	// and mint a token that actually carries the new scopes.
-	ssoScope = "esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-markets.read_character_orders.v1 esi-contracts.read_character_contracts.v1"
+	// access for the ledger, and standings for the broker-fee fast-follow.
+	// Because the scope set changed after v1 (and again for standings),
+	// any refresh token stored before a change was granted under the
+	// narrower scope and stays that way -- refreshing a token does not
+	// widen its scope. The owner must visit /auth/login once more (the
+	// "Re-authenticate with EVE" banner's link); the standings fetch
+	// latches that banner if a token refreshes fine but lacks the new
+	// scope.
+	ssoScope = "esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-markets.read_character_orders.v1 esi-contracts.read_character_contracts.v1 esi-characters.read_standings.v1"
 
 	pkceCookieName = "eve_trader_pkce"
 	pkceCookiePath = "/auth"
@@ -139,15 +141,10 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Access tokens are never written to disk -- only used in-memory,
-	// here, to fetch the character's skills.
-	skills, err := s.gateway.FetchCharacterSkills(ctx, token.CharacterID, token.AccessToken)
-	if err != nil {
-		s.authFail(w, http.StatusBadGateway, "auth callback: fetching character skills", "fetching character skills", err)
-		return
-	}
-
-	if err := s.upsertCharacterSkill(ctx, token.CharacterID, skills, now); err != nil {
-		s.authFail(w, http.StatusInternalServerError, "auth callback: storing character_skill", "storing character skills", err)
+	// here, to fetch the character's fee-relevant skills and standings and
+	// the Rens station's owner.
+	if err := s.refreshTradingProfile(ctx, token.CharacterID, token.AccessToken); err != nil {
+		s.authFail(w, http.StatusBadGateway, "auth callback: fetching trading profile", "fetching character profile", err)
 		return
 	}
 

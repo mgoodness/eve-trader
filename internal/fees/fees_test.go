@@ -9,16 +9,24 @@ import (
 
 func TestBrokerFeeRate(t *testing.T) {
 	tests := []struct {
-		level int
-		want  float64
+		name                          string
+		level                         int
+		corpStanding, factionStanding float64
+		want                          float64
 	}{
-		{0, 0.03},
-		{4, 0.018},
-		{5, 0.015},
+		{"no standings", 0, 0, 0, 0.03},
+		{"skill only, no standings", 4, 0, 0, 0.018},
+		{"max skill, no standings", 5, 0, 0, 0.015},
+		// −0.03%×10 − 0.02%×10 = −0.5%, so 3% − 0.5% = 2.5% at level 0.
+		{"max positive standings", 0, 10, 10, 0.025},
+		// Max skill and max standings reach EVE's 1% floor.
+		{"max skill and standings", 5, 10, 10, 0.01},
+		// Negative standings raise the rate above 3%.
+		{"negative standings", 0, -10, -10, 0.035},
 	}
 	for _, tc := range tests {
-		if got := fees.BrokerFeeRate(tc.level); math.Abs(got-tc.want) > 1e-12 {
-			t.Errorf("BrokerFeeRate(%d) = %v, want %v", tc.level, got, tc.want)
+		if got := fees.BrokerFeeRate(tc.level, tc.corpStanding, tc.factionStanding); math.Abs(got-tc.want) > 1e-12 {
+			t.Errorf("%s: BrokerFeeRate(%d, %v, %v) = %v, want %v", tc.name, tc.level, tc.corpStanding, tc.factionStanding, got, tc.want)
 		}
 	}
 }

@@ -21,6 +21,11 @@ type Fake struct {
 	Skills         Skills
 	FetchSkillsErr error
 
+	Standings            []Standing
+	FetchStandingsErr    error
+	StationOwner         int64
+	FetchStationOwnerErr error
+
 	WalletTransactions         []WalletTransaction
 	FetchWalletTransactionsErr error
 
@@ -83,6 +88,24 @@ func (f *Fake) FetchCharacterSkills(ctx context.Context, characterID int, access
 		return Skills{}, f.FetchSkillsErr
 	}
 	return f.Skills, nil
+}
+
+// FetchCharacterStandings returns the seeded Standings, or
+// FetchStandingsErr if set.
+func (f *Fake) FetchCharacterStandings(ctx context.Context, characterID int, accessToken string) ([]Standing, error) {
+	if f.FetchStandingsErr != nil {
+		return nil, f.FetchStandingsErr
+	}
+	return f.Standings, nil
+}
+
+// FetchStationOwner returns the seeded StationOwner, or
+// FetchStationOwnerErr if set.
+func (f *Fake) FetchStationOwner(ctx context.Context, stationID int64) (int64, error) {
+	if f.FetchStationOwnerErr != nil {
+		return 0, f.FetchStationOwnerErr
+	}
+	return f.StationOwner, nil
 }
 
 // FetchWalletTransactions returns the seeded WalletTransactions, or

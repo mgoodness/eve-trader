@@ -31,6 +31,10 @@ func (*scriptedGateway) FetchHistory(context.Context, int) ([]esi.HistoryPoint, 
 func (*scriptedGateway) FetchCharacterSkills(context.Context, int, string) (esi.Skills, error) {
 	return esi.Skills{}, nil
 }
+func (*scriptedGateway) FetchCharacterStandings(context.Context, int, string) ([]esi.Standing, error) {
+	return nil, nil
+}
+func (*scriptedGateway) FetchStationOwner(context.Context, int64) (int64, error) { return 0, nil }
 func (*scriptedGateway) FetchWalletTransactions(context.Context, int, string, int64) ([]esi.WalletTransaction, error) {
 	return nil, nil
 }

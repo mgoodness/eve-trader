@@ -137,6 +137,32 @@ func SeedSkillsWithAdvancedBrokerRelations(t *testing.T, sqlDB *sql.DB, characte
 	}
 }
 
+// SeedStanding inserts one character_standing row with the unmodified
+// standing (ESI's −10…+10 scale) for fromType/fromID.
+func SeedStanding(t *testing.T, sqlDB *sql.DB, characterID, fromID int, fromType string, standing float64) {
+	t.Helper()
+	if _, err := sqlDB.Exec(
+		`INSERT INTO character_standing (character_id, from_id, from_type, standing, updated_at)
+		 VALUES (?, ?, ?, ?, '2024-01-01T00:00:00Z')`,
+		characterID, fromID, fromType, standing,
+	); err != nil {
+		t.Fatalf("seeding character_standing (%s %d): %v", fromType, fromID, err)
+	}
+}
+
+// SeedStationOwner inserts the owner_corp_id that GET /universe/stations/{id}
+// reports for stationID.
+func SeedStationOwner(t *testing.T, sqlDB *sql.DB, stationID, ownerCorpID int64) {
+	t.Helper()
+	if _, err := sqlDB.Exec(
+		`INSERT INTO station_owner (station_id, owner_corp_id, updated_at)
+		 VALUES (?, ?, '2024-01-01T00:00:00Z')`,
+		stationID, ownerCorpID,
+	); err != nil {
+		t.Fatalf("seeding station_owner %d: %v", stationID, err)
+	}
+}
+
 // SeedToken inserts the single esi_token row, AES-GCM-encrypting
 // refreshToken with tokenKey exactly as the auth callback does. Tests that
 // exercise authenticated routes (the opportunity table) need this: without a

@@ -1,8 +1,9 @@
 // Package fees holds eve-trader's broker-fee and sales-tax formulas in
 // one place, so the opportunity ranking and the portfolio P/L engine agree
-// on them (docs/spec/v2.md §4.3, §4.4). Standings are deliberately omitted
-// in v2 (§9): every figure is a pessimistic upper bound for a character
-// with non-negative standings.
+// on them (docs/spec/v2.md §4.3, §4.4, §9). The broker-fee rate folds in
+// the station owner's corporation and faction standings additively; both
+// are passed in so this package stays a pure formula with no database or
+// ESI dependency.
 package fees
 
 import "math"
@@ -10,9 +11,19 @@ import "math"
 // MinFee is the ISK floor on a single broker fee, placement or modify.
 const MinFee = 100.0
 
-// BrokerFeeRate is R_b for a given Broker Relations skill level.
-func BrokerFeeRate(brokerRelationsLevel int) float64 {
-	return 0.03 - 0.003*float64(brokerRelationsLevel)
+// BrokerFeeRate is R_b for a given Broker Relations skill level and the
+// character's standings toward the station's owner corporation and that
+// corporation's faction (docs/spec/v2.md §9). Standings are on ESI's
+// −10…+10 scale; a missing standing is 0.
+//
+//	R_b = 3% − 0.3%×BrokerRelations − 0.03%×factionStanding − 0.02%×corpStanding
+//
+// The terms are additive, and the formula is linear: positive standings
+// reduce the fee (to EVE's 1% floor at +10/+10), negative standings raise
+// it above 3% (research/standings-broker-fees). The per-order 100 ISK
+// floor is applied by PlacementFee/ModifyFee, not here.
+func BrokerFeeRate(brokerRelationsLevel int, corpStanding, factionStanding float64) float64 {
+	return 0.03 - 0.003*float64(brokerRelationsLevel) - 0.0002*corpStanding - 0.0003*factionStanding
 }
 
 // SalesTaxRate is R_t for a given Accounting skill level.
