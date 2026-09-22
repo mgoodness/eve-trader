@@ -55,6 +55,12 @@ func (*namesGateway) FetchCharacterContracts(context.Context, int, string) ([]es
 func (*namesGateway) FetchContractItems(context.Context, int, string, int64) ([]esi.ContractItem, error) {
 	return nil, nil
 }
+func (*namesGateway) FetchCharacterOrders(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
+func (*namesGateway) FetchCharacterOrderHistory(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
 func (*namesGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }

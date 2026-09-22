@@ -88,6 +88,7 @@ func run() error {
 	go serverHandler.NewSkillPoller(server.CharacterSkillsInterval).Run(ctx)
 	go serverHandler.NewWalletPoller(server.WalletSyncInterval).Run(ctx)
 	go serverHandler.NewContractPoller(server.ContractSyncInterval).Run(ctx)
+	go serverHandler.NewCharacterOrderPoller(server.CharacterOrdersInterval).Run(ctx)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           serverHandler,

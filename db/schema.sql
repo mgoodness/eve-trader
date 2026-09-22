@@ -184,3 +184,34 @@ CREATE TABLE IF NOT EXISTS manual_transfer (
   created_at    TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_manual_transfer_type_id ON manual_transfer(type_id);
+
+-- The character's own market orders, snapshotted by (order_id, issued) so
+-- that an in-place modify (same order_id, a new issued) survives as a new
+-- row rather than overwriting the prior snapshot, and cancel-and-recreate
+-- re-list chains stay inferable (docs/spec/v2.md §3, §5). Distinct from
+-- the public Rens book in market_order. state is '' for open orders and
+-- 'cancelled'/'expired' for order-history rows; ESI omits is_buy_order for
+-- sell orders, which is stored as 0. The order_range column carries ESI's
+-- `range` field (`range` is a SQL keyword).
+CREATE TABLE IF NOT EXISTS character_order (
+  order_id        INTEGER NOT NULL,
+  issued          TEXT    NOT NULL,   -- ISO8601; with order_id, the snapshot key
+  type_id         INTEGER NOT NULL,
+  location_id     INTEGER NOT NULL,
+  is_buy_order    INTEGER NOT NULL,   -- 0/1; ESI omits it for sell orders
+  price           REAL    NOT NULL,
+  volume_remain   INTEGER NOT NULL,
+  volume_total    INTEGER NOT NULL,
+  min_volume      INTEGER NOT NULL,
+  duration        INTEGER NOT NULL,
+  state           TEXT    NOT NULL,   -- '' open; 'cancelled'/'expired' history
+  is_corporation  INTEGER NOT NULL,   -- 0/1
+  region_id       INTEGER NOT NULL,
+  order_range     TEXT    NOT NULL,
+  escrow          REAL    NOT NULL,
+  updated_at      TEXT    NOT NULL,
+  PRIMARY KEY (order_id, issued)
+);
+-- Re-list chains are reconstructed by matching (type_id, location_id, side)
+-- and ordering by issued, so that tuple is the access path (docs/spec/v2.md §3).
+CREATE INDEX IF NOT EXISTS idx_character_order_relist ON character_order(type_id, location_id, is_buy_order, issued);

@@ -51,6 +51,12 @@ func (*historyGateway) FetchCharacterContracts(context.Context, int, string) ([]
 func (*historyGateway) FetchContractItems(context.Context, int, string, int64) ([]esi.ContractItem, error) {
 	return nil, nil
 }
+func (*historyGateway) FetchCharacterOrders(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
+func (*historyGateway) FetchCharacterOrderHistory(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
 func (*historyGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }

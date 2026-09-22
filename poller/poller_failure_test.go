@@ -41,6 +41,12 @@ func (*failingOrdersGateway) FetchCharacterContracts(context.Context, int, strin
 func (*failingOrdersGateway) FetchContractItems(context.Context, int, string, int64) ([]esi.ContractItem, error) {
 	return nil, nil
 }
+func (*failingOrdersGateway) FetchCharacterOrders(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
+func (*failingOrdersGateway) FetchCharacterOrderHistory(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
 func (*failingOrdersGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }

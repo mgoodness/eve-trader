@@ -33,6 +33,11 @@ type Fake struct {
 	ContractItems         map[int64][]ContractItem
 	FetchContractItemsErr error
 
+	CharacterOrders               []CharacterOrder
+	FetchCharacterOrdersErr       error
+	CharacterOrderHistory         []CharacterOrder
+	FetchCharacterOrderHistoryErr error
+
 	ExchangeCodeToken Token
 	ExchangeCodeErr   error
 
@@ -129,6 +134,24 @@ func (f *Fake) FetchContractItems(ctx context.Context, characterID int, accessTo
 		return nil, f.FetchContractItemsErr
 	}
 	return f.ContractItems[contractID], nil
+}
+
+// FetchCharacterOrders returns the seeded CharacterOrders, or
+// FetchCharacterOrdersErr if set.
+func (f *Fake) FetchCharacterOrders(ctx context.Context, characterID int, accessToken string) ([]CharacterOrder, error) {
+	if f.FetchCharacterOrdersErr != nil {
+		return nil, f.FetchCharacterOrdersErr
+	}
+	return f.CharacterOrders, nil
+}
+
+// FetchCharacterOrderHistory returns the seeded CharacterOrderHistory, or
+// FetchCharacterOrderHistoryErr if set.
+func (f *Fake) FetchCharacterOrderHistory(ctx context.Context, characterID int, accessToken string) ([]CharacterOrder, error) {
+	if f.FetchCharacterOrderHistoryErr != nil {
+		return nil, f.FetchCharacterOrderHistoryErr
+	}
+	return f.CharacterOrderHistory, nil
 }
 
 // ExchangeCode returns the seeded ExchangeCodeToken, or ExchangeCodeErr if
