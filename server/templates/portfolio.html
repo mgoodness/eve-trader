@@ -74,6 +74,28 @@
   {{range .Groups}}
   <section class="group">
     <h2>{{.Title}} <span class="count">{{.Count}}</span></h2>
+    {{if .Orders}}
+    {{if .RelistGains}}
+    <table>
+      <thead>
+        <tr>
+          <th>Item / location</th><th>Qty</th><th>Current</th><th>Suggested</th><th>Net gain</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .RelistGains}}
+        <tr data-order-id="{{.OrderID}}">
+          <td>{{.Name}} <span class="muted">{{fmtLocation .LocationID}}</span></td>
+          <td>{{fmtQty .VolumeRemain}}</td>
+          <td>{{fmtPrice .OldPrice}}</td>
+          <td>{{fmtPrice .NewPrice}}</td>
+          <td class="pos">{{fmtSignedISK .NetGain}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}<p class="empty-group">None.</p>{{end}}
+    {{else}}
     {{if .Positions}}
     <table>
       <thead>
@@ -101,6 +123,7 @@
       </tbody>
     </table>
     {{else}}<p class="empty-group">None.</p>{{end}}
+    {{end}}
   </section>
   {{end}}
   <p class="footnote">Profit figures are net of estimated broker fees and sales tax; broker fees include your Broker Relations skill and your standings toward the Rens station owner and its faction. Per-item fees are estimates: ESI does not link a fee to an order or item, so fees are attributed from order snapshots. Unattributed fees are mostly re-lists, and the forecast's high end shares them across positions. Portfolio data can be up to an hour stale.</p>
