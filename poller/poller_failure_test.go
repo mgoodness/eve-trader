@@ -16,7 +16,7 @@ type failingOrdersGateway struct {
 	err    error
 }
 
-func (g *failingOrdersGateway) FetchRensOrders(context.Context) ([]esi.Order, error) {
+func (g *failingOrdersGateway) FetchRegionOrders(context.Context) ([]esi.Order, error) {
 	return g.orders, g.err
 }
 func (*failingOrdersGateway) FetchTypeNames(context.Context, []int) (map[int]string, error) {

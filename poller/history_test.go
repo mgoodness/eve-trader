@@ -22,7 +22,9 @@ type historyGateway struct {
 	calls []int
 }
 
-func (g *historyGateway) FetchRensOrders(context.Context) ([]esi.Order, error) { return g.orders, nil }
+func (g *historyGateway) FetchRegionOrders(context.Context) ([]esi.Order, error) {
+	return g.orders, nil
+}
 func (*historyGateway) FetchTypeNames(context.Context, []int) (map[int]string, error) {
 	return nil, nil
 }

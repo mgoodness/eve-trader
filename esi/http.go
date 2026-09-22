@@ -51,7 +51,7 @@ func (g *HTTPGateway) base() string {
 	return "https://esi.evetech.net/latest"
 }
 
-func (g *HTTPGateway) FetchRensOrders(ctx context.Context) ([]Order, error) {
+func (g *HTTPGateway) FetchRegionOrders(ctx context.Context) ([]Order, error) {
 	var out []Order
 	for page := 1; ; page++ {
 		u := fmt.Sprintf("%s/markets/%d/orders/?order_type=all&page=%d", g.base(), regionHeimatar, page)
@@ -65,16 +65,14 @@ func (g *HTTPGateway) FetchRensOrders(ctx context.Context) ([]Order, error) {
 			Min      int       `json:"min_volume"`
 			Issued   time.Time `json:"issued"`
 			Duration int       `json:"duration"`
-			Location int       `json:"location_id"`
+			Location int64     `json:"location_id"`
 		}
 		resp, err := g.get(ctx, u, "", &raw)
 		if err != nil {
 			return nil, err
 		}
 		for _, v := range raw {
-			if v.Location == RensStationID {
-				out = append(out, Order{OrderID: v.OrderID, TypeID: v.TypeID, IsBuyOrder: v.IsBuy, Price: v.Price, VolumeRemain: v.Remain, VolumeTotal: v.Total, MinVolume: v.Min, Issued: v.Issued, Duration: v.Duration})
-			}
+			out = append(out, Order{OrderID: v.OrderID, TypeID: v.TypeID, LocationID: v.Location, IsBuyOrder: v.IsBuy, Price: v.Price, VolumeRemain: v.Remain, VolumeTotal: v.Total, MinVolume: v.Min, Issued: v.Issued, Duration: v.Duration})
 		}
 		pages := resp.Header.Get("X-Pages")
 		n, _ := strconv.Atoi(pages)
@@ -283,7 +281,7 @@ func (g *HTTPGateway) FetchWalletTransactions(ctx context.Context, characterID i
 }
 
 // FetchWalletJournal returns the character's whole wallet journal, walking
-// the page/X-Pages pagination exactly like FetchRensOrders.
+// the page/X-Pages pagination exactly like FetchRegionOrders.
 func (g *HTTPGateway) FetchWalletJournal(ctx context.Context, characterID int, accessToken string) ([]WalletJournalEntry, error) {
 	var out []WalletJournalEntry
 	for page := 1; ; page++ {

@@ -17,7 +17,7 @@ type scriptedGateway struct {
 	calls     int
 }
 
-func (g *scriptedGateway) FetchRensOrders(_ context.Context) ([]esi.Order, error) {
+func (g *scriptedGateway) FetchRegionOrders(_ context.Context) ([]esi.Order, error) {
 	orders := g.snapshots[g.calls]
 	g.calls++
 	return orders, nil
@@ -97,6 +97,31 @@ func TestPollReplacesAndPrunesSnapshot(t *testing.T) {
 	}
 	if name != "Type 36" {
 		t.Fatalf("lazy name = %q, want fallback", name)
+	}
+}
+
+// TestPollPersistsOrderLocation asserts the region book's per-order station
+// survives the poll, which is what lets the ledger stay Rens-anchored while
+// the ranking reads the whole region.
+func TestPollPersistsOrderLocation(t *testing.T) {
+	database := dbtest.OpenDB(t)
+	issued := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	gateway := &scriptedGateway{snapshots: [][]esi.Order{{
+		{OrderID: 1, TypeID: 34, LocationID: 60004588, IsBuyOrder: true, Price: 5, Issued: issued},
+		{OrderID: 2, TypeID: 35, LocationID: 60004589, Price: 8, Issued: issued},
+	}}}
+	p := poller.New(gateway, database, time.Hour)
+	if err := p.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for orderID, want := range map[int64]int64{1: 60004588, 2: 60004589} {
+		var got int64
+		if err := database.QueryRow(`SELECT location_id FROM market_order WHERE order_id = ?`, orderID).Scan(&got); err != nil {
+			t.Fatalf("reading location_id for order %d: %v", orderID, err)
+		}
+		if got != want {
+			t.Errorf("order %d location_id = %d, want %d", orderID, got, want)
+		}
 	}
 }
 

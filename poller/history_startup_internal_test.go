@@ -31,8 +31,8 @@ func TestWaitForOrderBookReturnsOnceOrdersExist(t *testing.T) {
 	if _, err := sqlDB.Exec(`INSERT INTO item_type (type_id, name, updated_at) VALUES (34, 'Tritanium', '2024-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqlDB.Exec(`INSERT INTO market_order (order_id, type_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
-		VALUES (1, 34, 1, 5, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z')`); err != nil {
+	if _, err := sqlDB.Exec(`INSERT INTO market_order (order_id, type_id, location_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
+		VALUES (1, 34, 60004588, 1, 5, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 

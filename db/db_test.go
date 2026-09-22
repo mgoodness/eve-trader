@@ -250,6 +250,68 @@ func TestOpenIsIdempotent(t *testing.T) {
 	defer second.Close()
 }
 
+// TestOpenBackfillsMarketOrderLocationToRens proves the region-book
+// migration against a genuine pre-region database: a market_order table
+// with no location_id and a Rens-only row upgrades in place, the row
+// surviving with its location_id backfilled to Rens (its only possible
+// station before the region-wide poll).
+func TestOpenBackfillsMarketOrderLocationToRens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "eve-trader.db")
+
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening legacy database: %v", err)
+	}
+	if _, err := legacy.Exec(`
+		CREATE TABLE item_type (
+			type_id     INTEGER PRIMARY KEY,
+			name        TEXT    NOT NULL,
+			updated_at  TEXT    NOT NULL
+		);
+		CREATE TABLE market_order (
+			order_id       INTEGER PRIMARY KEY,
+			type_id        INTEGER NOT NULL,
+			is_buy_order   INTEGER NOT NULL,
+			price          REAL    NOT NULL,
+			volume_remain  INTEGER NOT NULL,
+			volume_total   INTEGER NOT NULL,
+			min_volume     INTEGER NOT NULL,
+			issued         TEXT    NOT NULL,
+			duration       INTEGER NOT NULL,
+			updated_at     TEXT    NOT NULL
+		);
+		INSERT INTO item_type (type_id, name, updated_at) VALUES (34, 'Tritanium', '2024-01-01T00:00:00Z');
+		INSERT INTO market_order (order_id, type_id, is_buy_order, price, volume_remain, volume_total, min_volume, issued, duration, updated_at)
+			VALUES (1, 34, 1, 5, 1000, 1000, 1, '2024-01-01T00:00:00Z', 90, '2024-01-01T00:00:00Z');
+	`); err != nil {
+		legacy.Close()
+		t.Fatalf("seeding pre-region database: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sqlDB, err := db.Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer sqlDB.Close()
+
+	var (
+		price      float64
+		locationID int64
+	)
+	if err := sqlDB.QueryRow(`SELECT price, location_id FROM market_order WHERE order_id = 1`).Scan(&price, &locationID); err != nil {
+		t.Fatalf("reading migrated row: %v", err)
+	}
+	if price != 5 {
+		t.Fatalf("price = %v, want 5 (no data loss)", price)
+	}
+	if locationID != 60004588 {
+		t.Fatalf("location_id = %d, want 60004588 (Rens backfill)", locationID)
+	}
+}
+
 func TestOpenInMemory(t *testing.T) {
 	sqlDB, err := db.Open(":memory:")
 	if err != nil {

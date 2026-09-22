@@ -159,6 +159,80 @@ func TestLoadExcludesItemsMissingEitherSideOfTheBook(t *testing.T) {
 	}
 }
 
+// TestLoadRanksOnRegionExtrema seeds a book whose Rens station and another
+// Heimatar station disagree and asserts the Opportunity's Buy/Sell are the
+// highest region buy and lowest region sell, not the Rens prices
+// (docs/adr/0005-heimatar-region-as-pricing-market.md).
+func TestLoadRanksOnRegionExtrema(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	dbtest.SeedSkills(t, sqlDB, 1, 0, 0)
+	dbtest.SeedItem(t, sqlDB, 34, "Region Ore")
+	dbtest.SeedHistory(t, sqlDB, 34, 50, 50, 50, 50, 50, 50, 50)
+
+	const otherStation = 60004589
+	// Rens book: buy 90, sell 140.
+	dbtest.SeedOrderAt(t, sqlDB, 1, 34, dbtest.RensStationID, true, 90)
+	dbtest.SeedOrderAt(t, sqlDB, 2, 34, dbtest.RensStationID, true, 89)
+	dbtest.SeedOrderAt(t, sqlDB, 3, 34, dbtest.RensStationID, false, 140)
+	dbtest.SeedOrderAt(t, sqlDB, 4, 34, dbtest.RensStationID, false, 138)
+	// Another station carries the region's best buy and best sell.
+	dbtest.SeedOrderAt(t, sqlDB, 5, 34, otherStation, true, 100)
+	dbtest.SeedOrderAt(t, sqlDB, 6, 34, otherStation, true, 99)
+	dbtest.SeedOrderAt(t, sqlDB, 7, 34, otherStation, false, 130)
+	dbtest.SeedOrderAt(t, sqlDB, 8, 34, otherStation, false, 131)
+
+	result, err := ranking.Load(t.Context(), sqlDB, ranking.Filters{})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(result.Opportunities) != 1 {
+		t.Fatalf("Load() returned %d opportunities, want 1 (%+v)", len(result.Opportunities), result.Opportunities)
+	}
+	got := result.Opportunities[0]
+	if got.Buy != 100 || got.Sell != 130 {
+		t.Errorf("Buy/Sell = %v/%v, want region extrema 100/130", got.Buy, got.Sell)
+	}
+	// R_b = 3%, R_t = 7.5%: π = 130 - 100 - 3 - 3.9 - 9.75 = 13.35.
+	if !approxEqual(got.ProfitPerUnit, 13.35) {
+		t.Errorf("ProfitPerUnit = %v, want 13.35 (region extrema)", got.ProfitPerUnit)
+	}
+}
+
+// TestLoadRealismSingleOrderCheckCountsRegionOrders seeds an item whose
+// Rens book has depth on both sides but whose region-best buy is a lone
+// order at another station. The single-order-spread filter must count
+// region orders near the region best, so the row is hidden even though its
+// Rens depth alone would have passed.
+func TestLoadRealismSingleOrderCheckCountsRegionOrders(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	dbtest.SeedSkills(t, sqlDB, 1, 0, 0)
+	dbtest.SeedItem(t, sqlDB, 35, "Thin Region Ore")
+	dbtest.SeedHistory(t, sqlDB, 35, 50, 50, 50, 50, 50, 50, 50)
+
+	const otherStation = 60004589
+	// Rens book is two-deep on each side near its own bests...
+	dbtest.SeedOrderAt(t, sqlDB, 1, 35, dbtest.RensStationID, true, 100)
+	dbtest.SeedOrderAt(t, sqlDB, 2, 35, dbtest.RensStationID, true, 99)
+	dbtest.SeedOrderAt(t, sqlDB, 3, 35, dbtest.RensStationID, false, 140)
+	dbtest.SeedOrderAt(t, sqlDB, 4, 35, dbtest.RensStationID, false, 138)
+	// ...but the region best buy is a single order far above the rest, so
+	// the region book's buy side is a thin single-order spread.
+	dbtest.SeedOrderAt(t, sqlDB, 5, 35, otherStation, true, 110)
+	dbtest.SeedOrderAt(t, sqlDB, 6, 35, otherStation, false, 130)
+	dbtest.SeedOrderAt(t, sqlDB, 7, 35, otherStation, false, 131)
+
+	result, err := ranking.Load(t.Context(), sqlDB, ranking.Filters{})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(result.Opportunities) != 0 {
+		t.Fatalf("Load() = %+v, want empty (region buy side is a single order)", result.Opportunities)
+	}
+	if result.HiddenByRealism != 1 {
+		t.Errorf("HiddenByRealism = %d, want 1", result.HiddenByRealism)
+	}
+}
+
 func TestSortReordersByColumn(t *testing.T) {
 	rows := []ranking.Opportunity{
 		{Name: "A", Buy: 100, Sell: 120, GrossMarginPct: 15, NetMarginPct: 10, ProfitPerUnit: 5, VolumePerDay: 30, ISKPerDay: 150},

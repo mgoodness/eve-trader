@@ -103,3 +103,32 @@ func TestComputePnLRelistGainUsesModifyFeeSkill(t *testing.T) {
 	}
 	assertAlmost(t, "RelistGain.NetGain at ABR 5", report.RelistGains[0].NetGain, 17180)
 }
+
+// TestComputePnLRelistGainIgnoresOtherStations seeds a cheaper sell order at
+// another Heimatar station and asserts the re-list target stays the Rens
+// best sell: the re-list gain is Rens-anchored even though market_order now
+// spans the region.
+func TestComputePnLRelistGainIgnoresOtherStations(t *testing.T) {
+	day1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	db := dbtest.OpenDB(t)
+	dbtest.SeedSkills(t, db, 123, 0, 0)
+
+	dbtest.SeedItem(t, db, 320, "Region Relist Ore")
+	seedOrderSnapshot(t, db, 7020, day1, 320, rensLocation, false, 100, 1000, 1000, "")
+	dbtest.SeedOrder(t, db, 7020, 320, false, 100) // character's own order, in the public book
+	dbtest.SeedOrder(t, db, 9021, 320, false, 120) // the real Rens best sell
+	// A better sell elsewhere in the region must not become the target.
+	dbtest.SeedOrderAt(t, db, 9022, 320, otherRegionStation, false, 200)
+
+	report, err := ledger.ComputePnL(t.Context(), db, 123)
+	if err != nil {
+		t.Fatalf("ComputePnL() error = %v", err)
+	}
+	if len(report.RelistGains) != 1 {
+		t.Fatalf("Report.RelistGains len = %d, want 1; got %+v", len(report.RelistGains), report.RelistGains)
+	}
+	if got := report.RelistGains[0].NewPrice; got != 120 {
+		t.Errorf("RelistGain.NewPrice = %v, want 120 (Rens best sell, not the region's 200)", got)
+	}
+}

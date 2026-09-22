@@ -8,28 +8,28 @@ import (
 	"github.com/mgoodness/eve-trader/esi"
 )
 
-func TestFakeFetchRensOrdersReturnsSeededOrders(t *testing.T) {
+func TestFakeFetchRegionOrdersReturnsSeededOrders(t *testing.T) {
 	want := []esi.Order{
-		{OrderID: 1, TypeID: 34, IsBuyOrder: false, Price: 5.5, VolumeRemain: 100},
+		{OrderID: 1, TypeID: 34, LocationID: 60004588, IsBuyOrder: false, Price: 5.5, VolumeRemain: 100},
 	}
 	fake := &esi.Fake{Orders: want}
 
-	got, err := fake.FetchRensOrders(t.Context())
+	got, err := fake.FetchRegionOrders(t.Context())
 	if err != nil {
-		t.Fatalf("FetchRensOrders() error = %v", err)
+		t.Fatalf("FetchRegionOrders() error = %v", err)
 	}
 	if len(got) != 1 || got[0] != want[0] {
-		t.Fatalf("FetchRensOrders() = %+v, want %+v", got, want)
+		t.Fatalf("FetchRegionOrders() = %+v, want %+v", got, want)
 	}
 }
 
-func TestFakeFetchRensOrdersReturnsSeededError(t *testing.T) {
+func TestFakeFetchRegionOrdersReturnsSeededError(t *testing.T) {
 	wantErr := errors.New("esi down")
 	fake := &esi.Fake{FetchOrdersErr: wantErr}
 
-	_, err := fake.FetchRensOrders(t.Context())
+	_, err := fake.FetchRegionOrders(t.Context())
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("FetchRensOrders() error = %v, want %v", err, wantErr)
+		t.Fatalf("FetchRegionOrders() error = %v, want %v", err, wantErr)
 	}
 }
 

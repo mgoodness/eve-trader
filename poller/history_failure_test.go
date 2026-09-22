@@ -16,7 +16,7 @@ type failingHistoryGateway struct {
 	err     error
 }
 
-func (*failingHistoryGateway) FetchRensOrders(context.Context) ([]esi.Order, error) {
+func (*failingHistoryGateway) FetchRegionOrders(context.Context) ([]esi.Order, error) {
 	return nil, nil
 }
 func (*failingHistoryGateway) FetchTypeNames(context.Context, []int) (map[int]string, error) {

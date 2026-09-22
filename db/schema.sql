@@ -6,10 +6,14 @@
 -- No order-level history is kept; market_history carries each day's
 -- aggregate price figures alongside its volume.
 
--- Current Rens order book. Upserted + hard-pruned every poll (~5 min).
+-- Current Heimatar-region order book: every station's orders. Upserted +
+-- hard-pruned every poll (~5 min). location_id is the station an order
+-- rests at; the ranking reads the whole table (region extrema), while the
+-- ledger filters it to Rens (60004588) to stay at the execution venue.
 CREATE TABLE IF NOT EXISTS market_order (
   order_id       INTEGER PRIMARY KEY,
   type_id        INTEGER NOT NULL REFERENCES item_type(type_id),
+  location_id    INTEGER NOT NULL,   -- station the order rests at
   is_buy_order   INTEGER NOT NULL,   -- 0/1
   price          REAL    NOT NULL,
   volume_remain  INTEGER NOT NULL,
@@ -42,9 +46,9 @@ CREATE TABLE IF NOT EXISTS market_history (
   PRIMARY KEY (type_id, date)
 );
 
--- Lazy display-name cache. Populated the first time a type_id is seen in a
--- Rens pull; refreshed on a long cadence (e.g. weekly). Also stands in for
--- the "Rens-tradable" item set -- no separate curated catalog.
+-- Lazy display-name cache. Populated the first time a type_id is seen in an
+-- order poll; refreshed on a long cadence (e.g. weekly). Also stands in for
+-- the tradable item set -- no separate curated catalog.
 CREATE TABLE IF NOT EXISTS item_type (
   type_id     INTEGER PRIMARY KEY,
   name        TEXT    NOT NULL,
