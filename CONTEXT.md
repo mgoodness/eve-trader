@@ -1,11 +1,11 @@
 # eve-trader
 
-A single-user tool that finds station-trading opportunities at Rens in EVE Online's Heimatar region.
+A single-user tool that ranks Heimatar-region trading opportunities and tracks the character's Rens-anchored portfolio in EVE Online.
 
 ## Language
 
 **Opportunity**:
-An item that has both a best buy order and a best sell order at Rens, clears the always-on realism filters, and clears the active user filters.
+An item that has a Region best buy and a Region best sell in Heimatar, clears the always-on realism filters, and clears the active user filters. The list ranks region-wide prices; it does not require an order at Rens.
 _Avoid_: trade, deal, flip
 
 **User filter**:
@@ -13,15 +13,27 @@ One of the four trader-adjustable bounds applied after the realism filters: mini
 _Avoid_: filters, criteria, v1 thresholds
 
 **Rens**:
-The NPC station in the Heimatar region where every trade in scope takes place.
+The NPC station where the character's own orders are placed and filled. The execution venue, and the location positions and P/L are anchored to -- not the market the Opportunity list ranks.
 _Avoid_: station, market
 
 **Heimatar**:
-The region whose market history supplies the volume figures; volume is region-wide, not station-specific.
-_Avoid_: region, market
+The region, treated as one market: its aggregate order book supplies the Region best buy and Region best sell every Opportunity is ranked on, and its market history supplies the volume figures.
+_Avoid_: station, venue
+
+**Region best buy**:
+The highest buy order price anywhere in Heimatar's order book.
+_Avoid_: Rens best buy
+
+**Region best sell**:
+The lowest sell order price anywhere in Heimatar's order book.
+_Avoid_: Rens best sell
+
+**Rens best buy / Rens best sell**:
+The best prices on the Rens station's own book. Distinct from the Region best buy and Region best sell: the Portfolio values positions at the Rens figures because that is the venue where goods are held and orders rest.
+_Avoid_: market price
 
 **Order poll**:
-The refresh of the current Rens order book — what is on the market right now.
+The refresh of the current Heimatar order book — every station's orders, what is on the region's market right now.
 _Avoid_: history refresh, sweep, snapshot
 
 **History refresh**:
