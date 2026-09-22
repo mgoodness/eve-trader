@@ -14,31 +14,18 @@ import (
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/fees"
+	"github.com/mgoodness/eve-trader/internal/skills"
 )
 
-// Skills holds the fee/tax-relevant skill levels the P/L engine needs.
-// Missing rows or skills are level 0, matching the ESI convention.
-type Skills struct {
-	BrokerRelationsLevel         int
-	AccountingLevel              int
-	AdvancedBrokerRelationsLevel int
-}
+// Skills holds the fee/tax-relevant skill levels the P/L engine needs. It
+// is the shared skills.Skills type, so a missing row resolves the same way
+// here as in the ranking.
+type Skills = skills.Skills
 
 // LoadSkills reads the single character_skill row. A missing row resolves
 // to level-0 skills rather than an error.
 func LoadSkills(ctx context.Context, db *sql.DB) (Skills, error) {
-	var s Skills
-	err := db.QueryRowContext(ctx, `
-		SELECT broker_relations_level, accounting_level, advanced_broker_relations_level
-		FROM character_skill ORDER BY character_id LIMIT 1`).Scan(
-		&s.BrokerRelationsLevel, &s.AccountingLevel, &s.AdvancedBrokerRelationsLevel)
-	if err == sql.ErrNoRows {
-		return Skills{}, nil
-	}
-	if err != nil {
-		return Skills{}, fmt.Errorf("loading character skills: %w", err)
-	}
-	return s, nil
+	return skills.Load(ctx, db)
 }
 
 // Position is one derived (item, location) row.
@@ -69,6 +56,7 @@ type Report struct {
 	EstimatedFees    float64
 	UnattributedFees float64
 	SunkFees         float64
+	PendingFees      float64 // charged open-order fees not yet in cost basis
 	JournalFees      float64 // actual brokers_fee + transaction_tax from the journal
 	TransferGainLoss float64
 }
@@ -122,11 +110,13 @@ func ComputePnL(ctx context.Context, db *sql.DB, characterID int) (Report, error
 	// Remaining held quantity is marked to the Rens best sell, net of an
 	// estimated fresh sell fee and sales tax; no market means no fabricated
 	// price (docs/spec/v2.md §4.6).
-	var sunkSell float64
+	var sunk, pending float64
 	for _, o := range orders {
-		sunkSell += o.SunkFee
+		sunk += o.SunkFee
+		pending += o.Pending
 	}
-	report.SunkFees = sunkSell
+	report.SunkFees = sunk
+	report.PendingFees = pending
 
 	positions := finalizePositions(state, prices, names, relistCounts, rt, rb)
 	for _, p := range positions {
@@ -134,7 +124,9 @@ func ComputePnL(ctx context.Context, db *sql.DB, characterID int) (Report, error
 	}
 	report.Positions = positions
 	report.JournalFees = journalFees
-	report.UnattributedFees = journalFees - report.EstimatedFees - report.SunkFees
+	// Pending open-order fees are charged cash but not yet in cost basis;
+	// they are neither unattributed nor sunk (docs/spec/v2.md §4.4).
+	report.UnattributedFees = journalFees - report.EstimatedFees - report.SunkFees - report.PendingFees
 	return report, nil
 }
 
@@ -208,6 +200,7 @@ type order struct {
 	MatchedQty  int
 	Allocated   float64
 	SunkFee     float64
+	Pending     float64
 }
 
 func loadOrders(ctx context.Context, db *sql.DB, rb, abr float64) ([]*order, error) {
@@ -293,11 +286,10 @@ func (o *order) estimateFee(rb, abr float64) {
 	o.Closed = last.State != "" || last.VolumeRemain == 0
 }
 
-// matchTransactions attributes each transaction to the re-list chain that
-// most plausibly filled it: same (type, location, side), a price the chain
-// ever rested at, issued at or before the fill, and -- among those -- the
-// most recently issued. Unmatched transactions fall back to a fresh
-// placement-fee estimate.
+// matchTransactions attributes fills to re-list chains and returns each
+// transaction's estimated broker fee: a share of its chain's fee, or a
+// fresh placement-fee estimate when the chain is unknown (a fully-filled
+// order vanishes from the order routes).
 func matchTransactions(txs []transaction, orders []*order, rb float64) []float64 {
 	attributed := make([]*order, len(txs))
 	matched := map[*order]int{}
@@ -309,18 +301,21 @@ func matchTransactions(txs []transaction, orders []*order, rb float64) []float64
 		}
 	}
 	// Allocate each chain's fee to filled units, then split that across the
-	// fills proportionally to quantity.
+	// fills proportionally to quantity. An open chain's unfilled share is
+	// pending; a closed chain's is sunk.
 	for _, o := range orders {
-		m := matched[o]
-		if m > o.VolumeTotal {
-			m = o.VolumeTotal
+		matchedQty := matched[o]
+		if matchedQty > o.VolumeTotal {
+			matchedQty = o.VolumeTotal
 		}
-		o.MatchedQty = m
+		o.MatchedQty = matchedQty
 		if o.VolumeTotal > 0 {
-			o.Allocated = o.Fee * float64(m) / float64(o.VolumeTotal)
+			o.Allocated = o.Fee * float64(matchedQty) / float64(o.VolumeTotal)
 		}
 		if o.Closed {
 			o.SunkFee = o.Fee - o.Allocated
+		} else {
+			o.Pending = o.Fee - o.Allocated
 		}
 	}
 	shares := make([]float64, len(txs))

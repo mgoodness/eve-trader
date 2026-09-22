@@ -13,6 +13,7 @@ import (
 	"sort"
 
 	"github.com/mgoodness/eve-trader/internal/fees"
+	"github.com/mgoodness/eve-trader/internal/skills"
 )
 
 // CaptureRate is the fixed fraction of an item's average daily
@@ -60,11 +61,9 @@ type Opportunity struct {
 }
 
 // Skills holds the fee/tax-relevant skill levels used in the ranking
-// formula: Broker Relations and Accounting active_skill_level.
-type Skills struct {
-	BrokerRelationsLevel int
-	AccountingLevel      int
-}
+// formula. It is the shared skills.Skills type so ranking and the portfolio
+// loader agree on how a missing row resolves.
+type Skills = skills.Skills
 
 // BrokerFeeRate is R_b, the broker fee rate charged on both the buy and
 // sell side, for a given Broker Relations skill level. The standings term
@@ -305,17 +304,7 @@ func Load(ctx context.Context, db *sql.DB, filters Filters) (Result, error) {
 // that need the fee-relevant skills outside a ranking pass -- e.g. the
 // skills-derived minimum-margin default -- use it directly.
 func LoadSkills(ctx context.Context, db *sql.DB) (Skills, error) {
-	var s Skills
-	err := db.QueryRowContext(ctx,
-		`SELECT broker_relations_level, accounting_level FROM character_skill ORDER BY character_id LIMIT 1`,
-	).Scan(&s.BrokerRelationsLevel, &s.AccountingLevel)
-	if err == sql.ErrNoRows {
-		return Skills{}, nil
-	}
-	if err != nil {
-		return Skills{}, fmt.Errorf("loading character skills: %w", err)
-	}
-	return s, nil
+	return skills.Load(ctx, db)
 }
 
 // Sort reorders rows in place by the given column key: "buy", "sell",

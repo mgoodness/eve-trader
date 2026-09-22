@@ -72,7 +72,7 @@ type pnlFixture struct {
 }
 
 func TestComputePnL(t *testing.T) {
-	for _, f := range []pnlFixture{buySellFixture(), modifyFixture(), transferFixture(), sunkFixture(), vanishedOrderFixture()} {
+	for _, f := range []pnlFixture{buySellFixture(), modifyFixture(), transferFixture(), sunkFixture(), vanishedOrderFixture(), pendingFixture()} {
 		t.Run(f.name, func(t *testing.T) {
 			db := dbtest.OpenDB(t)
 			f.seed(t, db)
@@ -289,6 +289,35 @@ func vanishedOrderFixture() pnlFixture {
 	}
 }
 
+// pendingFixture: an open, partially-filled buy order. The unfilled half's
+// placement fee is pending -- charged cash but not yet in cost basis -- not
+// unattributed (docs/spec/v2.md §4.4).
+func pendingFixture() pnlFixture {
+	day1 := time.Date(2024, 4, 1, 10, 0, 0, 0, time.UTC)
+	return pnlFixture{
+		name: "open partially-filled order fee is pending",
+		seed: func(t *testing.T, db *sql.DB) {
+			t.Helper()
+			dbtest.SeedItem(t, db, 40, "Tritanium")
+			dbtest.SeedSkills(t, db, 123, 0, 0)
+			seedTx(t, db, 9, day1, 40, 1000, 10, true, rensLocation)
+			seedOrderSnapshot(t, db, 30, day1, 40, rensLocation, true, 10, 1000, 2000, "")
+			seedJournal(t, db, [2]any{"brokers_fee", -600.0})
+		},
+		wantReport: ledger.Report{
+			EstimatedFees: 300,
+			PendingFees:   300,
+			JournalFees:   600,
+		},
+		wantPositions: map[int]ledger.Position{
+			40: {
+				TypeID: 40, LocationID: rensLocation, Quantity: 1000, AverageCost: 10.3,
+				CostBasis: 10300, EstimatedFees: 300,
+			},
+		},
+	}
+}
+
 func positionByType(positions []ledger.Position, typeID int) (ledger.Position, bool) {
 	for _, p := range positions {
 		if p.TypeID == typeID {
@@ -306,6 +335,7 @@ func assertReport(t *testing.T, got, want ledger.Report) {
 		"EstimatedFees":    {got.EstimatedFees, want.EstimatedFees},
 		"UnattributedFees": {got.UnattributedFees, want.UnattributedFees},
 		"SunkFees":         {got.SunkFees, want.SunkFees},
+		"PendingFees":      {got.PendingFees, want.PendingFees},
 		"JournalFees":      {got.JournalFees, want.JournalFees},
 		"TransferGainLoss": {got.TransferGainLoss, want.TransferGainLoss},
 	} {

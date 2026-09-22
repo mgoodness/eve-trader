@@ -157,6 +157,48 @@ func TestLoadTransfersIgnoresUnfinishedContracts(t *testing.T) {
 	}
 }
 
+func TestLoadTransfersSplitsContractPriceAcrossItems(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	const characterID = 123
+	issued := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
+
+	// A two-item handoff carries one whole-contract price; each item stack
+	// must get a share, not the full price.
+	seedContract(t, sqlDB, 6001, characterID, 900, "item_exchange", 1_000_000, issued)
+	seedContractItem(t, sqlDB, 6001, 1, 34, 100, true)
+	seedContractItem(t, sqlDB, 6001, 2, 35, 200, true)
+
+	got, err := ledger.LoadTransfers(t.Context(), sqlDB, characterID)
+	if err != nil {
+		t.Fatalf("LoadTransfers() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("LoadTransfers() = %+v, want two items", got)
+	}
+	for _, tr := range got {
+		if tr.Price != 500_000 {
+			t.Errorf("transfer %d price = %v, want 500000 (half the contract price)", tr.TypeID, tr.Price)
+		}
+	}
+}
+
+func TestLoadTransfersValuesSingleItemContractAtFullPrice(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	const characterID = 123
+	issued := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
+
+	seedContract(t, sqlDB, 6002, characterID, 900, "item_exchange", 750_000, issued)
+	seedContractItem(t, sqlDB, 6002, 1, 34, 100, true)
+
+	got, err := ledger.LoadTransfers(t.Context(), sqlDB, characterID)
+	if err != nil {
+		t.Fatalf("LoadTransfers() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Price != 750_000 {
+		t.Fatalf("LoadTransfers() = %+v, want one transfer at the full contract price", got)
+	}
+}
+
 func TestRecordManualTransferStoresPartialQuantity(t *testing.T) {
 	sqlDB := dbtest.OpenDB(t)
 
