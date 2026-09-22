@@ -30,7 +30,18 @@ var templateFuncs = template.FuncMap{
 		return s
 	},
 	"fmtPrice": func(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) },
-	"fmtQty":   func(n int) string { return formatThousands(int64(n)) },
+	// fmtPriceRange headlines the conservative high end and shows the
+	// confidently-allocated low end beside it, so a precise-looking number
+	// never hides the unattributed-fee allocation guess (docs/spec/v2.md
+	// §4.7). A collapsed range renders as the single headline price.
+	"fmtPriceRange": func(low, high float64) string {
+		h := strconv.FormatFloat(high, 'f', 2, 64)
+		if high-low <= 1e-9 {
+			return h
+		}
+		return h + " (low " + strconv.FormatFloat(low, 'f', 2, 64) + ")"
+	},
+	"fmtQty": func(n int) string { return formatThousands(int64(n)) },
 	// fmtNetMargin renders a fractional net margin (0.038 -> "3.8% net").
 	"fmtNetMargin": func(v float64) string { return trimFloat(v*100) + "% net" },
 	"fmtLocation":  formatLocation,

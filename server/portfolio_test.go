@@ -220,6 +220,78 @@ func TestPortfolioGroupsPositionsByDecision(t *testing.T) {
 	}
 }
 
+// seedPortfolioForecastFixtures seeds three open positions whose allocated
+// fees (3,000 / 6,000 / 3,000) differ, plus a journal that carries 1,200 ISK
+// more in broker fees than the engine can attribute. That 1,200 ISK
+// unattributed bucket is shared across the positions for the forecast's high
+// end, so the break-even/target columns show a real low/high range.
+func seedPortfolioForecastFixtures(t *testing.T, db *sql.DB) {
+	t.Helper()
+	dbtest.SeedToken(t, db, portfolioCharacterID, testAuthConfig().TokenKey, "refresh-token")
+	dbtest.SeedSkills(t, db, portfolioCharacterID, 0, 0)
+
+	day1 := time.Date(2024, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	dbtest.SeedItem(t, db, 200, "Range A")
+	seedPortfolioTx(t, db, 100, day1, 200, 1000, 100, true)
+	seedPortfolioOrder(t, db, 200, day1, 200, true, 100, 0, 1000, "")
+	dbtest.SeedOrder(t, db, 2200, 200, false, 120)
+
+	dbtest.SeedItem(t, db, 201, "Range B")
+	seedPortfolioTx(t, db, 101, day1, 201, 1000, 200, true)
+	seedPortfolioOrder(t, db, 201, day1, 201, true, 200, 0, 1000, "")
+	dbtest.SeedOrder(t, db, 2201, 201, false, 220)
+
+	dbtest.SeedItem(t, db, 202, "Range C")
+	seedPortfolioTx(t, db, 102, day1, 202, 1000, 100, true)
+	seedPortfolioOrder(t, db, 202, day1, 202, true, 100, 0, 1000, "")
+
+	seedPortfolioJournal(t, db,
+		[2]any{"brokers_fee", -3000.0},
+		[2]any{"brokers_fee", -6000.0},
+		[2]any{"brokers_fee", -3000.0},
+		[2]any{"brokers_fee", -1200.0},
+	)
+}
+
+// TestPortfolioForecastRangeAndTargetControl covers the re-list forecast's
+// view-level control (docs/spec/v2.md §4.7): the target net margin is
+// URL-carried and defaults to 0% (Target = Break-even), and each forecast
+// column shows the conservative high end as the headline with the
+// confidently-allocated low end beside it.
+func TestPortfolioForecastRangeAndTargetControl(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	seedPortfolioForecastFixtures(t, sqlDB)
+
+	srv := httptest.NewServer(server.New(&esi.Fake{}, sqlDB, testAuthConfig()))
+	defer srv.Close()
+
+	// Default: 0% net target. Break-even high headlines 115.42 with the
+	// allocated low 115.08; at a 0% target, Target equals Break-even.
+	_, body := getBody(t, srv.URL+"/portfolio")
+	if !strings.Contains(body, `name="targetmargin"`) {
+		t.Errorf("GET /portfolio missing target-margin control; body:\n%s", body)
+	}
+	if !strings.Contains(body, `value="0"`) {
+		t.Errorf("GET /portfolio target-margin control should default to 0")
+	}
+	for _, want := range []string{"115.42 (low 115.08)", "230.84 (low 230.17)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET /portfolio body missing forecast range %q", want)
+		}
+	}
+
+	// A 5% target raises Target above break-even (121.89/122.25 for A) and
+	// round-trips the control's value.
+	_, targeted := getBody(t, srv.URL+"/portfolio?targetmargin=5")
+	if !strings.Contains(targeted, `value="5"`) {
+		t.Errorf("GET /portfolio?targetmargin=5 control did not round-trip 5")
+	}
+	if !strings.Contains(targeted, "122.25 (low 121.89)") {
+		t.Errorf("GET /portfolio?targetmargin=5 body missing the 5%% target range; body:\n%s", targeted)
+	}
+}
+
 // TestHeaderNavLinksOpportunitiesAndPortfolio asserts the header nav links
 // the two views to each other, from both pages.
 func TestHeaderNavLinksOpportunitiesAndPortfolio(t *testing.T) {

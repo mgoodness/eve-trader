@@ -33,13 +33,20 @@
   .badge.transfer { border-color: #4338ca; color: #a5b4fc; }
   .badge.muted-badge { border-color: #334155; color: #94a3b8; }
   .empty-group { color: #64748b; font-size: .8rem; margin: 0; padding: .4rem 0; }
+  .margin-control { display: flex; align-items: flex-end; gap: .5rem; margin: 0 0 1.25rem; background: #0f172a; border: 1px solid #1e293b; border-radius: .5rem; padding: .6rem .8rem; }
+  .margin-control label { display: block; color: #cbd5e1; font-size: .8rem; }
+  .margin-control input { display: block; margin-top: .3rem; width: 7rem; background: #020617; border: 1px solid #1e293b; border-radius: .35rem; color: #e2e8f0; padding: .4rem .5rem; font-size: .85rem; }
+  .margin-control button { background: #34d399; color: #06251b; border: 0; border-radius: .35rem; font-weight: 600; padding: .45rem .75rem; cursor: pointer; }
+  .margin-control a { color: #94a3b8; font-size: .8rem; text-decoration: none; padding: .45rem .25rem; }
+  .margin-control a:hover { color: #e2e8f0; }
+  .help { display: inline-block; margin-left: .25rem; width: 1rem; height: 1rem; line-height: 1rem; text-align: center; border-radius: 50%; background: #1e293b; color: #94a3b8; font-size: .7rem; cursor: help; }
 </style>
 </head>
 <body>
 <header>
   <h1>Portfolio</h1>
   {{template "nav" "portfolio"}}
-  <p class="legend"><strong>Break-even</strong> &mdash; the list price at which net proceeds cover the position's cost plus estimated sell fees (zero profit). <strong>Target</strong> &mdash; break-even plus your target net margin; it defaults to 0% net, so it equals break-even. <strong>Mkt net margin</strong> &mdash; the net margin the current Rens best sell would actually yield, shown only when positive. Re-lists are inferred from order snapshots and may undercount.</p>
+  <p class="legend"><strong>Break-even</strong> &mdash; the list price at which net proceeds cover the position's cost plus estimated sell fees (zero profit). It is a range: the headline high shares the unattributed-fee bucket, the low uses only confidently allocated fees. <strong>Target</strong> &mdash; break-even plus your target net margin, shown as the same range. <strong>Mkt net margin</strong> &mdash; the net margin the current Rens best sell would actually yield, shown only when positive. Status compares the market to break-even (costs covered), not to your target margin. Re-lists are inferred from order snapshots and may undercount.</p>
 </header>
 <main class="portfolio">
   {{if .Reauth}}
@@ -51,6 +58,13 @@
     </div>
   </section>
   {{else}}
+  <form class="margin-control" method="get" action="/portfolio">
+    <label>Target net margin %<span class="help" title="The net margin each position's Target list price must earn. Default 0% net, so Target equals Break-even.">?</span>
+      <input type="text" inputmode="decimal" name="targetmargin" value="{{.TargetNetMargin}}" title="The net margin each position's Target list price must earn. Default 0% net, so Target equals Break-even.">
+    </label>
+    <button type="submit">Apply</button>
+    <a href="/portfolio">Reset</a>
+  </form>
   <div class="stats">
     <div class="stat"><span>Realized</span><strong class="{{if lt .Summary.Realized 0.0}}neg{{else}}pos{{end}}">{{fmtSignedISK .Summary.Realized}}</strong></div>
     <div class="stat"><span>Unrealized</span><strong class="{{if lt .Summary.Unrealized 0.0}}neg{{else}}pos{{end}}">{{fmtSignedISK .Summary.Unrealized}}</strong></div>
@@ -78,8 +92,8 @@
           <td>{{if eq .Status "Closed"}}{{fmtSignedISK .Realized}}{{else if eq .Status "Transferred"}}{{fmtSignedISK .TransferGainLoss}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
           <td>{{.BuyRelists}} / {{.SellRelists}}<span class="est"> inf</span></td>
           <td>{{fmtISK .EstimatedFees}}<span class="est"> est</span></td>
-          <td>{{if .Quantity}}{{fmtPrice .BreakEven}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-          <td>{{if .Quantity}}{{fmtPrice .Target}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if .Quantity}}{{fmtPriceRange .BreakEvenLow .BreakEvenHigh}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if .Quantity}}{{fmtPriceRange .TargetLow .TargetHigh}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
           <td>{{if gt .MarketNetMargin 0.0}}<span class="pos">{{fmtNetMargin .MarketNetMargin}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
           <td><span class="badge {{statusClass .Status}}">{{.Status}}</span></td>
         </tr>
@@ -89,7 +103,7 @@
     {{else}}<p class="empty-group">None.</p>{{end}}
   </section>
   {{end}}
-  <p class="footnote">Profit figures are net of estimated broker fees and sales tax. Per-item fees are estimates: ESI does not link a fee to an order or item, so fees are attributed from order snapshots. Unattributed fees are mostly re-lists. Portfolio data can be up to an hour stale.</p>
+  <p class="footnote">Profit figures are net of estimated broker fees and sales tax. Per-item fees are estimates: ESI does not link a fee to an order or item, so fees are attributed from order snapshots. Unattributed fees are mostly re-lists, and the forecast's high end shares them across positions. Portfolio data can be up to an hour stale.</p>
   {{end}}
 </main>
 </body>

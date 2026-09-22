@@ -37,7 +37,9 @@ type Status string
 
 const (
 	// StatusAtTarget means the current best sell covers cost plus estimated
-	// sell fees -- net margin at or above the (default zero) target.
+	// sell fees -- the market clears break-even. Status is measured against
+	// break-even (0% net) independently of the view's Target net margin, so
+	// the group means "costs are covered" at any target setting.
 	StatusAtTarget Status = "At target now"
 	// StatusBelowTarget means the current best sell would sell at a loss.
 	StatusBelowTarget Status = "Below target"
@@ -67,10 +69,16 @@ type Position struct {
 	TransferredQuantity int
 	BuyRelists          int // inferred from order snapshots; may undercount
 	SellRelists         int
-	BreakEven           float64 // list price covering cost + estimated sell fees, zero profit
-	Target              float64 // break-even plus the target net margin (0% by default)
-	MarketNetMargin     float64 // net margin at the current best sell; <= 0 means below break-even
-	Status              Status
+	// BreakEvenLow/High bound the list price covering cost + estimated sell
+	// fees at zero profit (docs/spec/v2.md §4.7). Low uses only confidently
+	// allocated fees; high also shares the position's slice of the
+	// unattributed-fee bucket. The conservative high end is the headline.
+	BreakEvenLow    float64
+	BreakEvenHigh   float64
+	TargetLow       float64 // break-even plus the view's target net margin
+	TargetHigh      float64
+	MarketNetMargin float64 // net margin at the current best sell; <= 0 means below break-even
+	Status          Status
 }
 
 // Report is the whole portfolio's derived P/L.
@@ -84,12 +92,22 @@ type Report struct {
 	PendingFees      float64 // charged open-order fees not yet in cost basis
 	JournalFees      float64 // actual brokers_fee + transaction_tax from the journal
 	TransferGainLoss float64
+	TargetNetMargin  float64 // view-level target net margin used for the Target range (0 by default)
 }
 
-// ComputePnL derives the portfolio report from the ledger. characterID is
-// the tracked character, used to decide which side of a contract gave up
-// the goods. The position list is ordered by type then location.
+// ComputePnL derives the portfolio report from the ledger at the default
+// 0% target net margin, so each Target equals its Break-even. characterID
+// is the tracked character, used to decide which side of a contract gave
+// up the goods. The position list is ordered by type then location.
 func ComputePnL(ctx context.Context, db *sql.DB, characterID int) (Report, error) {
+	return ComputePnLForTarget(ctx, db, characterID, 0)
+}
+
+// ComputePnLForTarget derives the portfolio report with a view-level target
+// net margin (a fraction, e.g. 0.05 for 5%), carried from the Portfolio's
+// URL control (docs/spec/v2.md §4.7). It only moves the Target range; the
+// break-even, market-implied margin, and status are independent of it.
+func ComputePnLForTarget(ctx context.Context, db *sql.DB, characterID int, targetNetMargin float64) (Report, error) {
 	skills, err := LoadSkills(ctx, db)
 	if err != nil {
 		return Report{}, err
@@ -142,16 +160,23 @@ func ComputePnL(ctx context.Context, db *sql.DB, characterID int) (Report, error
 	}
 	report.SunkFees = sunk
 	report.PendingFees = pending
+	report.JournalFees = journalFees
+	report.TargetNetMargin = targetNetMargin
+	// Pending open-order fees are charged cash but not yet in cost basis;
+	// they are neither unattributed nor sunk (docs/spec/v2.md §4.4).
+	report.UnattributedFees = journalFees - report.EstimatedFees - report.SunkFees - report.PendingFees
 
-	positions := finalizePositions(state, prices, names, relistCounts, rt, rb)
+	// The forecast's high end shares the unattributed bucket across open
+	// positions; a negative bucket (journal missing fees) shares nothing.
+	sharing := report.UnattributedFees
+	if sharing < 0 {
+		sharing = 0
+	}
+	positions := finalizePositions(state, prices, names, relistCounts, rt, rb, targetNetMargin, sharing)
 	for _, p := range positions {
 		report.Unrealized += p.Unrealized
 	}
 	report.Positions = positions
-	report.JournalFees = journalFees
-	// Pending open-order fees are charged cash but not yet in cost basis;
-	// they are neither unattributed nor sunk (docs/spec/v2.md §4.4).
-	report.UnattributedFees = journalFees - report.EstimatedFees - report.SunkFees - report.PendingFees
 	return report, nil
 }
 
@@ -668,11 +693,20 @@ func averageCost(p *positionState) float64 {
 // the engine charges elsewhere (§4.4), so the floor cannot silently
 // disappear from a small position's forecast.
 func breakEvenPrice(cost float64, qty int, rb, rt float64) float64 {
+	return targetPrice(cost, qty, rb, rt, 0)
+}
+
+// targetPrice generalizes breakEvenPrice to a target net margin m: the list
+// price at which (net proceeds − cost) / gross equals m. With m = 0 it is
+// the break-even price. Like the break-even it honors the max(100 ISK,
+// value×R_b) broker-fee floor, and returns 0 when the margin is so high that
+// no finite price could reach it.
+func targetPrice(cost float64, qty int, rb, rt, m float64) float64 {
 	if qty <= 0 {
 		return 0
 	}
 	// First assume the percentage fee clears the 100 ISK floor.
-	denom := float64(qty) * (1 - rb - rt)
+	denom := float64(qty) * (1 - rb - rt - m)
 	if denom <= 0 {
 		return 0
 	}
@@ -680,8 +714,9 @@ func breakEvenPrice(cost float64, qty int, rb, rt float64) float64 {
 	if price*float64(qty)*rb >= fees.MinFee {
 		return price
 	}
-	// The floor dominates: net proceeds are price×qty − 100 − price×qty×R_t.
-	denomFloor := float64(qty) * (1 - rt)
+	// The floor dominates: net proceeds are price×qty − 100 − price×qty×R_t,
+	// and net margin m requires those proceeds to exceed cost by m×gross.
+	denomFloor := float64(qty) * (1 - rt - m)
 	if denomFloor <= 0 {
 		return 0
 	}
@@ -707,7 +742,18 @@ func statusFor(p *positionState, pos Position) Status {
 	}
 }
 
-func finalizePositions(state map[positionKey]*positionState, prices map[int]marketPrices, names map[int]string, relists map[positionKey]relistCount, rt, rb float64) []Position {
+func finalizePositions(state map[positionKey]*positionState, prices map[int]marketPrices, names map[int]string, relists map[positionKey]relistCount, rt, rb, targetNetMargin, unattributed float64) []Position {
+	// The high end of each forecast shares the unattributed-fee bucket in
+	// proportion to the position's confidently-allocated estimated fees, so
+	// the position most likely to have generated the unlinked re-list fees
+	// carries the most of them (docs/spec/v2.md §4.7).
+	var openFeeWeight float64
+	for _, p := range state {
+		if p.qty > 0 {
+			openFeeWeight += p.estFees
+		}
+	}
+
 	var out []Position
 	for k, p := range state {
 		if p.qty == 0 && p.realized == 0 && p.transGain == 0 && p.estFees == 0 && p.transQty == 0 {
@@ -734,6 +780,10 @@ func finalizePositions(state map[positionKey]*positionState, prices map[int]mark
 				pos.MarketSell = mp.bestSell
 				pos.LiquidationBuy = mp.bestBuy
 				if mp.hasSell {
+					// The market-implied margin and the status use the
+					// confidently-allocated fees only (the low end), so they
+					// report what the market actually yields rather than the
+					// unattributed-fee guess (re-list-forecast addendum).
 					grossValue := float64(p.qty) * mp.bestSell
 					sellFee := fees.PlacementFee(grossValue, rb)
 					tax := grossValue * rt
@@ -743,11 +793,14 @@ func finalizePositions(state map[positionKey]*positionState, prices map[int]mark
 					}
 				}
 			}
-			pos.BreakEven = breakEvenPrice(p.cost, p.qty, rb, rt)
-			// The target net margin is a view-level control defaulting to
-			// 0% net, so target equals break-even by default (docs/spec/v2.md
-			// §4.7); the URL-carried override arrives with the forecast ticket.
-			pos.Target = pos.BreakEven
+			share := 0.0
+			if unattributed > 0 && openFeeWeight > 0 {
+				share = unattributed * p.estFees / openFeeWeight
+			}
+			pos.BreakEvenLow = breakEvenPrice(p.cost, p.qty, rb, rt)
+			pos.BreakEvenHigh = breakEvenPrice(p.cost+share, p.qty, rb, rt)
+			pos.TargetLow = targetPrice(p.cost, p.qty, rb, rt, targetNetMargin)
+			pos.TargetHigh = targetPrice(p.cost+share, p.qty, rb, rt, targetNetMargin)
 		}
 		pos.Status = statusFor(p, pos)
 		out = append(out, pos)
