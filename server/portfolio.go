@@ -43,13 +43,17 @@ func parseTargetNetMargin(q url.Values) (margin float64, raw string) {
 	return v / 100, raw
 }
 
-// portfolioGroup is one decision group of the Portfolio table. Count is the
-// group's full size; Positions is empty when the group has none, so the
-// template can render the heading and an empty state.
+// portfolioGroup is one group of the Portfolio table. A positions group
+// carries decision rows; the orders group carries raise-only re-list gains,
+// which are one row per order rather than per position. Count is the group's
+// full size; the slice is empty when the group has none, so the template can
+// render the heading and an empty state.
 type portfolioGroup struct {
-	Title     string
-	Count     int
-	Positions []ledger.Position
+	Title       string
+	Orders      bool
+	Count       int
+	Positions   []ledger.Position
+	RelistGains []ledger.RelistGain
 }
 
 // portfolioSummary is the four-cell Realised / Unrealised / Fees (est) /
@@ -75,22 +79,24 @@ type portfolioData struct {
 }
 
 // portfolioGroupOrder is the decision order the table renders in
-// (docs/spec/v2.md §7). "Orders worth moving" slots in beside these when
-// the re-list-gain ticket lands.
+// (docs/spec/v2.md §7), including the raise-only "Orders worth moving"
+// group between Below target and Transfers.
 var portfolioGroupOrder = []struct {
-	status ledger.Status
 	title  string
+	status ledger.Status
+	orders bool
 }{
-	{ledger.StatusAtTarget, "At target now"},
-	{ledger.StatusBelowTarget, "Below target"},
-	{ledger.StatusTransfer, "Transfers"},
-	{ledger.StatusNoMarket, "No market"},
-	{ledger.StatusClosed, "Closed / realized"},
+	{"At target now", ledger.StatusAtTarget, false},
+	{"Below target", ledger.StatusBelowTarget, false},
+	{"Orders worth moving", "", true},
+	{"Transfers", ledger.StatusTransfer, false},
+	{"No market", ledger.StatusNoMarket, false},
+	{"Closed / realized", ledger.StatusClosed, false},
 }
 
-// buildPortfolioData groups the report's positions and copies the summary
-// figures. Empty groups still render, with a count of zero. targetRaw is
-// the raw target-margin percentage the control renders.
+// buildPortfolioData groups the report's positions and re-list gains and
+// copies the summary figures. Empty groups still render, with a count of
+// zero. targetRaw is the raw target-margin percentage the control renders.
 func buildPortfolioData(report ledger.Report, targetRaw string) portfolioData {
 	byStatus := make(map[ledger.Status][]ledger.Position, len(portfolioGroupOrder))
 	for _, p := range report.Positions {
@@ -99,8 +105,21 @@ func buildPortfolioData(report ledger.Report, targetRaw string) portfolioData {
 
 	groups := make([]portfolioGroup, 0, len(portfolioGroupOrder))
 	for _, g := range portfolioGroupOrder {
+		if g.orders {
+			groups = append(groups, portfolioGroup{
+				Title:       g.title,
+				Orders:      true,
+				Count:       len(report.RelistGains),
+				RelistGains: report.RelistGains,
+			})
+			continue
+		}
 		positions := byStatus[g.status]
-		groups = append(groups, portfolioGroup{Title: g.title, Count: len(positions), Positions: positions})
+		groups = append(groups, portfolioGroup{
+			Title:     g.title,
+			Count:     len(positions),
+			Positions: positions,
+		})
 	}
 
 	return portfolioData{

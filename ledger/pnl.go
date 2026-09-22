@@ -81,10 +81,27 @@ type Position struct {
 	Status          Status
 }
 
+// RelistGain is one resting sell order worth moving: a raise-only re-list
+// to the market's best sell among other traders that still nets more after
+// the in-place modify fee and the extra sales tax on the increase
+// (docs/spec/v2.md §4.8). One row per order, independent of the position's
+// target.
+type RelistGain struct {
+	OrderID      int64
+	TypeID       int
+	Name         string
+	LocationID   int64
+	VolumeRemain int
+	OldPrice     float64 // the order's current resting price
+	NewPrice     float64 // the market's best sell among other traders
+	NetGain      float64
+}
+
 // Report is the whole portfolio's derived P/L.
 type Report struct {
 	Positions        []Position
-	Realized         float64 // trading realized P/L, excluding transfer gain/loss
+	RelistGains      []RelistGain // resting sell orders worth moving (§4.8)
+	Realized         float64      // trading realized P/L, excluding transfer gain/loss
 	Unrealized       float64
 	EstimatedFees    float64
 	UnattributedFees float64
@@ -177,6 +194,19 @@ func ComputePnLForTarget(ctx context.Context, db *sql.DB, characterID int, targe
 		report.Unrealized += p.Unrealized
 	}
 	report.Positions = positions
+
+	// The re-list gain compares each resting sell order against the best
+	// sell among *other* traders, so the character's own orders -- which the
+	// public book also carries -- are excluded (docs/spec/v2.md §4.8).
+	own := make(map[int64]bool, len(orders))
+	for _, o := range orders {
+		own[o.ID] = true
+	}
+	otherBestSells, err := loadOtherBestSells(ctx, db, own)
+	if err != nil {
+		return Report{}, err
+	}
+	report.RelistGains = relistGains(orders, otherBestSells, names, rb, rt, abr)
 	return report, nil
 }
 
@@ -493,6 +523,97 @@ func loadMarketPrices(ctx context.Context, db *sql.DB) (map[int]marketPrices, er
 		return nil, fmt.Errorf("reading market prices: %w", err)
 	}
 	return out, nil
+}
+
+// loadOtherBestSells returns, per type, the lowest sell price in the Rens
+// book among orders the character does not own. The re-list gain needs the
+// price level the character is actually competing against: including the
+// character's own best order would always make the current best sell equal
+// to that order's price, leaving nothing to raise to.
+func loadOtherBestSells(ctx context.Context, db *sql.DB, own map[int64]bool) (map[int]float64, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT type_id, order_id, price
+		FROM market_order
+		WHERE is_buy_order = 0`)
+	if err != nil {
+		return nil, fmt.Errorf("querying sell orders: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[int]float64{}
+	for rows.Next() {
+		var (
+			typeID  int
+			orderID int64
+			price   float64
+		)
+		if err := rows.Scan(&typeID, &orderID, &price); err != nil {
+			return nil, fmt.Errorf("scanning sell order: %w", err)
+		}
+		if own[orderID] {
+			continue
+		}
+		if best, ok := out[typeID]; !ok || price < best {
+			out[typeID] = price
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading sell orders: %w", err)
+	}
+	return out, nil
+}
+
+// relistGains computes the raise-only re-list gain for every open resting
+// sell order priced below the market's best sell among other traders
+// (docs/spec/v2.md §4.8):
+//
+//	net = (P_new - P_old) x volume_remain x (1 - R_t) - relistFee
+//
+// where relistFee is the in-place modify fee evaluating old and new order
+// values at the order's remaining volume. Buy orders, orders undercut by
+// someone else, orders already at/above best, and any move that does not
+// net positive are dropped.
+func relistGains(orders []*order, otherBestSells map[int]float64, names map[int]string, rb, rt, abr float64) []RelistGain {
+	var out []RelistGain
+	for _, o := range orders {
+		if o.IsBuy || o.Closed {
+			continue
+		}
+		last := o.Snapshots[len(o.Snapshots)-1]
+		if last.VolumeRemain <= 0 {
+			continue
+		}
+		newPrice, ok := otherBestSells[o.TypeID]
+		if !ok || last.Price >= newPrice {
+			continue
+		}
+		volume := float64(last.VolumeRemain)
+		fee := fees.ModifyFee(last.Price*volume, newPrice*volume, rb, abr)
+		net := (newPrice-last.Price)*volume*(1-rt) - fee
+		if net <= 0 {
+			continue
+		}
+		out = append(out, RelistGain{
+			OrderID:      o.ID,
+			TypeID:       o.TypeID,
+			Name:         names[o.TypeID],
+			LocationID:   o.LocationID,
+			VolumeRemain: last.VolumeRemain,
+			OldPrice:     last.Price,
+			NewPrice:     newPrice,
+			NetGain:      net,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TypeID != out[j].TypeID {
+			return out[i].TypeID < out[j].TypeID
+		}
+		if out[i].LocationID != out[j].LocationID {
+			return out[i].LocationID < out[j].LocationID
+		}
+		return out[i].OrderID < out[j].OrderID
+	})
+	return out
 }
 
 func loadNames(ctx context.Context, db *sql.DB) (map[int]string, error) {

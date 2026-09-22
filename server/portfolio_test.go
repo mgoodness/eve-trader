@@ -311,3 +311,66 @@ func TestHeaderNavLinksOpportunitiesAndPortfolio(t *testing.T) {
 		t.Errorf("opportunities header missing Portfolio link; body:\n%s", indexBody)
 	}
 }
+
+// seedPortfolioRelistFixtures seeds one resting sell order worth moving: the
+// character holds the book's best sell at 100, the next real sell among
+// other traders is 120, so raising nets 16,100 ISK after the in-place modify
+// fee (docs/spec/v2.md §4.8). A buy order and a below-floor move are seeded
+// too, to show they are excluded.
+func seedPortfolioRelistFixtures(t *testing.T, db *sql.DB) {
+	t.Helper()
+	dbtest.SeedToken(t, db, portfolioCharacterID, testAuthConfig().TokenKey, "refresh-token")
+	dbtest.SeedSkills(t, db, portfolioCharacterID, 0, 0) // R_b 3%, R_t 7.5%
+
+	day1 := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	// Worth moving. Including the character's own order in the public book
+	// must not collapse the best sell onto it.
+	dbtest.SeedItem(t, db, 400, "Relist Ore")
+	seedPortfolioOrder(t, db, 4001, day1, 400, false, 100, 1000, 1000, "")
+	dbtest.SeedOrder(t, db, 4001, 400, false, 100)
+	dbtest.SeedOrder(t, db, 9500, 400, false, 120)
+	dbtest.SeedOrder(t, db, 9501, 400, false, 125)
+
+	// A buy order is never a raise-only gain.
+	dbtest.SeedItem(t, db, 401, "Bid Ore")
+	seedPortfolioOrder(t, db, 4002, day1, 401, true, 90, 1000, 1000, "")
+
+	// A one-unit move is swamped by the 100 ISK modify-fee floor.
+	dbtest.SeedItem(t, db, 402, "Floor Ore")
+	seedPortfolioOrder(t, db, 4003, day1, 402, false, 119.99, 1, 1, "")
+	dbtest.SeedOrder(t, db, 9503, 402, false, 120)
+}
+
+// TestPortfolioOrdersWorthMovingGroup covers the re-list-gain group
+// (docs/spec/v2.md §4.8, §7): the Portfolio surfaces one row per order whose
+// raise-only move nets positive, with item/location, current -> suggested
+// price, and the net gain.
+func TestPortfolioOrdersWorthMovingGroup(t *testing.T) {
+	sqlDB := dbtest.OpenDB(t)
+	seedPortfolioRelistFixtures(t, sqlDB)
+	body := renderPortfolio(t, sqlDB)
+
+	if !strings.Contains(body, "Orders worth moving") {
+		t.Fatalf("GET /portfolio body missing group %q", "Orders worth moving")
+	}
+	for _, want := range []string{"Relist Ore", "100.00", "120.00", "16,100 ISK"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET /portfolio body missing relist-gain value %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Bid Ore", "Floor Ore"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("GET /portfolio body surfaced excluded item %q", unwanted)
+		}
+	}
+
+	// The group sits between Below target and Transfers, per the spec's
+	// action ordering.
+	below := strings.Index(body, "Below target")
+	relist := strings.Index(body, "Orders worth moving")
+	transfers := strings.Index(body, "Transfers")
+	if !(below < relist && relist < transfers) {
+		t.Errorf("group order = Below %d, Orders %d, Transfers %d; want Below < Orders < Transfers", below, relist, transfers)
+	}
+}
