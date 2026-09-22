@@ -76,8 +76,9 @@ var realismRules = []string{
 }
 
 // pageData is the data handed to the "page.html" template and to the
-// htmx-sorted "layout" partial. Shown/Total and the two hidden counts drive
-// the summary line; FilterForm and Columns carry the stateless URL state.
+// htmx-sorted "layout" partial. Shown/Total and the two hidden counts feed
+// the sidebar and empty-state copy; FilterForm and Columns carry the
+// stateless URL state.
 type pageData struct {
 	Opportunities   []ranking.Opportunity
 	HiddenByRealism int
