@@ -1,0 +1,97 @@
+{{define "portfolio.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eve-trader &mdash; Portfolio</title>
+{{template "styles"}}
+<style>
+  .legend { color: #94a3b8; font-size: .75rem; margin: .8rem 0 0; background: #0f172a; border: 1px solid #1e293b; border-radius: .4rem; padding: .5rem .7rem; }
+  .legend strong { color: #e2e8f0; }
+  .footnote { color: #94a3b8; font-size: .75rem; margin: 1rem 0 0; }
+  .portfolio { margin-top: 1.5rem; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 0 0 1.5rem; }
+  .stat { background: #0f172a; border: 1px solid #1e293b; border-radius: .5rem; padding: .6rem .8rem; font-size: .8rem; }
+  .stat span { display: block; color: #94a3b8; }
+  .stat strong { font-size: 1.05rem; color: #e2e8f0; }
+  .stat strong.pos { color: #34d399; }
+  .stat strong.neg { color: #f87171; }
+  .stat strong.warnc { color: #fbbf24; }
+  .group { margin-top: 1.5rem; }
+  .group h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin: 0 0 .5rem; }
+  .count { background: #1e293b; color: #e2e8f0; border-radius: 99px; padding: .05rem .5rem; font-size: .75rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #1e293b; white-space: nowrap; }
+  th { color: #94a3b8; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; }
+  .muted { color: #64748b; }
+  .pos { color: #34d399; }
+  .neg { color: #f87171; }
+  .warnc { color: #fbbf24; }
+  .est { color: #64748b; font-size: .7rem; }
+  .badge { font-size: .7rem; padding: .15rem .45rem; border-radius: 99px; border: 1px solid #334155; color: #cbd5e1; }
+  .badge.ok { border-color: #059669; color: #34d399; }
+  .badge.warn { border-color: #b45309; color: #fbbf24; }
+  .badge.transfer { border-color: #4338ca; color: #a5b4fc; }
+  .badge.muted-badge { border-color: #334155; color: #94a3b8; }
+  .empty-group { color: #64748b; font-size: .8rem; margin: 0; padding: .4rem 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Portfolio</h1>
+  {{template "nav" "portfolio"}}
+  <p class="legend"><strong>Break-even</strong> &mdash; the list price at which net proceeds cover the position's cost plus estimated sell fees (zero profit). <strong>Target</strong> &mdash; break-even plus your target net margin; it defaults to 0% net, so it equals break-even. <strong>Mkt net margin</strong> &mdash; the net margin the current Rens best sell would actually yield, shown only when positive. Re-lists are inferred from order snapshots and may undercount.</p>
+</header>
+<main class="portfolio">
+  {{if .Reauth}}
+  <section class="reauth" aria-labelledby="reauth-title">
+    <div>
+      <h2 id="reauth-title">Re-authenticate with EVE</h2>
+      <p>{{if .FirstBoot}}Log in with EVE to load your character's ledger and portfolio.{{else}}Your EVE session has expired or was revoked.{{end}}</p>
+      <a href="/auth/login">Re-authenticate with EVE</a>
+    </div>
+  </section>
+  {{else}}
+  <div class="stats">
+    <div class="stat"><span>Realized</span><strong class="{{if lt .Summary.Realized 0.0}}neg{{else}}pos{{end}}">{{fmtSignedISK .Summary.Realized}}</strong></div>
+    <div class="stat"><span>Unrealized</span><strong class="{{if lt .Summary.Unrealized 0.0}}neg{{else}}pos{{end}}">{{fmtSignedISK .Summary.Unrealized}}</strong></div>
+    <div class="stat"><span>Fees (est)</span><strong>{{fmtISK .Summary.EstimatedFees}}</strong></div>
+    <div class="stat"><span>Unattributed</span><strong class="warnc">{{fmtISK .Summary.UnattributedFees}}</strong></div>
+  </div>
+  {{range .Groups}}
+  <section class="group">
+    <h2>{{.Title}} <span class="count">{{.Count}}</span></h2>
+    {{if .Positions}}
+    <table>
+      <thead>
+        <tr>
+          <th>Item / location</th><th>Qty</th><th>Avg cost</th><th>Mkt sell</th><th>Unreal P/L</th><th>Realized</th><th>Buy / sell re-lists</th><th>Est. fees</th><th>Break-even</th><th>Target</th><th>Mkt net margin</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Positions}}
+        <tr data-type-id="{{.TypeID}}">
+          <td>{{.Name}} <span class="muted">{{fmtLocation .LocationID}}</span></td>
+          <td>{{if .Quantity}}{{fmtQty .Quantity}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if .Quantity}}{{fmtPrice .AverageCost}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if .HasMarket}}{{fmtPrice .MarketSell}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if and .Quantity .HasMarket}}{{fmtSignedISK .Unrealized}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if eq .Status "Closed"}}{{fmtSignedISK .Realized}}{{else if eq .Status "Transferred"}}{{fmtSignedISK .TransferGainLoss}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{.BuyRelists}} / {{.SellRelists}}<span class="est"> inf</span></td>
+          <td>{{fmtISK .EstimatedFees}}<span class="est"> est</span></td>
+          <td>{{if .Quantity}}{{fmtPrice .BreakEven}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if .Quantity}}{{fmtPrice .Target}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td>{{if gt .MarketNetMargin 0.0}}<span class="pos">{{fmtNetMargin .MarketNetMargin}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td><span class="badge {{statusClass .Status}}">{{.Status}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}<p class="empty-group">None.</p>{{end}}
+  </section>
+  {{end}}
+  <p class="footnote">Profit figures are net of estimated broker fees and sales tax. Per-item fees are estimates: ESI does not link a fee to an order or item, so fees are attributed from order snapshots. Unattributed fees are mostly re-lists. Portfolio data can be up to an hour stale.</p>
+  {{end}}
+</main>
+</body>
+</html>
+{{end}}

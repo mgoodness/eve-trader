@@ -4,11 +4,8 @@
 <meta charset="utf-8">
 <title>eve-trader &mdash; Rens Opportunities</title>
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+{{template "styles"}}
 <style>
-  body { font-family: system-ui, sans-serif; background: #0b1120; color: #e2e8f0; margin: 0; padding: 0 1.5rem 3rem; }
-  header { border-bottom: 1px solid #1e293b; padding: 1.5rem 0; }
-  h1 { margin: 0 0 .25rem; font-size: 1.25rem; }
-  .footnote { color: #94a3b8; font-size: .8rem; margin: 0; }
   .layout { display: flex; gap: 1.5rem; align-items: flex-start; margin-top: 1.5rem; }
   .sidebar { flex: 0 0 18rem; }
   .results { flex: 1 1 auto; min-width: 0; }
@@ -36,13 +33,12 @@
   th.active { color: #e2e8f0; }
   td.empty { color: #94a3b8; padding: 2rem .75rem; text-align: center; }
   td.iskday { font-weight: 600; color: #34d399; }
-  .reauth { min-height: 60vh; display: grid; place-items: center; text-align: center; }
-  .reauth a { display: inline-block; margin-top: 1rem; padding: .75rem 1.25rem; border-radius: .35rem; background: #34d399; color: #06251b; font-weight: 700; text-decoration: none; }
 </style>
 </head>
 <body>
 <header>
   <h1>Rens Station Trading Opportunities</h1>
+  {{template "nav" "opportunities"}}
   <p class="footnote">{{template "footnote"}}</p>
 </header>
 <main>
