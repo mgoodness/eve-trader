@@ -152,4 +152,50 @@ func TestFakeRefreshTokenReturnsSeededError(t *testing.T) {
 	}
 }
 
+func TestFakeFetchCharacterOrdersReturnsSeededOrders(t *testing.T) {
+	want := []esi.CharacterOrder{{OrderID: 1, TypeID: 34, LocationID: 60004588, IsBuyOrder: true, Price: 5.5}}
+	fake := &esi.Fake{CharacterOrders: want}
+
+	got, err := fake.FetchCharacterOrders(t.Context(), 12345, "access-token")
+	if err != nil {
+		t.Fatalf("FetchCharacterOrders() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("FetchCharacterOrders() = %+v, want %+v", got, want)
+	}
+}
+
+func TestFakeFetchCharacterOrdersReturnsSeededError(t *testing.T) {
+	wantErr := errors.New("esi down")
+	fake := &esi.Fake{FetchCharacterOrdersErr: wantErr}
+
+	_, err := fake.FetchCharacterOrders(t.Context(), 12345, "access-token")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("FetchCharacterOrders() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestFakeFetchCharacterOrderHistoryReturnsSeededOrders(t *testing.T) {
+	want := []esi.CharacterOrder{{OrderID: 2, TypeID: 626, LocationID: 60004588, State: "cancelled"}}
+	fake := &esi.Fake{CharacterOrderHistory: want}
+
+	got, err := fake.FetchCharacterOrderHistory(t.Context(), 12345, "access-token")
+	if err != nil {
+		t.Fatalf("FetchCharacterOrderHistory() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("FetchCharacterOrderHistory() = %+v, want %+v", got, want)
+	}
+}
+
+func TestFakeFetchCharacterOrderHistoryReturnsSeededError(t *testing.T) {
+	wantErr := errors.New("esi down")
+	fake := &esi.Fake{FetchCharacterOrderHistoryErr: wantErr}
+
+	_, err := fake.FetchCharacterOrderHistory(t.Context(), 12345, "access-token")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("FetchCharacterOrderHistory() error = %v, want %v", err, wantErr)
+	}
+}
+
 var _ esi.ESIGateway = (*esi.Fake)(nil)

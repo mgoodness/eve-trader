@@ -34,6 +34,12 @@ func (*failingOrdersGateway) FetchWalletTransactions(context.Context, int, strin
 func (*failingOrdersGateway) FetchWalletJournal(context.Context, int, string) ([]esi.WalletJournalEntry, error) {
 	return nil, nil
 }
+func (*failingOrdersGateway) FetchCharacterOrders(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
+func (*failingOrdersGateway) FetchCharacterOrderHistory(context.Context, int, string) ([]esi.CharacterOrder, error) {
+	return nil, nil
+}
 func (*failingOrdersGateway) ExchangeCode(context.Context, string, string) (esi.Token, error) {
 	return esi.Token{}, nil
 }

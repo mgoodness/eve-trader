@@ -318,6 +318,19 @@ func (s *Server) latchInsufficientScope(err error) {
 	slog.Error("authenticated ESI work stopped: token lacks a newly required scope, re-authentication required", "err", err)
 }
 
+// latchIfInsufficientScope recognizes ESI's 403 for a token that refreshes
+// fine but was never granted the scope a call needs -- the state a pre-v2
+// refresh token is in after the ssoScope expansion (docs/spec/v2.md §6).
+// It latches the same "Re-authenticate with EVE" banner a refresh failure
+// does, whose link requests the current (superset) ssoScope, so following
+// it once re-consents and replaces the under-scoped token.
+func (s *Server) latchIfInsufficientScope(err error) {
+	var httpErr *esi.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden {
+		s.latchInsufficientScope(err)
+	}
+}
+
 func (s *Server) resetAuthentication() {
 	s.mu.Lock()
 	s.authChecked, s.reauthRequired, s.reauthFirstBoot = false, false, false
