@@ -1,0 +1,4 @@
+{{define "nav"}}<nav class="nav" aria-label="Main">
+  <a href="/"{{if eq . "opportunities"}} class="active" aria-current="page"{{end}}>Opportunities</a>
+  <a href="/portfolio"{{if eq . "portfolio"}} class="active" aria-current="page"{{end}}>Portfolio</a>
+</nav>{{end}}

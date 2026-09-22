@@ -53,6 +53,7 @@ func New(gateway esi.ESIGateway, db *sql.DB, auth AuthConfig) *Server {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /opportunities", s.handleOpportunities)
+	mux.HandleFunc("GET /portfolio", s.handlePortfolio)
 	mux.HandleFunc("GET /auth/login", s.handleAuthLogin)
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	s.mux = mux

@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/mgoodness/eve-trader/ledger"
 	"github.com/mgoodness/eve-trader/ranking"
 )
 
@@ -17,6 +18,57 @@ var templateFuncs = template.FuncMap{
 	// fmtCaptureRate renders ranking.CaptureRate as a percentage so the
 	// user-facing footnote can't silently drift from the constant.
 	"fmtCaptureRate": func() string { return trimFloat(ranking.CaptureRate*100) + "%" },
+
+	// Portfolio helpers.
+	// fmtSignedISK prefixes a positive figure with "+", so realized and
+	// unrealized gains and losses read unambiguously at a glance.
+	"fmtSignedISK": func(v float64) string {
+		s := formatThousands(round(v)) + " ISK"
+		if v > 0 {
+			return "+" + s
+		}
+		return s
+	},
+	"fmtPrice": func(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) },
+	"fmtQty":   func(n int) string { return formatThousands(int64(n)) },
+	// fmtNetMargin renders a fractional net margin (0.038 -> "3.8% net").
+	"fmtNetMargin": func(v float64) string { return trimFloat(v*100) + "% net" },
+	"fmtLocation":  formatLocation,
+	"statusClass":  statusClass,
+}
+
+// rensStationID is the Rens NPC station every in-scope trade happens at
+// (docs/spec/v1.md). Positions can also sit at other locations after a
+// transfer; ESI gives no name for those here, so they render by id.
+const rensStationID = 60004588
+
+// formatLocation names a location id for the Portfolio's Item/location
+// column: Rens by name, other ids numerically, an unknown id as an em dash
+// placeholder.
+func formatLocation(id int64) string {
+	switch {
+	case id == rensStationID:
+		return "Rens"
+	case id == 0:
+		return "unknown"
+	default:
+		return formatThousands(id)
+	}
+}
+
+// statusClass maps a ledger status to the badge CSS class its row renders
+// with.
+func statusClass(status ledger.Status) string {
+	switch status {
+	case ledger.StatusAtTarget:
+		return "ok"
+	case ledger.StatusBelowTarget:
+		return "warn"
+	case ledger.StatusTransfer:
+		return "transfer"
+	default:
+		return "muted-badge"
+	}
 }
 
 // round rounds v to the nearest integer (half away from zero), rather

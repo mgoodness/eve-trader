@@ -28,6 +28,27 @@ func LoadSkills(ctx context.Context, db *sql.DB) (Skills, error) {
 	return skills.Load(ctx, db)
 }
 
+// Status is the decision a position's row demands: whether the current
+// Rens best sell already clears its costs, whether it does not, whether it
+// left the character, or whether there is nothing to price against. It
+// drives the Portfolio's At-target / Below-target / Transfers / No-market
+// / Closed grouping (docs/spec/v2.md §7).
+type Status string
+
+const (
+	// StatusAtTarget means the current best sell covers cost plus estimated
+	// sell fees -- net margin at or above the (default zero) target.
+	StatusAtTarget Status = "At target now"
+	// StatusBelowTarget means the current best sell would sell at a loss.
+	StatusBelowTarget Status = "Below target"
+	// StatusTransfer marks goods that left the character without a sale.
+	StatusTransfer Status = "Transferred"
+	// StatusNoMarket marks a held position with no Rens best sell.
+	StatusNoMarket Status = "No market"
+	// StatusClosed marks a position fully disposed of by sales.
+	StatusClosed Status = "Closed"
+)
+
 // Position is one derived (item, location) row.
 type Position struct {
 	TypeID              int
@@ -46,6 +67,10 @@ type Position struct {
 	TransferredQuantity int
 	BuyRelists          int // inferred from order snapshots; may undercount
 	SellRelists         int
+	BreakEven           float64 // list price covering cost + estimated sell fees, zero profit
+	Target              float64 // break-even plus the target net margin (0% by default)
+	MarketNetMargin     float64 // net margin at the current best sell; <= 0 means below break-even
+	Status              Status
 }
 
 // Report is the whole portfolio's derived P/L.
@@ -636,6 +661,52 @@ func averageCost(p *positionState) float64 {
 	return p.cost / float64(p.qty)
 }
 
+// breakEvenPrice is the list price at which a position's net proceeds --
+// gross of the sale less the estimated broker fee and sales tax -- cover
+// its cost basis and allocated estimated fees, i.e. zero net margin
+// (docs/spec/v2.md §4.7). The broker fee is the same max(100 ISK, value×R_b)
+// the engine charges elsewhere (§4.4), so the floor cannot silently
+// disappear from a small position's forecast.
+func breakEvenPrice(cost float64, qty int, rb, rt float64) float64 {
+	if qty <= 0 {
+		return 0
+	}
+	// First assume the percentage fee clears the 100 ISK floor.
+	denom := float64(qty) * (1 - rb - rt)
+	if denom <= 0 {
+		return 0
+	}
+	price := cost / denom
+	if price*float64(qty)*rb >= fees.MinFee {
+		return price
+	}
+	// The floor dominates: net proceeds are price×qty − 100 − price×qty×R_t.
+	denomFloor := float64(qty) * (1 - rt)
+	if denomFloor <= 0 {
+		return 0
+	}
+	return (cost + fees.MinFee) / denomFloor
+}
+
+// statusFor picks the Portfolio group for a position. A position with no
+// remaining quantity is a Transfer (it left off-market) or Closed (it was
+// sold); a held position is No market without a Rens best sell, otherwise
+// At target / Below target by whether the current market clears its cost.
+func statusFor(p *positionState, pos Position) Status {
+	switch {
+	case p.qty == 0 && p.transQty > 0:
+		return StatusTransfer
+	case p.qty == 0:
+		return StatusClosed
+	case !pos.HasMarket:
+		return StatusNoMarket
+	case pos.Unrealized >= 0:
+		return StatusAtTarget
+	default:
+		return StatusBelowTarget
+	}
+}
+
 func finalizePositions(state map[positionKey]*positionState, prices map[int]marketPrices, names map[int]string, relists map[positionKey]relistCount, rt, rb float64) []Position {
 	var out []Position
 	for k, p := range state {
@@ -667,9 +738,18 @@ func finalizePositions(state map[positionKey]*positionState, prices map[int]mark
 					sellFee := fees.PlacementFee(grossValue, rb)
 					tax := grossValue * rt
 					pos.Unrealized = grossValue - sellFee - tax - p.cost
+					if grossValue > 0 {
+						pos.MarketNetMargin = pos.Unrealized / grossValue
+					}
 				}
 			}
+			pos.BreakEven = breakEvenPrice(p.cost, p.qty, rb, rt)
+			// The target net margin is a view-level control defaulting to
+			// 0% net, so target equals break-even by default (docs/spec/v2.md
+			// §4.7); the URL-carried override arrives with the forecast ticket.
+			pos.Target = pos.BreakEven
 		}
+		pos.Status = statusFor(p, pos)
 		out = append(out, pos)
 	}
 	sort.Slice(out, func(i, j int) bool {
