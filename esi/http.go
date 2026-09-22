@@ -16,11 +16,12 @@ import (
 const (
 	regionHeimatar = 10000030
 
-	// RensStationID is the NPC station where every trade in scope takes
-	// place: Rens VI - Moon 8 - Brutor Tribe Treasury, in Heimatar. It is
-	// exported because the broker-fee standings term (docs/spec/v2.md §9)
-	// resolves this station's owner and marries the owner standings to the
-	// fee the ranking and portfolio both compute.
+	// RensStationID is the character's execution venue: Rens VI - Moon 8 -
+	// Brutor Tribe Treasury, in Heimatar, where every order rests. The
+	// Opportunity list ranks the whole region (see
+	// docs/adr/0005-heimatar-region-as-pricing-market.md), but fees stay
+	// Rens-only, so this station's owner still drives the broker-fee
+	// standings term (docs/spec/v2.md §9) for both ranking and portfolio.
 	RensStationID = 60004588
 
 	// errorLimitedStatus is ESI's 420 "error limited" response, distinct from

@@ -48,9 +48,12 @@ var templateFuncs = template.FuncMap{
 	"statusClass":  statusClass,
 }
 
-// rensStationID is the Rens NPC station every in-scope trade happens at
-// (docs/spec/v1.md). Positions can also sit at other locations after a
-// transfer; ESI gives no name for those here, so they render by id.
+// rensStationID is the character's execution venue, Rens VI - Moon 8 -
+// Brutor Tribe Treasury, where orders rest and positions are anchored. The
+// Opportunity list now ranks the whole region, but the Portfolio stays
+// Rens-anchored, so this is still the one station shown by name. Positions
+// can also sit at other locations after a transfer; ESI gives no name for
+// those here, so they render by id.
 const rensStationID = 60004588
 
 // formatLocation names a location id for the Portfolio's Item/location
