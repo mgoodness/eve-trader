@@ -11,7 +11,13 @@ import (
 )
 
 func main() {
-	root := cli.NewRootCmd(cli.DefaultConfig())
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	root := cli.NewRootCmd(cfg)
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
