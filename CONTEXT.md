@@ -171,3 +171,8 @@ _Avoid_: investment, cost basis
 `units ÷ (capture rate × average daily volume)` — the expected number of days an
 order size takes to sell; caps the units posted per item.
 _Avoid_: turnover, holding time
+
+**Minimum order**:
+The smallest committed capital worth posting; a partial fill below it is left
+idle rather than created. Default 1M ISK.
+_Avoid_: order floor, dust order
