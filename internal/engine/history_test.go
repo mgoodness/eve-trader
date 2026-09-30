@@ -193,6 +193,22 @@ func TestFilterByHistoryKeepsACandidateThatClearsAllThreeFilters(t *testing.T) {
 	}
 }
 
+func TestFilterByHistoryAttachesAverageDailyVolumeToSurvivors(t *testing.T) {
+	// 30 days at 25 units/day = ADV 25.
+	candidates := []engine.CandidateHistory{
+		historyCandidate(1, 60, 80, daysOfHistory(30, 25)),
+	}
+
+	recs, excluded := engine.FilterByHistory(candidates, historyThresholds())
+
+	if len(recs) != 1 || len(excluded) != 0 {
+		t.Fatalf("got recs=%+v excluded=%+v, want the candidate kept", recs, excluded)
+	}
+	if recs[0].AverageDailyVolume != 25 {
+		t.Errorf("got AverageDailyVolume=%v, want 25 (750 units over the fixed 30-day period)", recs[0].AverageDailyVolume)
+	}
+}
+
 func TestFilterByHistoryAppliesTheThreeFiltersInOrderWithOneReasonEach(t *testing.T) {
 	// Survives everything.
 	survivor := historyCandidate(1, 60, 80, daysOfHistory(30, 20))

@@ -82,9 +82,24 @@ func FilterByHistory(candidates []CandidateHistory, thresholds FilterThresholds)
 	excluded = append(excluded, priceBandExcluded...)
 
 	for _, c := range afterPriceBand {
-		recommendations = append(recommendations, c.Recommendation)
+		rec := c.Recommendation
+		rec.AverageDailyVolume = AverageDailyVolume(c.History)
+		recommendations = append(recommendations, rec)
 	}
 	return recommendations, excluded
+}
+
+// AverageDailyVolume computes a candidate's 30-day average daily volume
+// (spec §7 step 4, §9 "30-day ADV"): total volume across the trailing
+// 30-day window (historyWindow), divided by the fixed 30-day period — not
+// by the number of days actually present — so a sparse trading history
+// (fewer than 30 days with recorded activity) doesn't inflate the average.
+func AverageDailyVolume(history []HistoryRecord) float64 {
+	var totalVolume int64
+	for _, r := range historyWindow(history) {
+		totalVolume += r.Volume
+	}
+	return float64(totalVolume) / float64(historyWindowDays)
 }
 
 // PriceBand reports the subset of candidates whose front-of-queue prices
@@ -140,11 +155,7 @@ func PriceBand(candidates []CandidateHistory, lowMult, highMult float64) (passed
 // inflate the average.
 func MinLiquidity(candidates []CandidateHistory, minADV float64) (passed []CandidateHistory, excluded []Excluded) {
 	for _, c := range candidates {
-		var totalVolume int64
-		for _, r := range historyWindow(c.History) {
-			totalVolume += r.Volume
-		}
-		adv := float64(totalVolume) / float64(historyWindowDays)
+		adv := AverageDailyVolume(c.History)
 		if adv < minADV {
 			excluded = append(excluded, Excluded{
 				TypeID: c.Recommendation.TypeID,
