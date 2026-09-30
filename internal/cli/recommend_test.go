@@ -87,3 +87,31 @@ func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
 		t.Errorf("got %d recommendations, want 1", len(result.Recommendations))
 	}
 }
+
+func TestRecommendDeltaFlagOverridesTheConfiguredValue(t *testing.T) {
+	server := fakeESIServer(t)
+	cfg := testConfig(t, server.URL)
+	root := cli.NewRootCmd(cfg)
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"recommend", "--json", "--delta", "250"})
+
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var result engine.Result
+	if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, out.String())
+	}
+	if len(result.Recommendations) != 1 {
+		t.Fatalf("got %d recommendations, want 1: %+v", len(result.Recommendations), result.Recommendations)
+	}
+	rec := result.Recommendations[0]
+	// best bid 18220, best ask 24080 (see fakeESIServer); δ=250 overrides the
+	// default of 100, so buy_price/sell_price must move by the difference.
+	if rec.BuyPrice != 18470 || rec.SellPrice != 23830 {
+		t.Errorf("got buy_price=%v sell_price=%v, want buy_price=18470 sell_price=23830 (\u03b4=250 applied)", rec.BuyPrice, rec.SellPrice)
+	}
+}

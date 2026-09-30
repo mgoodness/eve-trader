@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mgoodness/eve-trader/internal/cache"
+	"github.com/mgoodness/eve-trader/internal/config"
 	"github.com/mgoodness/eve-trader/internal/engine"
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/spf13/cobra"
@@ -24,8 +26,9 @@ const regionOrdersTTL = 300 * time.Second
 
 // Config is everything Run needs to produce a Result for one candidate
 // type. DefaultConfig fills in the walking skeleton's compiled-in values;
-// tests override ESIBaseURL and CacheDir to point at a fake server and a
-// temp directory.
+// LoadConfig additionally resolves config.toml/credentials.json/the cache
+// directory from disk (spec §13). Tests call DefaultConfig and override
+// ESIBaseURL and CacheDir to point at a fake server and a temp directory.
 type Config struct {
 	ESIBaseURL string
 	UserAgent  string
@@ -38,14 +41,25 @@ type Config struct {
 
 	TypeID int32
 	Name   string
-	Delta  float64
 	Fees   engine.Fees
+
+	// Values holds the configurable run parameters (spec §13): built from
+	// config.Defaults(), overlaid by config.toml (LoadConfig), overlaid in
+	// turn by recommend's CLI flags.
+	Values config.Values
+
+	// Credentials is read from credentials.json by LoadConfig. It is never
+	// settable by a CLI flag (spec §13); no command consumes it yet —
+	// ticket #16 wires it into ESI OAuth.
+	Credentials config.Credentials
 }
 
 // DefaultConfig is the config main.go runs with: live ESI, the Heimatar/Rens
-// constants (spec §2), and a single compiled-in candidate. The fee rates are
-// the pilot's real, hardcoded rates (spec §4) — a placeholder until ticket
-// #16 reads skills and standings live from ESI.
+// constants (spec §2), a single compiled-in candidate, and the documented
+// config defaults (spec §13). The fee rates are the pilot's real, hardcoded
+// rates (spec §4) — a placeholder until ticket #16 reads skills and
+// standings live from ESI. Callers that want config.toml/credentials.json
+// read from disk should call LoadConfig instead.
 func DefaultConfig() Config {
 	return Config{
 		UserAgent:      "eve-trader/0.1 (+https://github.com/mgoodness/eve-trader)",
@@ -56,20 +70,58 @@ func DefaultConfig() Config {
 		TradeSystemID:  30002510, // Rens
 		TypeID:         11399,    // Morphite: liquid and two-sided at Rens
 		Name:           "Morphite",
-		Delta:          100,
 		Fees:           engine.Fees{Broker: 0.018, SalesTax: 0.05025},
+		Values:         config.Defaults(),
 	}
 }
 
-func defaultCacheDir() string {
-	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
-		return filepath.Join(dir, "eve-trader")
+// LoadConfig resolves eve-trader's on-disk configuration and state surface
+// (spec §13) on top of DefaultConfig: config.toml's values (or the
+// documented defaults, if it doesn't exist), the credentials file (mode
+// 600, never settable by a flag), and the disk cache directory. A missing
+// config.toml is not an error; a malformed config.toml, or a
+// present-but-wrong-mode or malformed credentials.json, is — both name the
+// offending path. A missing credentials.json is not an error either: no
+// command needs ESI auth yet (ticket #16 is the first that will).
+func LoadConfig() (Config, error) {
+	cfg := DefaultConfig()
+
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return Config{}, fmt.Errorf("resolving config directory: %w", err)
 	}
-	home, err := os.UserHomeDir()
+
+	values, err := config.Load(filepath.Join(configDir, "config.toml"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Values = values
+
+	creds, err := config.LoadCredentials(filepath.Join(configDir, "credentials.json"))
+	switch {
+	case errors.Is(err, config.ErrCredentialsNotFound):
+		// Fine: nothing needs ESI auth yet.
+	case err != nil:
+		return Config{}, err
+	default:
+		cfg.Credentials = creds
+	}
+
+	cacheDir, err := config.CacheDir()
+	if err != nil {
+		return Config{}, fmt.Errorf("resolving cache directory: %w", err)
+	}
+	cfg.CacheDir = cacheDir
+
+	return cfg, nil
+}
+
+func defaultCacheDir() string {
+	dir, err := config.CacheDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), "eve-trader")
 	}
-	return filepath.Join(home, ".cache", "eve-trader")
+	return dir
 }
 
 // Run fetches the region orders for cfg.TypeID (from cache if fresh,
@@ -85,7 +137,7 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 		RegionID:       cfg.RegionID,
 		TradeStationID: cfg.TradeStationID,
 		TradeSystemID:  cfg.TradeSystemID,
-		Delta:          cfg.Delta,
+		Delta:          cfg.Values.Delta,
 		Fees:           cfg.Fees,
 	}
 	result := engine.Recommend(orders, cfg.TypeID, cfg.Name, params, time.Now().UTC())
@@ -139,8 +191,15 @@ func NewRootCmd(cfg Config) *cobra.Command {
 	return root
 }
 
+// newRecommendCmd builds the recommend command. Its flags default to
+// cfg.Values (already config.toml-overlaid defaults, spec §13) and override
+// whichever ones the pilot passes; the merged result is what Run sees.
+// Credentials are deliberately not a flag (spec §13) — cfg.Credentials is
+// the only source.
 func newRecommendCmd(cfg Config) *cobra.Command {
 	var jsonOutput bool
+	values := cfg.Values
+
 	cmd := &cobra.Command{
 		Use:   "recommend",
 		Short: "Recommend buy/sell prices for the candidate universe",
@@ -148,9 +207,26 @@ func newRecommendCmd(cfg Config) *cobra.Command {
 			if !jsonOutput {
 				return fmt.Errorf("table output isn't implemented yet (ticket #23); pass --json")
 			}
-			return Run(cmd.Context(), cfg, cmd.OutOrStdout())
+			runCfg := cfg
+			runCfg.Values = values
+			return Run(cmd.Context(), runCfg, cmd.OutOrStdout())
 		},
 	}
+
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "emit the JSON result")
+	cmd.Flags().Int64Var(&values.Budget, "budget", values.Budget, "trading budget, self-reported ISK")
+	cmd.Flags().Float64Var(&values.TargetMargin, "target-margin", values.TargetMargin, "minimum net margin a candidate must clear to be recommended")
+	cmd.Flags().Float64Var(&values.Delta, "delta", values.Delta, "aggression tick (\u03b4), in ISK, for front-of-queue prices")
+	cmd.Flags().IntVar(&values.HorizonDays, "horizon", values.HorizonDays, "capture horizon in days")
+	cmd.Flags().Int64Var(&values.MinOrder, "min-order", values.MinOrder, "minimum committed capital, in ISK, to post a partial fill")
+	cmd.Flags().Float64Var(&values.CaptureRate, "capture-rate", values.CaptureRate, "fraction of 30-day ADV assumed capturable per day")
+	cmd.Flags().Float64Var(&values.Filters.GrossMarginCeiling, "gross-margin-ceiling", values.Filters.GrossMarginCeiling, "drop candidates with gross margin above this fraction")
+	cmd.Flags().IntVar(&values.Filters.ThinBookMinOrders, "thin-book-min-orders", values.Filters.ThinBookMinOrders, "minimum orders required within the thin-book band, on each side")
+	cmd.Flags().Float64Var(&values.Filters.ThinBookBandPct, "thin-book-band-pct", values.Filters.ThinBookBandPct, "price band, as a fraction of best, used by the thin-book filter")
+	cmd.Flags().IntVar(&values.Filters.MinHistoryDays, "min-history-days", values.Filters.MinHistoryDays, "minimum days of 30-day history required")
+	cmd.Flags().Float64Var(&values.Filters.MinLiquidityADV, "min-liquidity-adv", values.Filters.MinLiquidityADV, "minimum 30-day average daily volume, in units")
+	cmd.Flags().Float64Var(&values.Filters.PriceBandLow, "price-band-low", values.Filters.PriceBandLow, "drop if best bid is below this fraction of the 30-day low")
+	cmd.Flags().Float64Var(&values.Filters.PriceBandHigh, "price-band-high", values.Filters.PriceBandHigh, "drop if best ask is above this fraction of the 30-day high")
+
 	return cmd
 }
