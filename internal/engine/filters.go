@@ -121,6 +121,14 @@ type FilterThresholds struct {
 	GrossMarginCeiling float64
 	ThinBookMinOrders  int
 	ThinBookBandPct    float64
+
+	// MinHistoryDays, MinLiquidityADV, PriceBandLow, and PriceBandHigh are
+	// the history-dependent filters' thresholds (spec \u00a77 steps 3, 4, 7;
+	// ticket #20): consumed by FilterByHistory, not FilterBookOnly.
+	MinHistoryDays  int
+	MinLiquidityADV float64
+	PriceBandLow    float64
+	PriceBandHigh   float64
 }
 
 // FilterBookOnly runs the whole book-only filter stage (spec §7, §6 "History

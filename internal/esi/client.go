@@ -193,10 +193,48 @@ func (c *Client) FetchRegionOrdersPage(ctx context.Context, regionID int32, orde
 	}
 	reqURL := fmt.Sprintf("%s/markets/%d/orders/?%s", c.baseURL, regionID, q.Encode())
 
+	resp, err := c.getWithBackoff(ctx, reqURL, ifNoneMatch)
+	if err != nil {
+		return PageResult{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		return PageResult{NotModified: true, ETag: ifNoneMatch}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return PageResult{}, fmt.Errorf("GET %s: unexpected status %s", reqURL, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return PageResult{}, err
+	}
+	etag := resp.Header.Get("ETag")
+	pages := 1
+	if xp := resp.Header.Get("X-Pages"); xp != "" {
+		if n, err := strconv.Atoi(xp); err == nil {
+			pages = n
+		}
+	}
+
+	return PageResult{Body: body, ETag: etag, Pages: pages}, nil
+}
+
+// getWithBackoff issues a GET to reqURL with the client's standard headers
+// (X-Compatibility-Date, User-Agent, and If-None-Match: ifNoneMatch if
+// non-empty), retrying on 429 (rate limit) and 420 (error limit) per ESI's
+// politeness rules (docs/research/eve-market-mechanics-and-esi.md \u00a76.6): a
+// 429's Retry-After header (seconds) sets the backoff if present, otherwise
+// a fixed default is used. It gives up after maxBackoffAttempts and returns
+// an error. It returns the first response with any other status (200, 304,
+// or otherwise) for the caller to interpret; the caller is responsible for
+// closing the response body.
+func (c *Client) getWithBackoff(ctx context.Context, reqURL, ifNoneMatch string) (*http.Response, error) {
 	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
-			return PageResult{}, err
+			return nil, err
 		}
 		if c.compatDate != "" {
 			req.Header.Set("X-Compatibility-Date", c.compatDate)
@@ -210,43 +248,20 @@ func (c *Client) FetchRegionOrdersPage(ctx context.Context, regionID int32, orde
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return PageResult{}, err
+			return nil, err
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == statusErrorLimited {
 			retryAfter := retryAfterDuration(resp.Header.Get("Retry-After"))
 			resp.Body.Close()
 			if attempt >= maxBackoffAttempts {
-				return PageResult{}, fmt.Errorf("GET %s: status %s after %d attempts", reqURL, resp.Status, attempt)
+				return nil, fmt.Errorf("GET %s: status %s after %d attempts", reqURL, resp.Status, attempt)
 			}
 			c.sleep(retryAfter)
 			continue
 		}
 
-		if resp.StatusCode == http.StatusNotModified {
-			resp.Body.Close()
-			return PageResult{NotModified: true, ETag: ifNoneMatch}, nil
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			return PageResult{}, fmt.Errorf("GET %s: unexpected status %s", reqURL, resp.Status)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		etag := resp.Header.Get("ETag")
-		pages := 1
-		if xp := resp.Header.Get("X-Pages"); xp != "" {
-			if n, err := strconv.Atoi(xp); err == nil {
-				pages = n
-			}
-		}
-		resp.Body.Close()
-		if err != nil {
-			return PageResult{}, err
-		}
-
-		return PageResult{Body: body, ETag: etag, Pages: pages}, nil
+		return resp, nil
 	}
 }
 
