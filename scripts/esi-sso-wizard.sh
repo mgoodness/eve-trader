@@ -206,7 +206,7 @@ finish() {
 TOTAL_STAGES=7
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/eve-trader"
-ENV_FILE="${ENV_FILE:-$CONFIG_DIR/sso.env}"
+ENV_FILE="${EVE_TRADER_ENV_FILE:-$CONFIG_DIR/sso.env}"
 CRED_FILE="$CONFIG_DIR/credentials.json"
 WORKDIR="$(mktemp -d)"
                         trap 'rm -rf "$WORKDIR"' EXIT
@@ -391,7 +391,20 @@ NEW_ACCESS=$(printf '%s' "$NEWTOKENS" | python3 -c 'import sys,json;print(json.l
                                                                exit 1
 }
 ROTATED=$(printf '%s' "$NEWTOKENS" | python3 -c 'import sys,json;print("yes" if json.load(sys.stdin).get("refresh_token") else "no")')
-say "Refresh succeeded. Token rotated in response: $ROTATED (always persist the returned one)."
+say "Refresh succeeded. Token rotated in response: $ROTATED."
+if [[ "$ROTATED" == "yes" ]]; then
+    python3 - "$CRED_FILE" "$NEWTOKENS" <<'PY'
+import json, sys, os
+path, tok = sys.argv[1], json.loads(sys.argv[2])
+c = json.load(open(path))
+c["refresh_token"] = tok["refresh_token"]
+tmp = path + ".tmp"
+json.dump(c, open(tmp, "w"), indent=1)
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+PY
+    say "Persisted the rotated refresh token (always persist the returned one)."
+fi
 
 finish
 note "client id  → $ENV_FILE (EVE_CLIENT_ID)"
