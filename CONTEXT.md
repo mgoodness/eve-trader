@@ -121,6 +121,11 @@ The pair `(best bid + δ, best ask − δ)` — the most aggressive prices that 
 hold time/price priority.
 _Avoid_: best price, competitive price
 
+**Candidate universe**:
+The types that have an active order in the region, from which candidates are
+drawn.
+_Avoid_: item list, type list
+
 **Candidate**:
 An item that has passed the filter layer and so is eligible for a
 recommendation.
