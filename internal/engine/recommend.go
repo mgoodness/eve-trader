@@ -44,14 +44,21 @@ type Result struct {
 	Excluded        []Excluded       `json:"excluded"`
 }
 
-// Params are the run's configurable inputs (spec §13); allocation and filter
-// thresholds are added by later tickets.
+// Params are the run's configurable inputs (spec §13); allocation
+// thresholds are added by a later ticket.
 type Params struct {
 	RegionID       int32
 	TradeStationID int64
 	TradeSystemID  int32
 	Delta          float64
 	Fees           Fees
+
+	// TargetMargin is the pricing rule's minimum net margin (spec §7 step
+	// 8, §8): a candidate below it is excluded. Filters holds the
+	// remaining book-only filter thresholds (spec §7 steps 5, 6; ticket
+	// #19).
+	TargetMargin float64
+	Filters      FilterThresholds
 }
 
 // Recommend builds the Result for a single candidate type: it derives the
