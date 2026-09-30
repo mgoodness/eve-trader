@@ -38,6 +38,12 @@ A buy order's setting for how far from its own station a seller may be to fill
 it: station, N jumps, or region. A sell order has no range.
 _Avoid_: reach, distance
 
+**Jump distance**:
+The number of gate jumps along the shortest route between two solar systems; a
+buy order with a numeric range covers the trade station when its jump distance
+is at most that range.
+_Avoid_: route length, distance
+
 **Effective buy book**:
 Every buy order whose range covers the trade station, wherever it sits in the
 region. These are the competing bids, and also the prices at which held stock
