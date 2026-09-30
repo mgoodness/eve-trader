@@ -13,6 +13,17 @@ type Recommendation struct {
 	SellPrice     float64 `json:"sell_price"`
 	NetMargin     float64 `json:"net_margin"`
 	ProfitPerUnit float64 `json:"profit_per_unit"`
+
+	// AverageDailyVolume is the trailing 30-day ADV (spec §7 step 4, §9),
+	// attached by FilterByHistory once history is available. Zero for a
+	// recommendation that never went through the history stage.
+	AverageDailyVolume float64 `json:"average_daily_volume"`
+
+	// ExpectedDailyProfit, RoiPerDay, and ExpectedDailyProfitPerOrderSlot
+	// are Rank's outputs (spec §9): zero until Rank runs.
+	ExpectedDailyProfit             float64 `json:"expected_daily_profit"`
+	RoiPerDay                       float64 `json:"roi_per_day"`
+	ExpectedDailyProfitPerOrderSlot float64 `json:"expected_daily_profit_per_order_slot"`
 }
 
 // Price computes the front-of-queue recommendation (spec §8) for a single
