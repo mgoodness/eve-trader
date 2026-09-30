@@ -228,27 +228,48 @@ func NewRootCmd(cfg Config) *cobra.Command {
 
 // newRecommendCmd builds the recommend command. Its flags default to
 // cfg.Values (already config.toml-overlaid defaults, spec §13) and override
-// whichever ones the pilot passes; the merged result is what Run sees.
-// Credentials are deliberately not a flag (spec §13) — cfg.Credentials is
-// the only source.
+// whichever ones the pilot passes; the merged result is what BuildResult
+// sees. Credentials are deliberately not a flag (spec §13) —
+// cfg.Credentials is the only source. Default output is the dense table
+// (spec §11); --json emits the stable machine contract instead, and
+// --explain expands the table's excluded section from a bare count to the
+// item list and reasons.
 func newRecommendCmd(cfg Config) *cobra.Command {
 	var jsonOutput bool
+	var explain bool
 	values := cfg.Values
 
 	cmd := &cobra.Command{
 		Use:   "recommend",
 		Short: "Recommend buy/sell prices for the candidate universe",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !jsonOutput {
-				return fmt.Errorf("table output isn't implemented yet (ticket #23); pass --json")
-			}
 			runCfg := cfg
 			runCfg.Values = values
-			return Run(cmd.Context(), runCfg, cmd.OutOrStdout())
+
+			result, warnings, err := BuildResult(cmd.Context(), runCfg)
+			if err != nil {
+				return err
+			}
+			// Route-lookup warnings (a jump-distance lookup that failed, so an
+			// order was treated as not covering the station) go to stderr,
+			// never into the JSON contract (spec §11 has no warnings field).
+			for _, w := range warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), w)
+			}
+
+			if jsonOutput {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(result)
+			}
+
+			_, err = fmt.Fprint(cmd.OutOrStdout(), RenderTable(result, explain))
+			return err
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "emit the JSON result")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "emit the JSON result instead of the default table")
+	cmd.Flags().BoolVar(&explain, "explain", false, "list excluded items and their reasons in the table")
 	cmd.Flags().Int64Var(&values.Budget, "budget", values.Budget, "trading budget, self-reported ISK")
 	cmd.Flags().Float64Var(&values.TargetMargin, "target-margin", values.TargetMargin, "minimum net margin a candidate must clear to be recommended")
 	cmd.Flags().Float64Var(&values.Delta, "delta", values.Delta, "aggression tick (\u03b4), in ISK, for front-of-queue prices")

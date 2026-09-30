@@ -16,15 +16,43 @@ type Meta struct {
 	GeneratedAt  time.Time `json:"generated_at"`
 	RegionID     int32     `json:"region_id"`
 	TradeStation int64     `json:"trade_station"`
+	Params       RunParams `json:"params"`
 	Fees         Fees      `json:"fees"`
 }
 
+// RunParams are the run's configurable inputs (spec §13), echoed back in
+// the JSON contract (spec §11) so an adapter can audit or reproduce a run
+// without re-reading config.toml or ESI. Tick is the pricing rule's δ (spec
+// §8); Accounting, BrokerRelations, FactionStanding, and CorpStanding are
+// the live skill/standing inputs Fees and OrderLimit were derived from
+// (spec §4).
+type RunParams struct {
+	Budget          int64   `json:"budget"`
+	TargetMargin    float64 `json:"target_margin"`
+	Tick            float64 `json:"tick"`
+	HorizonDays     int     `json:"horizon_days"`
+	CaptureRate     float64 `json:"capture_rate"`
+	Accounting      int     `json:"accounting"`
+	BrokerRelations int     `json:"broker_relations"`
+	FactionStanding float64 `json:"faction_standing"`
+	CorpStanding    float64 `json:"corp_standing"`
+}
+
 // Summary is the three-way split of the candidate universe (spec §11):
-// every candidate is funded, unfunded, or excluded.
+// every candidate is funded, unfunded, or excluded. CommittedCapital and
+// ExpectedDailyProfit total the funded set; BudgetUsed is CommittedCapital
+// as a fraction of Budget; OrdersUsed is the funded set's active-order
+// cost (spec §10: two slots per candidate).
 type Summary struct {
-	Recommendations int `json:"recommendations"`
-	Excluded        int `json:"excluded"`
-	Unfunded        int `json:"unfunded"`
+	Recommendations     int     `json:"recommendations"`
+	CommittedCapital    float64 `json:"committed_capital"`
+	Budget              int64   `json:"budget"`
+	BudgetUsed          float64 `json:"budget_used"`
+	OrdersUsed          int     `json:"orders_used"`
+	OrderLimit          int     `json:"order_limit"`
+	ExpectedDailyProfit float64 `json:"expected_daily_profit"`
+	Excluded            int     `json:"excluded"`
+	Unfunded            int     `json:"unfunded"`
 }
 
 // Excluded records a candidate that failed a filter, and why (spec §7, §11).

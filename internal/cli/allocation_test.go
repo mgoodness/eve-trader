@@ -19,7 +19,7 @@ func TestAllocatedUniverseFundsSurvivorsWithinBudgetAndOrderLimit(t *testing.T) 
 	cfg.Values.Budget = 150_000_000
 	cfg.Values.MinOrder = 1_000_000
 
-	funded, unfunded, excluded, _, err := cli.AllocatedUniverse(t.Context(), cfg)
+	funded, unfunded, excluded, _, _, err := cli.AllocatedUniverse(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("AllocatedUniverse: %v", err)
 	}
