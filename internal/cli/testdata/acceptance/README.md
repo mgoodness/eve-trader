@@ -3,9 +3,14 @@
 One frozen live capture of the Heimatar region-orders feed, plus the
 jump-distance routes and market history the v1 pipeline needs, committed so
 `TestAcceptanceAgainstFrozenSnapshot` (ticket #24) runs offline and
-repeatably. The check asserts the functional acceptance criteria in
-`docs/spec.md` §14; it makes no claim that the engine's 20% capture rate is
-correct.
+repeatably:
+
+```
+go test ./internal/cli -run TestAcceptanceAgainstFrozenSnapshot -v
+```
+
+The check asserts the functional acceptance criteria in `docs/spec.md`
+§14; it makes no claim that the engine's 20% capture rate is correct.
 
 ## Provenance
 
