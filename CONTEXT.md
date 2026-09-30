@@ -135,3 +135,13 @@ _Avoid_: signal, call
 The selection of which recommendations to post and how many units each, under
 the pilot's ISK budget, order limit, and buy-order escrow.
 _Avoid_: portfolio, basket
+
+**Committed capital**:
+The ISK a posted buy order ties up: its escrow plus the broker fees of the round
+trip. Sales tax is netted from sale proceeds, not committed.
+_Avoid_: investment, cost basis
+
+**Days of supply**:
+`units ÷ (capture rate × average daily volume)` — the expected number of days an
+order size takes to sell; caps the units posted per item.
+_Avoid_: turnover, holding time
