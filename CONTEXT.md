@@ -18,6 +18,11 @@ The set of all orders in a region, visible region-wide. It is a *data scope*,
 not a venue; goods do not move to it.
 _Avoid_: market (unqualified)
 
+**Order**:
+A market order — a buy order or a sell order. Never a sequence or a queue
+position; say *rank* or *sort* for those.
+_Avoid_: using "order" for sequence, priority, or line position
+
 **Buy order**:
 An order asking for an item to be provided within the range set on the order, in
 exchange for ISK. It reserves 100% escrow on creation.
