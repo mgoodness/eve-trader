@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // ErrCredentialsNotFound is returned by LoadCredentials when the
@@ -51,4 +52,38 @@ func LoadCredentials(path string) (Credentials, error) {
 		return Credentials{}, fmt.Errorf("parsing credentials %s: %w", path, err)
 	}
 	return creds, nil
+}
+
+// SaveCredentials writes creds to path as mode-600 JSON, creating or
+// replacing the file atomically (write to a temp file in the same
+// directory, then rename). Ticket #16 uses this to persist a rotated
+// refresh token (spec §12: "the refresh token ... rotates — persist the
+// returned one every time") without ever leaving a partially-written or
+// wrong-permission credentials.json on disk.
+func SaveCredentials(path string, creds Credentials) error {
+	body, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding credentials %s: %w", path, err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("writing credentials %s: %w", path, err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing credentials %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing credentials %s: %w", path, err)
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return fmt.Errorf("writing credentials %s: %w", path, err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("writing credentials %s: %w", path, err)
+	}
+	return nil
 }

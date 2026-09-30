@@ -18,7 +18,10 @@ import (
 	"github.com/mgoodness/eve-trader/internal/engine"
 )
 
-const defaultBaseURL = "https://esi.evetech.net/latest"
+const (
+	defaultBaseURL    = "https://esi.evetech.net/latest"
+	defaultSSOBaseURL = "https://login.eveonline.com"
+)
 
 // maxBackoffAttempts bounds how many times FetchRegionOrdersPage retries a
 // 429/420 response before giving up (spec "caching & politeness": back off
@@ -30,11 +33,13 @@ const maxBackoffAttempts = 5
 // one.
 const defaultBackoff = time.Second
 
-// ClientOptions configures a Client. BaseURL, CompatDate, and UserAgent all
-// have sane defaults if left zero, except UserAgent: ESI's best-practices
-// docs require a contactable User-Agent, so callers should always set one.
+// ClientOptions configures a Client. BaseURL, SSOBaseURL, CompatDate, and
+// UserAgent all have sane defaults if left zero, except UserAgent: ESI's
+// best-practices docs require a contactable User-Agent, so callers should
+// always set one.
 type ClientOptions struct {
 	BaseURL    string
+	SSOBaseURL string
 	UserAgent  string
 	CompatDate string
 	HTTPClient *http.Client
@@ -46,6 +51,7 @@ type ClientOptions struct {
 // Client is an ESI HTTP client.
 type Client struct {
 	baseURL    string
+	ssoBaseURL string
 	userAgent  string
 	compatDate string
 	httpClient *http.Client
@@ -56,6 +62,7 @@ type Client struct {
 func NewClient(opts ClientOptions) *Client {
 	c := &Client{
 		baseURL:    opts.BaseURL,
+		ssoBaseURL: opts.SSOBaseURL,
 		userAgent:  opts.UserAgent,
 		compatDate: opts.CompatDate,
 		httpClient: opts.HTTPClient,
@@ -63,6 +70,9 @@ func NewClient(opts ClientOptions) *Client {
 	}
 	if c.baseURL == "" {
 		c.baseURL = defaultBaseURL
+	}
+	if c.ssoBaseURL == "" {
+		c.ssoBaseURL = defaultSSOBaseURL
 	}
 	if c.httpClient == nil {
 		c.httpClient = http.DefaultClient
