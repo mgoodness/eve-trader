@@ -137,6 +137,16 @@ pilot can win, used to turn per-unit profit into expected daily profit. Flat in
 v1; a fill-probability model is v2.
 _Avoid_: fill rate, fill probability
 
+**Observed capture**:
+The fraction of an item's average daily volume actually sold over a period,
+measured from realised trades; the calibration target for the capture rate.
+_Avoid_: actual capture, realised rate
+
+**Realised margin**:
+The net margin actually achieved on a completed round trip, as opposed to the
+predicted net margin.
+_Avoid_: actual margin, achieved margin
+
 **Expected daily profit**:
 `net profit per unit × capture rate × average daily volume` — an item's daily
 profit rate, independent of how many units the pilot posts.
