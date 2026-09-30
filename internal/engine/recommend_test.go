@@ -22,7 +22,7 @@ func TestRecommendProducesOneRecommendationForATwoSidedCoveredBook(t *testing.T)
 	}
 	generatedAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 
-	result := engine.Recommend(orders, 11399, "Morphite", testParams, generatedAt)
+	result := engine.Recommend(orders, 11399, "Morphite", testParams, nil, generatedAt)
 
 	if len(result.Recommendations) != 1 {
 		t.Fatalf("got %d recommendations, want 1: %+v", len(result.Recommendations), result.Recommendations)
@@ -54,7 +54,7 @@ func TestRecommendExcludesATypeWithNoTwoSidedBook(t *testing.T) {
 		// no covering buy order
 	}
 
-	result := engine.Recommend(orders, 11399, "Morphite", testParams, time.Now())
+	result := engine.Recommend(orders, 11399, "Morphite", testParams, nil, time.Now())
 
 	if len(result.Recommendations) != 0 {
 		t.Fatalf("got %d recommendations, want 0: %+v", len(result.Recommendations), result.Recommendations)
@@ -76,7 +76,7 @@ func TestRecommendExcludesACrossedBook(t *testing.T) {
 		{OrderID: 2, TypeID: 34, IsBuyOrder: true, LocationID: tradeStationID, SystemID: tradeSystemID, Price: 3, Range: "station"},
 	}
 
-	result := engine.Recommend(orders, 34, "Tritanium", testParams, time.Now())
+	result := engine.Recommend(orders, 34, "Tritanium", testParams, nil, time.Now())
 
 	if len(result.Recommendations) != 0 {
 		t.Fatalf("got %d recommendations, want 0: %+v", len(result.Recommendations), result.Recommendations)
