@@ -157,7 +157,7 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 		return err
 	}
 
-	fees, _, err := pilotFacts(ctx, cfg, store)
+	facts, err := pilotFacts(ctx, cfg, store)
 	if err != nil {
 		return fmt.Errorf("reading live pilot facts: %w", err)
 	}
@@ -178,7 +178,7 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 		TradeStationID: cfg.TradeStationID,
 		TradeSystemID:  cfg.TradeSystemID,
 		Delta:          cfg.Values.Delta,
-		Fees:           fees,
+		Fees:           facts.Fees,
 	}
 	result := engine.Recommend(orders, cfg.TypeID, cfg.Name, params, jumpDistances, time.Now().UTC())
 

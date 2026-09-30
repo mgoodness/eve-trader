@@ -17,25 +17,27 @@ import (
 // none. Any route-lookup warnings from the underlying jump-distance
 // resolution (ticket #18) are returned alongside the result. This is the
 // seam the history-dependent filters (#20) build on: they run only on the
-// survivors this returns.
-func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendation, []engine.Excluded, []string, error) {
+// survivors this returns. It also returns the pilot's live facts (fees,
+// order limit) read to do so, so later stages (allocation, ticket #22)
+// don't trigger a second live ESI call for the same run.
+func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendation, []engine.Excluded, PilotFacts, []string, error) {
 	twoSided, warnings, err := TwoSidedUniverse(ctx, cfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, PilotFacts{}, nil, err
 	}
 
 	store, err := cache.Open(cfg.CacheDir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, PilotFacts{}, nil, err
 	}
-	fees, _, err := pilotFacts(ctx, cfg, store)
+	facts, err := pilotFacts(ctx, cfg, store)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("reading live pilot facts: %w", err)
+		return nil, nil, PilotFacts{}, nil, fmt.Errorf("reading live pilot facts: %w", err)
 	}
 
 	params := engine.Params{
 		Delta:        cfg.Values.Delta,
-		Fees:         fees,
+		Fees:         facts.Fees,
 		TargetMargin: cfg.Values.TargetMargin,
 		Filters: engine.FilterThresholds{
 			GrossMarginCeiling: cfg.Values.Filters.GrossMarginCeiling,
@@ -45,5 +47,5 @@ func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendat
 	}
 
 	recommendations, excluded := engine.FilterBookOnly(twoSided, params)
-	return recommendations, excluded, warnings, nil
+	return recommendations, excluded, facts, warnings, nil
 }

@@ -102,7 +102,7 @@ func TestHistoryFilteredUniverseFetchesHistoryOnlyForBookOnlySurvivors(t *testin
 	server, historyRequests := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	cfg := testConfig(t, server.URL)
 
-	recs, excluded, warnings, err := cli.HistoryFilteredUniverse(t.Context(), cfg)
+	recs, excluded, _, warnings, err := cli.HistoryFilteredUniverse(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("HistoryFilteredUniverse: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestHistoryFilteredUniverseDropsCandidatesFailingAHistoryFilter(t *testing.
 	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	cfg := testConfig(t, server.URL)
 
-	recs, excluded, _, err := cli.HistoryFilteredUniverse(t.Context(), cfg)
+	recs, excluded, _, _, err := cli.HistoryFilteredUniverse(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("HistoryFilteredUniverse: %v", err)
 	}
@@ -157,10 +157,10 @@ func TestHistoryFilteredUniverseCachesHistoryAcrossCalls(t *testing.T) {
 	server, historyRequests := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	cfg := testConfig(t, server.URL)
 
-	if _, _, _, err := cli.HistoryFilteredUniverse(t.Context(), cfg); err != nil {
+	if _, _, _, _, err := cli.HistoryFilteredUniverse(t.Context(), cfg); err != nil {
 		t.Fatalf("HistoryFilteredUniverse (first call): %v", err)
 	}
-	if _, _, _, err := cli.HistoryFilteredUniverse(t.Context(), cfg); err != nil {
+	if _, _, _, _, err := cli.HistoryFilteredUniverse(t.Context(), cfg); err != nil {
 		t.Fatalf("HistoryFilteredUniverse (second call): %v", err)
 	}
 
