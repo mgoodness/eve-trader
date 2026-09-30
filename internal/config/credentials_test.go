@@ -70,3 +70,33 @@ func TestLoadCredentialsReturnsAClearErrorForMalformedJSON(t *testing.T) {
 		t.Fatal("LoadCredentials(malformed) returned no error, want one")
 	}
 }
+
+func TestSaveCredentialsRoundTripsWithLoadCredentials(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	want := config.Credentials{
+		ClientID:     "abc123",
+		ClientSecret: "shh",
+		RedirectURI:  "http://127.0.0.1:8000/callback",
+		RefreshToken: "rotated-refresh-token",
+	}
+
+	if err := config.SaveCredentials(path, want); err != nil {
+		t.Fatalf("SaveCredentials: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("got mode %#o, want 0600", perm)
+	}
+
+	got, err := config.LoadCredentials(path)
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if got != want {
+		t.Errorf("LoadCredentials() = %+v, want %+v", got, want)
+	}
+}

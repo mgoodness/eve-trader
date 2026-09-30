@@ -31,17 +31,36 @@ const regionOrdersTTL = 300 * time.Second
 // ESIBaseURL and CacheDir to point at a fake server and a temp directory.
 type Config struct {
 	ESIBaseURL string
+	SSOBaseURL string
 	UserAgent  string
 	CompatDate string
 	CacheDir   string
+
+	// ConfigDir is where credentials.json lives, so Run can persist a
+	// rotated refresh token back to disk (spec §12). Set by LoadConfig;
+	// left empty by DefaultConfig, in which case Run skips persistence (no
+	// disk-backed credentials file to rotate).
+	ConfigDir string
 
 	RegionID       int32
 	TradeStationID int64
 	TradeSystemID  int32
 
+	// StationOwnerCorpID and RegionFactionID identify whose standings
+	// reduce the NPC-station broker fee (spec §4; research
+	// eve-market-mechanics-and-esi.md §5, §7.3): the trade station's
+	// owning corporation and the region's controlling faction.
+	StationOwnerCorpID int32
+	RegionFactionID    int32
+
 	TypeID int32
 	Name   string
-	Fees   engine.Fees
+
+	// Fees is a placeholder filled in from DefaultConfig for callers that
+	// never call Run (e.g. future adapters that price a candidate
+	// directly); Run itself always overwrites it with live skills/
+	// standings-derived fees (ticket #16) before pricing.
+	Fees engine.Fees
 
 	// Values holds the configurable run parameters (spec §13): built from
 	// config.Defaults(), overlaid by config.toml (LoadConfig), overlaid in
@@ -49,8 +68,8 @@ type Config struct {
 	Values config.Values
 
 	// Credentials is read from credentials.json by LoadConfig. It is never
-	// settable by a CLI flag (spec §13); no command consumes it yet —
-	// ticket #16 wires it into ESI OAuth.
+	// settable by a CLI flag (spec §13). Run requires it: ticket #16 mints
+	// a live access token from the stored refresh token on every run.
 	Credentials config.Credentials
 }
 
@@ -62,16 +81,18 @@ type Config struct {
 // read from disk should call LoadConfig instead.
 func DefaultConfig() Config {
 	return Config{
-		UserAgent:      "eve-trader/0.1 (+https://github.com/mgoodness/eve-trader)",
-		CompatDate:     "2026-09-30",
-		CacheDir:       defaultCacheDir(),
-		RegionID:       10000030, // Heimatar
-		TradeStationID: 60004588, // Rens VI - Moon 8 - Brutor Tribe Treasury
-		TradeSystemID:  30002510, // Rens
-		TypeID:         11399,    // Morphite: liquid and two-sided at Rens
-		Name:           "Morphite",
-		Fees:           engine.Fees{Broker: 0.018, SalesTax: 0.05025},
-		Values:         config.Defaults(),
+		UserAgent:          "eve-trader/0.1 (+https://github.com/mgoodness/eve-trader)",
+		CompatDate:         "2026-09-30",
+		CacheDir:           defaultCacheDir(),
+		RegionID:           10000030, // Heimatar
+		TradeStationID:     60004588, // Rens VI - Moon 8 - Brutor Tribe Treasury
+		TradeSystemID:      30002510, // Rens
+		StationOwnerCorpID: 1000049,  // Brutor Tribe
+		RegionFactionID:    500002,   // Minmatar Republic
+		TypeID:             11399,    // Morphite: liquid and two-sided at Rens
+		Name:               "Morphite",
+		Fees:               engine.Fees{Broker: 0.018, SalesTax: 0.05025},
+		Values:             config.Defaults(),
 	}
 }
 
@@ -90,6 +111,7 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("resolving config directory: %w", err)
 	}
+	cfg.ConfigDir = configDir
 
 	values, err := config.Load(filepath.Join(configDir, "config.toml"))
 	if err != nil {
@@ -124,11 +146,23 @@ func defaultCacheDir() string {
 	return dir
 }
 
-// Run fetches the region orders for cfg.TypeID (from cache if fresh,
-// otherwise from ESI), prices the front of queue, and writes the JSON
-// Result to w.
+// Run mints a live access token from the pilot's stored refresh token,
+// derives fee rates and the order limit from live skills and standings
+// (spec §4, §12; ticket #16), fetches the region orders for cfg.TypeID
+// (from cache if fresh, otherwise from ESI), prices the front of queue, and
+// writes the JSON Result to w.
 func Run(ctx context.Context, cfg Config, w io.Writer) error {
-	orders, err := regionOrders(ctx, cfg)
+	store, err := cache.Open(cfg.CacheDir)
+	if err != nil {
+		return err
+	}
+
+	fees, _, err := pilotFacts(ctx, cfg, store)
+	if err != nil {
+		return fmt.Errorf("reading live pilot facts: %w", err)
+	}
+
+	orders, err := regionOrders(ctx, cfg, store)
 	if err != nil {
 		return fmt.Errorf("fetching region orders: %w", err)
 	}
@@ -138,7 +172,7 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 		TradeStationID: cfg.TradeStationID,
 		TradeSystemID:  cfg.TradeSystemID,
 		Delta:          cfg.Values.Delta,
-		Fees:           cfg.Fees,
+		Fees:           fees,
 	}
 	result := engine.Recommend(orders, cfg.TypeID, cfg.Name, params, time.Now().UTC())
 
@@ -147,12 +181,7 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 	return enc.Encode(result)
 }
 
-func regionOrders(ctx context.Context, cfg Config) ([]engine.Order, error) {
-	store, err := cache.Open(cfg.CacheDir)
-	if err != nil {
-		return nil, err
-	}
-
+func regionOrders(ctx context.Context, cfg Config, store *cache.Store) ([]engine.Order, error) {
 	key := fmt.Sprintf("region-orders:%d:%d", cfg.RegionID, cfg.TypeID)
 	if body, fresh, err := store.Get(key); err == nil && fresh {
 		var orders []engine.Order
