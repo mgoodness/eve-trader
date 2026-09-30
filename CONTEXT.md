@@ -115,6 +115,17 @@ An item that has passed the filter layer and so is eligible for a
 recommendation.
 _Avoid_: opportunity, pick
 
+**Capture rate**:
+The fraction of an item's average daily traded volume the engine assumes the
+pilot can win, used to turn per-unit profit into expected daily profit. Flat in
+v1; a fill-probability model is v2.
+_Avoid_: fill rate, fill probability
+
+**Expected daily profit**:
+`net profit per unit × capture rate × average daily volume` — an item's daily
+profit rate, independent of how many units the pilot posts.
+_Avoid_: daily yield, potential profit
+
 **Recommendation**:
 A candidate paired with the front-of-queue prices, the resulting net margin, and
 a unit quantity, subject to the pilot's budget and order limit.
