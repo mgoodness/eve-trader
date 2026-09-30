@@ -15,7 +15,7 @@ func TestUniverseGroupsOrdersByTypeAndBuildsEachTypesEffectiveBooks(t *testing.T
 		{OrderID: 3, TypeID: 34, IsBuyOrder: false, LocationID: tradeStationID, SystemID: tradeSystemID, Price: 5, Range: "region"},
 	}
 
-	universe := engine.Universe(orders, tradeStationID, tradeSystemID)
+	universe := engine.Universe(orders, tradeStationID, tradeSystemID, nil)
 
 	if len(universe) != 2 {
 		t.Fatalf("got %d candidate types, want 2: %+v", len(universe), universe)
@@ -43,7 +43,7 @@ func TestTwoSidedKeepsOnlyCandidatesWithACoveringBidAndAStationAsk(t *testing.T)
 		{OrderID: 4, TypeID: 35, IsBuyOrder: true, LocationID: tradeStationID, SystemID: tradeSystemID, Price: 2, Range: "station"},
 	}
 
-	twoSided := engine.TwoSided(engine.Universe(orders, tradeStationID, tradeSystemID))
+	twoSided := engine.TwoSided(engine.Universe(orders, tradeStationID, tradeSystemID, nil))
 
 	if len(twoSided) != 1 {
 		t.Fatalf("got %d two-sided types, want 1: %+v", len(twoSided), twoSided)

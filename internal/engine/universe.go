@@ -14,10 +14,10 @@ type CandidateType struct {
 // Universe groups a region-orders feed by type and computes each type's
 // effective sell and buy books (spec §3, §6). Every type with at least one
 // region order gets an entry, in ascending type_id order, even if one side
-// of its book is empty. Numeric jump-range coverage is still deferred
-// (ticket #18): EffectiveBuyBook's station/solarsystem/region-only coverage
-// applies per type here too.
-func Universe(orders []Order, tradeStationID int64, tradeSystemID int32) []CandidateType {
+// of its book is empty. jumpDistances is forwarded to EffectiveBuyBook
+// unchanged for numeric-range coverage (ticket #18); pass nil if the
+// caller has none (no numeric-range order will cover).
+func Universe(orders []Order, tradeStationID int64, tradeSystemID int32, jumpDistances map[int32]int) []CandidateType {
 	byType := make(map[int32][]Order)
 	var typeIDs []int32
 	for _, o := range orders {
@@ -34,7 +34,7 @@ func Universe(orders []Order, tradeStationID int64, tradeSystemID int32) []Candi
 		universe = append(universe, CandidateType{
 			TypeID:   typeID,
 			SellBook: EffectiveSellBook(typeOrders, tradeStationID),
-			BuyBook:  EffectiveBuyBook(typeOrders, tradeStationID, tradeSystemID),
+			BuyBook:  EffectiveBuyBook(typeOrders, tradeStationID, tradeSystemID, jumpDistances),
 		})
 	}
 	return universe

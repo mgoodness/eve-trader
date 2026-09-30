@@ -167,6 +167,12 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 		return fmt.Errorf("fetching region orders: %w", err)
 	}
 
+	// Route-lookup warnings aren't surfaced yet: Run prices a single
+	// compiled-in candidate (cfg.TypeID), and the spec's JSON contract
+	// (§11) has no warnings field. A later ticket wires --explain or
+	// stderr diagnostics for the whole-universe run.
+	jumpDistances, _ := JumpDistances(ctx, cfg, store, orders)
+
 	params := engine.Params{
 		RegionID:       cfg.RegionID,
 		TradeStationID: cfg.TradeStationID,
@@ -174,7 +180,7 @@ func Run(ctx context.Context, cfg Config, w io.Writer) error {
 		Delta:          cfg.Values.Delta,
 		Fees:           fees,
 	}
-	result := engine.Recommend(orders, cfg.TypeID, cfg.Name, params, time.Now().UTC())
+	result := engine.Recommend(orders, cfg.TypeID, cfg.Name, params, jumpDistances, time.Now().UTC())
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

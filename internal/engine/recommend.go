@@ -58,8 +58,10 @@ type Params struct {
 // effective books, prices the front of queue, and classifies the candidate
 // as recommended or excluded. This is the walking skeleton's entire engine
 // surface (ticket #14); later tickets extend it to the full filter/rank/
-// allocate pipeline over the whole candidate universe.
-func Recommend(orders []Order, typeID int32, name string, params Params, generatedAt time.Time) Result {
+// allocate pipeline over the whole candidate universe. jumpDistances is
+// forwarded to EffectiveBuyBook unchanged for numeric-range coverage
+// (ticket #18); pass nil if the caller has none.
+func Recommend(orders []Order, typeID int32, name string, params Params, jumpDistances map[int32]int, generatedAt time.Time) Result {
 	result := Result{
 		Meta: Meta{
 			GeneratedAt:  generatedAt,
@@ -73,7 +75,7 @@ func Recommend(orders []Order, typeID int32, name string, params Params, generat
 	}
 
 	sellBook := EffectiveSellBook(orders, params.TradeStationID)
-	buyBook := EffectiveBuyBook(orders, params.TradeStationID, params.TradeSystemID)
+	buyBook := EffectiveBuyBook(orders, params.TradeStationID, params.TradeSystemID, jumpDistances)
 
 	bestBid, haveBid := bestPrice(buyBook)
 	bestAsk, haveAsk := bestPrice(sellBook)
