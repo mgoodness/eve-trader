@@ -27,15 +27,15 @@ const (
 // order. No history is ever requested for a candidate the book-only stage
 // already excluded, and a book-only exclusion is never overwritten with a
 // second, history-stage reason.
-func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendation, []engine.Excluded, []string, error) {
-	recs, excluded, warnings, err := BookFilteredUniverse(ctx, cfg)
+func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendation, []engine.Excluded, PilotFacts, []string, error) {
+	recs, excluded, facts, warnings, err := BookFilteredUniverse(ctx, cfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, PilotFacts{}, nil, err
 	}
 
 	store, err := cache.Open(cfg.CacheDir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, PilotFacts{}, nil, err
 	}
 	client := esi.NewClient(esi.ClientOptions{
 		BaseURL:    cfg.ESIBaseURL,
@@ -47,7 +47,7 @@ func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommen
 	for _, rec := range recs {
 		history, err := cachedHistory(ctx, cfg, store, client, rec.TypeID, time.Now())
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("fetching history for type %d: %w", rec.TypeID, err)
+			return nil, nil, PilotFacts{}, nil, fmt.Errorf("fetching history for type %d: %w", rec.TypeID, err)
 		}
 		candidates = append(candidates, engine.CandidateHistory{Recommendation: rec, History: history})
 	}
@@ -65,7 +65,7 @@ func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommen
 	historyRecs, historyExcluded := engine.FilterByHistory(candidates, thresholds)
 	excluded = append(excluded, historyExcluded...)
 
-	return historyRecs, excluded, warnings, nil
+	return historyRecs, excluded, facts, warnings, nil
 }
 
 // cachedHistory returns typeID's 30-day market history from cache if fresh,

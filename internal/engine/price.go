@@ -24,6 +24,13 @@ type Recommendation struct {
 	ExpectedDailyProfit             float64 `json:"expected_daily_profit"`
 	RoiPerDay                       float64 `json:"roi_per_day"`
 	ExpectedDailyProfitPerOrderSlot float64 `json:"expected_daily_profit_per_order_slot"`
+
+	// Units, CommittedCapital, and DaysToClear are Allocate's outputs (spec
+	// §10): zero until Allocate runs. A candidate Allocate could not fund
+	// (the unfunded set) always has Units == 0.
+	Units            int64   `json:"units"`
+	CommittedCapital float64 `json:"committed_capital"`
+	DaysToClear      float64 `json:"days_to_clear"`
 }
 
 // Price computes the front-of-queue recommendation (spec §8) for a single

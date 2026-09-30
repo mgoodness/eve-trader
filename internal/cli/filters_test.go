@@ -55,7 +55,7 @@ func TestBookFilteredUniverseAppliesTheBookOnlyFiltersToTheTwoSidedUniverse(t *t
 	server := bookFilteredFixtureServer(t, orders)
 	cfg := testConfig(t, server.URL)
 
-	recs, excluded, warnings, err := cli.BookFilteredUniverse(t.Context(), cfg)
+	recs, excluded, _, warnings, err := cli.BookFilteredUniverse(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("BookFilteredUniverse: %v", err)
 	}

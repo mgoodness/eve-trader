@@ -34,7 +34,7 @@ func TestRankedUniverseSortsSurvivorsByExpectedDailyProfitDescending(t *testing.
 	server, _ := historyFilteredFixtureServer(t, rankedFilteredOrders(), history)
 	cfg := testConfig(t, server.URL)
 
-	recs, excluded, _, err := cli.RankedUniverse(t.Context(), cfg)
+	recs, excluded, _, _, err := cli.RankedUniverse(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("RankedUniverse: %v", err)
 	}
