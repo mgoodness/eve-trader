@@ -10,11 +10,14 @@ import (
 // the ranked survivors under the run's budget and the pilot's live,
 // skill-derived order limit (spec §10; ticket #22): the funded set and the
 // not-funded-by-budget set, kept separate from candidates the filter layer
-// already excluded. This is the seam the output contract (#23) builds on.
-func AllocatedUniverse(ctx context.Context, cfg Config) (funded, unfunded []engine.Recommendation, excluded []engine.Excluded, warnings []string, err error) {
+// already excluded. It also returns the live PilotFacts the run's fees and
+// order limit were derived from, so a caller building the output
+// contract's Meta (ticket #23) doesn't trigger a second live ESI call for
+// the same run. This is the seam the output contract (#23) builds on.
+func AllocatedUniverse(ctx context.Context, cfg Config) (funded, unfunded []engine.Recommendation, excluded []engine.Excluded, facts PilotFacts, warnings []string, err error) {
 	ranked, excluded, facts, warnings, err := RankedUniverse(ctx, cfg)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, PilotFacts{}, nil, err
 	}
 
 	params := engine.AllocationParams{
@@ -27,5 +30,5 @@ func AllocatedUniverse(ctx context.Context, cfg Config) (funded, unfunded []engi
 	}
 
 	funded, unfunded = engine.Allocate(ranked, params)
-	return funded, unfunded, excluded, warnings, nil
+	return funded, unfunded, excluded, facts, warnings, nil
 }

@@ -29,6 +29,15 @@ const (
 type PilotFacts struct {
 	Fees       engine.Fees
 	OrderLimit int
+
+	// Accounting, BrokerRelations, FactionStanding, and CorpStanding are the
+	// raw skill levels and standings Fees was derived from (spec §4),
+	// echoed into the output contract's Meta.Params (ticket #23) so a run
+	// is auditable without a second ESI call.
+	Accounting      int
+	BrokerRelations int
+	FactionStanding float64
+	CorpStanding    float64
 }
 
 // pilotFacts mints a fresh access token from the stored refresh token,
@@ -85,8 +94,12 @@ func pilotFacts(ctx context.Context, cfg Config, store *cache.Store) (PilotFacts
 	}
 
 	return PilotFacts{
-		Fees:       engine.DeriveFees(skills, factionStanding, corpStanding),
-		OrderLimit: engine.OrderLimit(skills),
+		Fees:            engine.DeriveFees(skills, factionStanding, corpStanding),
+		OrderLimit:      engine.OrderLimit(skills),
+		Accounting:      skills[engine.AccountingSkillID],
+		BrokerRelations: skills[engine.BrokerRelationsSkillID],
+		FactionStanding: factionStanding,
+		CorpStanding:    corpStanding,
 	}, nil
 }
 

@@ -207,20 +207,72 @@ func TestRunFailsClearlyWithoutCredentials(t *testing.T) {
 	}
 }
 
-func TestRecommendCommandRequiresTheJSONFlag(t *testing.T) {
-	server := fakeESIServer(t)
+func TestRecommendCommandDefaultsToTheDenseTableWithoutJSON(t *testing.T) {
+	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
+	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	root := cli.NewRootCmd(testConfig(t, server.URL))
-	root.SetArgs([]string{"recommend"})
-	root.SetOut(&strings.Builder{})
+	var out strings.Builder
+	root.SetOut(&out)
 	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"recommend"})
 
-	if err := root.ExecuteContext(t.Context()); err == nil {
-		t.Fatalf("got no error running recommend without --json, want an error")
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "FUNDED RECOMMENDATIONS") {
+		t.Fatalf("got table %q, want the funded recommendations section by default", out.String())
+	}
+	// Names aren't resolved yet (engine.PricingRule's doc comment); the
+	// table identifies funded Morphite (11399) by its type_id.
+	if !strings.Contains(out.String(), "11399") {
+		t.Errorf("got table %q, want the funded Morphite (type 11399) recommendation", out.String())
+	}
+	if strings.Contains(out.String(), "thin book") {
+		t.Errorf("got table %q, want excluded reasons hidden without --explain", out.String())
+	}
+}
+
+func TestRecommendExplainFlagListsExcludedReasons(t *testing.T) {
+	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
+	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
+	root := cli.NewRootCmd(testConfig(t, server.URL))
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"recommend", "--explain"})
+
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Tritanium is type 34; names aren't resolved yet, so --explain
+	// identifies it by type_id alongside its reason.
+	if !strings.Contains(out.String(), "34") || !strings.Contains(out.String(), "thin book") {
+		t.Errorf("got table %q, want Tritanium (type 34) and its exclusion reason under --explain", out.String())
+	}
+}
+
+func TestRecommendCommandRendersAnEmptyUniverseCleanlyWithoutCrashing(t *testing.T) {
+	server, _ := historyFilteredFixtureServer(t, nil, nil)
+	root := cli.NewRootCmd(testConfig(t, server.URL))
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"recommend", "--explain"})
+
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "FUNDED RECOMMENDATIONS (0)") {
+		t.Errorf("got table %q, want a clean zero-candidate rendering", out.String())
 	}
 }
 
 func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
-	server := fakeESIServer(t)
+	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
+	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	root := cli.NewRootCmd(testConfig(t, server.URL))
 	var out strings.Builder
 	root.SetOut(&out)
@@ -238,10 +290,17 @@ func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
 	if len(result.Recommendations) != 1 {
 		t.Errorf("got %d recommendations, want 1", len(result.Recommendations))
 	}
+	if result.Summary.Excluded != 1 {
+		t.Errorf("got Excluded=%d, want 1 (Tritanium)", result.Summary.Excluded)
+	}
+	if result.Recommendations[0].RoiPerDay == 0 {
+		t.Errorf("got RoiPerDay=0, want it populated in the JSON contract")
+	}
 }
 
 func TestRecommendDeltaFlagOverridesTheConfiguredValue(t *testing.T) {
-	server := fakeESIServer(t)
+	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
+	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	cfg := testConfig(t, server.URL)
 	root := cli.NewRootCmd(cfg)
 	var out strings.Builder
@@ -261,8 +320,9 @@ func TestRecommendDeltaFlagOverridesTheConfiguredValue(t *testing.T) {
 		t.Fatalf("got %d recommendations, want 1: %+v", len(result.Recommendations), result.Recommendations)
 	}
 	rec := result.Recommendations[0]
-	// best bid 18220, best ask 24080 (see fakeESIServer); δ=250 overrides the
-	// default of 100, so buy_price/sell_price must move by the difference.
+	// best bid 18220, best ask 24080 (see historyFilteredOrders); δ=250
+	// overrides the default of 100, so buy_price/sell_price must move by
+	// the difference.
 	if rec.BuyPrice != 18470 || rec.SellPrice != 23830 {
 		t.Errorf("got buy_price=%v sell_price=%v, want buy_price=18470 sell_price=23830 (\u03b4=250 applied)", rec.BuyPrice, rec.SellPrice)
 	}

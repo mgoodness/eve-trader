@@ -68,6 +68,18 @@ func Allocate(ranked []Recommendation, params AllocationParams) (funded, unfunde
 	return funded, unfunded
 }
 
+// CapitalNeeded reports the committed capital a candidate would need to be
+// funded at its full units cap (spec §10 steps 2–3): the same per-unit
+// capital and units-cap formula Allocate applies internally, exposed so
+// the output contract's "not funded by budget" section (spec §11) can
+// show what an unfunded candidate needs, without Allocate itself ever
+// setting Units or CommittedCapital on a candidate it did not fund.
+func CapitalNeeded(rec Recommendation, broker, captureRate float64, horizonDays int) float64 {
+	unitsCap := int64(captureRate * rec.AverageDailyVolume * float64(horizonDays))
+	capitalPerUnit := rec.BuyPrice*(1+broker) + rec.SellPrice*broker
+	return capitalPerUnit * float64(unitsCap)
+}
+
 // density is a candidate's expected daily profit per ISK of committed
 // capital (spec §10 step 1) — the fractional-knapsack sort key: expected
 // daily profit is already a rate independent of how many units are posted

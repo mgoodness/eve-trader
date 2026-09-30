@@ -7,6 +7,17 @@ import (
 	"github.com/mgoodness/eve-trader/internal/engine"
 )
 
+func TestCapitalNeededReportsWhatACandidateWouldNeedToBeFundedAtItsUnitsCap(t *testing.T) {
+	rec := engine.Recommendation{BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100}
+
+	// units cap = 0.20 * 100 * 3 = 60; capital/unit = 1000*1.018 + 1100*0.018 = 1037.8
+	want := 1037.8 * 60
+	got := engine.CapitalNeeded(rec, 0.018, 0.20, 3)
+	if math.Abs(got-want) > 1e-6 {
+		t.Errorf("got CapitalNeeded=%v, want %v", got, want)
+	}
+}
+
 func TestAllocateFundsACandidateAtItsUnitsCapWhenBudgetComfortablyCoversIt(t *testing.T) {
 	ranked := []engine.Recommendation{
 		{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, ProfitPerUnit: 90, AverageDailyVolume: 100},
