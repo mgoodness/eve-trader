@@ -74,6 +74,22 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 	return c.postTokenRequest(ctx, form)
 }
 
+// ExchangeAuthorizationCode exchanges an authorization code for an
+// access/refresh token pair (spec §12; docs/research/esi-sso-cli.md §1.2,
+// §1.3): POST https://login.eveonline.com/v2/oauth/token, form-encoded,
+// with the PKCE code_verifier and no client secret (public PKCE client,
+// no Authorization header) — reuses postTokenRequest so this and
+// RefreshAccessToken cannot drift.
+func (c *Client) ExchangeAuthorizationCode(ctx context.Context, clientID, redirectURI, code, codeVerifier string) (TokenResponse, error) {
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {codeVerifier},
+		"client_id":     {clientID},
+	}
+	return c.postTokenRequest(ctx, form)
+}
+
 // postTokenRequest POSTs form, form-encoded, to the SSO token endpoint
 // (docs/research/esi-sso-cli.md §3.1, §3.2) and decodes the JSON response
 // as a TokenResponse. It is shared by RefreshAccessToken's refresh grant
