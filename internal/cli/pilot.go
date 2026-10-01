@@ -36,6 +36,13 @@ type PilotFacts struct {
 	// belongs to without a second decode.
 	CharacterID int32
 
+	// CharacterName is the same character's name, decoded from the access
+	// token's JWT name claim (docs/research/esi-sso-cli.md §4.3). `login`
+	// prints this rather than CharacterID so its output names the pilot
+	// readably. Falls back to the numeric id (as a string) if the access
+	// token carries no name claim, so a display string is always available.
+	CharacterName string
+
 	// Accounting, BrokerRelations, FactionStanding, and CorpStanding are the
 	// raw skill levels and standings Fees was derived from (spec §4),
 	// echoed into the output contract's Meta.Params (ticket #23) so a run
@@ -93,6 +100,14 @@ func pilotFactsForAccessToken(ctx context.Context, cfg Config, store *cache.Stor
 		return PilotFacts{}, fmt.Errorf("decoding character id from access token: %w", err)
 	}
 
+	characterName, err := esi.CharacterNameFromAccessToken(accessToken)
+	if err != nil || characterName == "" {
+		// No name claim is not fatal -- a display string is still available
+		// (ticket #29's acceptance criterion only needs the character named,
+		// not necessarily by its name claim specifically).
+		characterName = fmt.Sprintf("%d", characterID)
+	}
+
 	skills, err := cachedSkills(ctx, store, client, characterID, accessToken)
 	if err != nil {
 		return PilotFacts{}, err
@@ -115,6 +130,7 @@ func pilotFactsForAccessToken(ctx context.Context, cfg Config, store *cache.Stor
 
 	return PilotFacts{
 		CharacterID:     characterID,
+		CharacterName:   characterName,
 		Fees:            engine.DeriveFees(skills, factionStanding, corpStanding),
 		OrderLimit:      engine.OrderLimit(skills),
 		Accounting:      skills[engine.AccountingSkillID],

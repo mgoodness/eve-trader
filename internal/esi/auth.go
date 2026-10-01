@@ -22,29 +22,49 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-// CharacterIDFromAccessToken decodes the character id from an ESI access
-// token's JWT payload, without verifying the signature (spec §12: "the
-// access token is a JWT ... carrying the character id in sub";
-// docs/research/esi-sso-cli.md §4.3). The sub claim's observed shape is
-// "CHARACTER:EVE:<character-id>"; per the research note's recommendation,
-// this splits on ":" and takes index 2 rather than matching a prefix, so
-// either claim ordering CCP has documented works.
-func CharacterIDFromAccessToken(accessToken string) (int32, error) {
+// accessTokenClaims is the subset of an ESI access token's JWT payload
+// CharacterIDFromAccessToken and CharacterNameFromAccessToken need (spec
+// §12; docs/research/esi-sso-cli.md §4.3's full example payload also
+// carries scp, aud, exp, etc., all irrelevant here).
+type accessTokenClaims struct {
+	Sub  string `json:"sub"`
+	Name string `json:"name"`
+}
+
+// decodeAccessTokenClaims decodes an ESI access token's JWT payload without
+// verifying the signature -- both CharacterIDFromAccessToken and
+// CharacterNameFromAccessToken are callers of this one shared decode so
+// there is a single place that knows the token is a 3-segment JWT and how
+// to base64url-decode its middle segment.
+func decodeAccessTokenClaims(accessToken string) (accessTokenClaims, error) {
 	parts := strings.Split(accessToken, ".")
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("access token %q is not a JWT (want 3 dot-separated segments, got %d)", accessToken, len(parts))
+		return accessTokenClaims{}, fmt.Errorf("access token %q is not a JWT (want 3 dot-separated segments, got %d)", accessToken, len(parts))
 	}
 
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return 0, fmt.Errorf("decoding access token payload: %w", err)
+		return accessTokenClaims{}, fmt.Errorf("decoding access token payload: %w", err)
 	}
 
-	var claims struct {
-		Sub string `json:"sub"`
-	}
+	var claims accessTokenClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return 0, fmt.Errorf("parsing access token payload: %w", err)
+		return accessTokenClaims{}, fmt.Errorf("parsing access token payload: %w", err)
+	}
+	return claims, nil
+}
+
+// CharacterIDFromAccessToken decodes the character id from an ESI access
+// token's JWT payload (spec §12: "the access token is a JWT ... carrying
+// the character id in sub"; docs/research/esi-sso-cli.md §4.3). The sub
+// claim's observed shape is "CHARACTER:EVE:<character-id>"; per the
+// research note's recommendation, this splits on ":" and takes index 2
+// rather than matching a prefix, so either claim ordering CCP has
+// documented works.
+func CharacterIDFromAccessToken(accessToken string) (int32, error) {
+	claims, err := decodeAccessTokenClaims(accessToken)
+	if err != nil {
+		return 0, err
 	}
 
 	fields := strings.Split(claims.Sub, ":")
@@ -57,6 +77,22 @@ func CharacterIDFromAccessToken(accessToken string) (int32, error) {
 		return 0, fmt.Errorf("sub claim %q does not end in a character id: %w", claims.Sub, err)
 	}
 	return int32(id), nil
+}
+
+// CharacterNameFromAccessToken decodes the character name from an ESI
+// access token's JWT payload's name claim (docs/research/esi-sso-cli.md
+// §4.3's example payload: "name": "Some Bloke"). `login` prints this
+// rather than the numeric character id so its output is readable at a
+// glance.
+func CharacterNameFromAccessToken(accessToken string) (string, error) {
+	claims, err := decodeAccessTokenClaims(accessToken)
+	if err != nil {
+		return "", err
+	}
+	if claims.Name == "" {
+		return "", fmt.Errorf("access token has no name claim")
+	}
+	return claims.Name, nil
 }
 
 // RefreshAccessToken mints a new access token from a stored refresh token

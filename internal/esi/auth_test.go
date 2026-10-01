@@ -19,8 +19,15 @@ import (
 // only decodes the payload.
 func jwtWithSub(t *testing.T, sub string) string {
 	t.Helper()
+	return jwtWithClaims(t, map[string]any{"sub": sub})
+}
+
+// jwtWithClaims builds an unsigned JWT-shaped string whose payload is
+// exactly claims, for tests that need more than just sub (e.g. name).
+func jwtWithClaims(t *testing.T, claims map[string]any) string {
+	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload, err := json.Marshal(map[string]any{"sub": sub})
+	payload, err := json.Marshal(claims)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -36,6 +43,30 @@ func TestCharacterIDFromAccessTokenReadsTheSubClaim(t *testing.T) {
 	}
 	if got != 932683762 {
 		t.Errorf("got character id %d, want 932683762", got)
+	}
+}
+
+// TestCharacterNameFromAccessTokenReadsTheNameClaim is a regression test:
+// `eve-trader login` printed the numeric character id in its output
+// ("Verified scopes for character 932683762: ...") because nothing decoded
+// the JWT's "name" claim, which EVE SSO already includes alongside sub
+// (docs/research/esi-sso-cli.md §4.3: "name": "Some Bloke"). The pilot asked
+// for the character name there instead.
+func TestCharacterNameFromAccessTokenReadsTheNameClaim(t *testing.T) {
+	token := jwtWithClaims(t, map[string]any{"sub": "CHARACTER:EVE:932683762", "name": "Some Bloke"})
+
+	got, err := esi.CharacterNameFromAccessToken(token)
+	if err != nil {
+		t.Fatalf("CharacterNameFromAccessToken: %v", err)
+	}
+	if got != "Some Bloke" {
+		t.Errorf("got character name %q, want %q", got, "Some Bloke")
+	}
+}
+
+func TestCharacterNameFromAccessTokenRejectsATokenThatIsNotThreeSegments(t *testing.T) {
+	if _, err := esi.CharacterNameFromAccessToken("not-a-jwt"); err == nil {
+		t.Fatal("got no error for a malformed token, want one")
 	}
 }
 

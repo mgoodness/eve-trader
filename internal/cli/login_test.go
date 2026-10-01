@@ -41,7 +41,7 @@ func newFakeLoginVerificationServer(t *testing.T, characterIDClaim string, skill
 			_ = r.ParseForm()
 			fake.grantTypes = append(fake.grantTypes, r.PostForm.Get("grant_type"))
 			json.NewEncoder(w).Encode(map[string]any{
-				"access_token":  fakeJWT(characterIDClaim),
+				"access_token":  fakeJWTWithName(characterIDClaim, "Test Pilot"),
 				"token_type":    "Bearer",
 				"expires_in":    1200,
 				"refresh_token": "rotated-refresh-token",
@@ -375,7 +375,7 @@ func TestRunLoginVerifiesScopesAndPrintsThePilotFactsFromTheFreshAccessToken(t *
 	out := buf.String()
 	// pilotSkills() is Trade 4 / Broker Relations 4 / Accounting 3 at zero
 	// standings (spec §4): broker 1.800%, sales tax 5.025%, order limit 21.
-	for _, want := range []string{"932683762", "1.800%", "5.025%", "21"} {
+	for _, want := range []string{"Test Pilot", "1.800%", "5.025%", "21"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("got output %q, want it to contain %q", out, want)
 		}
@@ -413,8 +413,8 @@ func TestRunLoginRefusesToOverwriteAWorkingStoredRefreshTokenAndNamesTheCharacte
 		t.Fatalf("got no error for a working stored refresh token without --force, want a refusal\noutput: %s", buf.String())
 	}
 
-	if !strings.Contains(buf.String(), "932683762") {
-		t.Errorf("got output %q, want it to name character 932683762", buf.String())
+	if !strings.Contains(buf.String(), "Test Pilot") {
+		t.Errorf("got output %q, want it to name the character by name (Test Pilot)", buf.String())
 	}
 
 	if browserOpened {

@@ -47,8 +47,22 @@ func defaultFakeESIServerOpts() fakeESIServerOpts {
 // fakeJWT builds an unsigned JWT-shaped access token whose payload carries
 // sub. Only the payload matters to the code under test.
 func fakeJWT(sub string) string {
+	return fakeJWTWithName(sub, "")
+}
+
+// fakeJWTWithName is fakeJWT plus a name claim, for tests that assert on
+// `login`'s printed character name (docs/research/esi-sso-cli.md §4.3:
+// the JWT carries name alongside sub). An empty name omits the claim
+// entirely, matching a real token that (per the research note) always has
+// one, but keeping fakeJWT's existing callers -- which don't care about
+// name -- unchanged.
+func fakeJWTWithName(sub, name string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload, _ := json.Marshal(map[string]string{"sub": sub})
+	claims := map[string]string{"sub": sub}
+	if name != "" {
+		claims["name"] = name
+	}
+	payload, _ := json.Marshal(claims)
 	return header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".sig"
 }
 

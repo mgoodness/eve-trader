@@ -82,7 +82,7 @@ type LoginParams struct {
 // standings through the same access-token path pilotFacts uses for a
 // normal run (ticket #29), with the access token the exchange just
 // minted -- never a second refresh-token exchange -- and prints the
-// character id, broker fee, sales tax, and order limit it derived. A
+// character name, broker fee, sales tax, and order limit it derived. A
 // verification failure is returned as a plain error, so a wrong scope or
 // the wrong character fails at login rather than part-way through a
 // market scan.
@@ -391,7 +391,7 @@ func randomState() (string, error) {
 // exchange just minted -- rather than performing a second, redundant
 // refresh-token exchange (ticket #29: "reuses the existing pilot-facts path
 // for verification, so there is a single access-token/refresh code path").
-// On success it prints the character id and the derived fee rates/order
+// On success it prints the character name and the derived fee rates/order
 // limit; any failure (a missing scope, the wrong character, a transient ESI
 // error) is returned as a plain error so RunLogin fails loudly rather than
 // reporting a success a later market scan would fail on.
@@ -401,18 +401,13 @@ func verifyScopes(ctx context.Context, cfg Config, client *esi.Client, accessTok
 		return fmt.Errorf("opening cache for scope verification: %w", err)
 	}
 
-	characterID, err := esi.CharacterIDFromAccessToken(accessToken)
-	if err != nil {
-		return fmt.Errorf("decoding character id from access token: %w", err)
-	}
-
 	facts, err := pilotFactsForAccessToken(ctx, cfg, store, client, accessToken)
 	if err != nil {
 		return fmt.Errorf("verifying granted scopes (reading skills and standings): %w", err)
 	}
 
-	fmt.Fprintf(w, "Verified scopes for character %d: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
-		characterID, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
+	fmt.Fprintf(w, "Verified scopes for character %s: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
+		facts.CharacterName, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
 	return nil
 }
 
@@ -440,9 +435,9 @@ func refuseIfStoredCredentialsStillWork(ctx context.Context, cfg Config, store *
 		return nil
 	}
 
-	fmt.Fprintf(w, "Stored credentials already work for character %d: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
-		facts.CharacterID, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
-	return fmt.Errorf("refusing to overwrite working credentials for character %d; rerun with --force to re-authorize", facts.CharacterID)
+	fmt.Fprintf(w, "Stored credentials already work for character %s: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
+		facts.CharacterName, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
+	return fmt.Errorf("refusing to overwrite working credentials for character %s; rerun with --force to re-authorize", facts.CharacterName)
 }
 
 // resolveClientID picks the client id a login run authorizes with (ticket
