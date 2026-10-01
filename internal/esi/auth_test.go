@@ -213,6 +213,20 @@ func TestAuthorizeURLSetsTheExactParametersEVESSORequires(t *testing.T) {
 	}
 }
 
+// TestAuthorizeURLDefaultsAnEmptySSOBaseURL is a regression test (diagnosed
+// bug: cli.DefaultConfig leaves SSOBaseURL at its zero value, and
+// internal/cli/login.go calls AuthorizeURL directly rather than through a
+// Client, so a production run produced a relative, unopenable consent URL
+// -- "/v2/oauth/authorize?..." with no scheme or host). AuthorizeURL must
+// default an empty ssoBaseURL exactly like NewClient does.
+func TestAuthorizeURLDefaultsAnEmptySSOBaseURL(t *testing.T) {
+	got := esi.AuthorizeURL("", "my-client-id", "http://127.0.0.1:8000/callback", "my-state", "my-challenge")
+
+	if !strings.HasPrefix(got, "https://login.eveonline.com/v2/oauth/authorize?") {
+		t.Fatalf("AuthorizeURL with empty ssoBaseURL = %q, want it to default to the production SSO host", got)
+	}
+}
+
 func containsParam(form, wantPair string) bool {
 	for _, pair := range splitAmp(form) {
 		if pair == wantPair {

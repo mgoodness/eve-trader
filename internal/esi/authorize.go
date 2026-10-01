@@ -41,8 +41,19 @@ func PKCEChallenge(verifier string) string {
 
 // AuthorizeURL builds the EVE SSO authorization request URL (spec §12;
 // docs/research/esi-sso-cli.md §1.2): response_type=code, the fixed
-// Scopes, S256 PKCE, and the caller-supplied state and redirect URI.
+// Scopes, S256 PKCE, and the caller-supplied state and redirect URI. An
+// empty ssoBaseURL defaults to the production SSO host, exactly like
+// NewClient -- cli.DefaultConfig leaves SSOBaseURL at its zero value and
+// relies on that default, and this is the one caller (internal/cli/login.go)
+// that builds a URL directly rather than going through a Client, so it must
+// honor the same empty-means-default contract or production gets a
+// relative, unopenable URL (diagnosed: a bare "" reached here and produced
+// "/v2/oauth/authorize?..." with no scheme or host).
 func AuthorizeURL(ssoBaseURL, clientID, redirectURI, state, codeChallenge string) string {
+	if ssoBaseURL == "" {
+		ssoBaseURL = defaultSSOBaseURL
+	}
+
 	v := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {clientID},
