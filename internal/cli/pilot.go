@@ -30,6 +30,12 @@ type PilotFacts struct {
 	Fees       engine.Fees
 	OrderLimit int
 
+	// CharacterID is the character pilotFacts minted an access token for,
+	// decoded from that token's JWT sub claim. `login`'s reuse guard (ticket
+	// #30) uses it to name the character a working stored refresh token
+	// belongs to without a second decode.
+	CharacterID int32
+
 	// Accounting, BrokerRelations, FactionStanding, and CorpStanding are the
 	// raw skill levels and standings Fees was derived from (spec §4),
 	// echoed into the output contract's Meta.Params (ticket #23) so a run
@@ -108,6 +114,7 @@ func pilotFactsForAccessToken(ctx context.Context, cfg Config, store *cache.Stor
 	}
 
 	return PilotFacts{
+		CharacterID:     characterID,
 		Fees:            engine.DeriveFees(skills, factionStanding, corpStanding),
 		OrderLimit:      engine.OrderLimit(skills),
 		Accounting:      skills[engine.AccountingSkillID],
