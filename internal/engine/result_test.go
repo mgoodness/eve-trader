@@ -1,7 +1,9 @@
 package engine_test
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +93,32 @@ func TestNewResultAccountsForUnfundedAndExcludedCounts(t *testing.T) {
 	}
 	if len(result.Excluded) != 1 || result.Excluded[0].Name != "Tritanium" {
 		t.Errorf("got excluded=%+v, want Tritanium", result.Excluded)
+	}
+}
+
+func TestNewResultRendersFlagsAsEmptyArraysNotNull(t *testing.T) {
+	result := engine.NewResult(
+		[]engine.Recommendation{{TypeID: 1}},
+		[]engine.Recommendation{{TypeID: 2}},
+		nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21,
+	)
+
+	if result.Recommendations[0].Flags == nil {
+		t.Errorf("got nil funded Flags, want a non-nil slice so JSON emits [] not null")
+	}
+	if result.Unfunded[0].Flags == nil {
+		t.Errorf("got nil unfunded Flags, want a non-nil slice so JSON emits [] not null")
+	}
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(body), `"flags":null`) {
+		t.Errorf("got JSON containing \"flags\":null, want []:\n%s", body)
+	}
+	if !strings.Contains(string(body), `"flags":[]`) {
+		t.Errorf("got JSON without \"flags\":[], want []:\n%s", body)
 	}
 }
 

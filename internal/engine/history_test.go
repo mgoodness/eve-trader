@@ -33,6 +33,70 @@ func daysOfHistory(n int, volume int64) []engine.HistoryRecord {
 	return records
 }
 
+func TestAverageDailyVolumeIgnoresRecordsOlderThanTheTrailingThirtyDays(t *testing.T) {
+	// 30 records spaced two days apart span 60 calendar days; only the 15
+	// inside the newest 30-day window count. With volume 10 each, the 30-day
+	// ADV is 150/30 = 5 -- not 300/30 = 10, which counting all 30 records
+	// would give (spec §7 step 4: the 30-day window, not the last 30 rows).
+	records := make([]engine.HistoryRecord, 0, 30)
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 30; i++ {
+		records = append(records, engine.HistoryRecord{
+			Date:   start.AddDate(0, 0, 2*i).Format("2006-01-02"),
+			Volume: 10,
+		})
+	}
+
+	got := engine.AverageDailyVolume(records)
+	if got != 5 {
+		t.Errorf("got AverageDailyVolume=%v, want 5 (150 units across the newest 30 calendar days / 30)", got)
+	}
+}
+
+func TestMinHistoryIgnoresStaleRecordsOutsideTheTrailingThirtyDays(t *testing.T) {
+	// 30 records total: 24 stale ones (days 0-23) plus 6 recent ones (days
+	// 60-65). Only 6 days fall inside the newest record's trailing 30-day
+	// window, so the 7-day minimum is unmet even though there are 30 records.
+	var records []engine.HistoryRecord
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 24; i++ {
+		records = append(records, engine.HistoryRecord{Date: start.AddDate(0, 0, i).Format("2006-01-02"), Volume: 100})
+	}
+	for i := 0; i < 6; i++ {
+		records = append(records, engine.HistoryRecord{Date: start.AddDate(0, 0, 60+i).Format("2006-01-02"), Volume: 100})
+	}
+	candidates := []engine.CandidateHistory{historyCandidate(1, 60, 80, records)}
+
+	passed, excluded := engine.MinHistory(candidates, 7)
+
+	if len(passed) != 0 {
+		t.Fatalf("got passed=%+v, want none (only 6 of the newest 30 calendar days have history)", passed)
+	}
+	if len(excluded) != 1 || excluded[0].TypeID != 1 || excluded[0].Reason == "" {
+		t.Fatalf("got excluded=%+v, want one entry for type 1 with a non-empty reason", excluded)
+	}
+}
+
+func TestMinHistoryKeepsAStaleHistoryWhoseRecentRecordsStillMeetTheMinimum(t *testing.T) {
+	// 10 stale records (days 0-9) plus 7 recent ones (days 60-66): the recent
+	// window still holds 7 days, so the candidate is kept.
+	var records []engine.HistoryRecord
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 10; i++ {
+		records = append(records, engine.HistoryRecord{Date: start.AddDate(0, 0, i).Format("2006-01-02"), Volume: 100})
+	}
+	for i := 0; i < 7; i++ {
+		records = append(records, engine.HistoryRecord{Date: start.AddDate(0, 0, 60+i).Format("2006-01-02"), Volume: 100})
+	}
+	candidates := []engine.CandidateHistory{historyCandidate(1, 60, 80, records)}
+
+	passed, excluded := engine.MinHistory(candidates, 7)
+
+	if len(passed) != 1 || len(excluded) != 0 {
+		t.Fatalf("got passed=%+v excluded=%+v, want the candidate kept (7 days inside the trailing window)", passed, excluded)
+	}
+}
+
 func TestMinHistoryKeepsCandidatesWithAtLeastTheMinimumDays(t *testing.T) {
 	candidates := []engine.CandidateHistory{
 		historyCandidate(1, 60, 80, daysOfHistory(7, 100)),

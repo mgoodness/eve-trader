@@ -20,6 +20,12 @@ import "sort"
 func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta, orderLimit int) Result {
 	funded = sortedByExpectedDailyProfit(funded)
 	unfunded = sortedByExpectedDailyProfit(unfunded)
+	for i := range funded {
+		funded[i].Flags = nonNilFlags(funded[i].Flags)
+	}
+	for i := range unfunded {
+		unfunded[i].Flags = nonNilFlags(unfunded[i].Flags)
+	}
 	if excluded == nil {
 		excluded = []Excluded{}
 	}
@@ -59,8 +65,25 @@ func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta
 func sortedByExpectedDailyProfit(recs []Recommendation) []Recommendation {
 	sorted := make([]Recommendation, len(recs))
 	copy(sorted, recs)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].ExpectedDailyProfit > sorted[j].ExpectedDailyProfit
-	})
+	sortByExpectedDailyProfitDescending(sorted)
 	return sorted
+}
+
+// sortByExpectedDailyProfitDescending sorts recs in place, descending by
+// expected daily profit, stably. Rank and NewResult share this one
+// comparator so the JSON contract's ordering invariant (spec §11) lives in
+// exactly one place.
+func sortByExpectedDailyProfitDescending(recs []Recommendation) {
+	sort.SliceStable(recs, func(i, j int) bool {
+		return recs[i].ExpectedDailyProfit > recs[j].ExpectedDailyProfit
+	})
+}
+
+// nonNilFlags returns flags as a non-nil slice, so a recommendation with no
+// pipeline notes marshals as "flags": [] rather than null (spec §11).
+func nonNilFlags(flags []string) []string {
+	if flags == nil {
+		return []string{}
+	}
+	return flags
 }

@@ -21,9 +21,9 @@ func RenderTable(result engine.Result, explain bool) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "region %d \u00b7 trade station %d\n", result.Meta.RegionID, result.Meta.TradeStation)
-	fmt.Fprintf(&b, "broker %s \u00b7 tax %s \u00b7 capture %s \u00b7 tick %s \u00b7 horizon %dd \u00b7 orders %d/%d\n\n",
+	fmt.Fprintf(&b, "broker %s \u00b7 tax %s \u00b7 capture %s \u00b7 delta %s \u00b7 horizon %dd \u00b7 orders %d/%d\n\n",
 		formatPercent(result.Meta.Fees.Broker, 2), formatPercent(result.Meta.Fees.SalesTax, 2),
-		formatPercent(result.Meta.Params.CaptureRate, 0), formatISK(result.Meta.Params.Tick),
+		formatPercent(result.Meta.Params.CaptureRate, 0), formatISK(result.Meta.Params.Delta),
 		result.Meta.Params.HorizonDays, result.Summary.OrdersUsed, result.Summary.OrderLimit)
 
 	renderFunded(&b, result)
@@ -85,10 +85,10 @@ func renderExcluded(b *strings.Builder, result engine.Result, explain bool) {
 }
 
 // displayName is name if it is known, or a "type <id>" placeholder
-// otherwise. Name resolution (ESI type IDs → display names) is not yet wired
-// into the whole-universe pipeline yet (see engine.PricingRule's doc
-// comment); every row must still identify its item rather than rendering a
-// blank column.
+// otherwise. The whole-universe pipeline resolves names through the batched,
+// disk-cached ESI lookup (internal/cli/names.go); a row must still identify
+// its item when that lookup genuinely cannot resolve an id, rather than
+// rendering a blank column.
 func displayName(typeID int32, name string) string {
 	if name != "" {
 		return name

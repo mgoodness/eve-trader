@@ -100,10 +100,12 @@ func DefaultConfig() Config {
 // (spec §13) on top of DefaultConfig: config.toml's values (or the
 // documented defaults, if it doesn't exist), the credentials file (mode
 // 600, never settable by a flag), and the disk cache directory. A missing
-// config.toml is not an error; a malformed config.toml, or a
-// present-but-wrong-mode or malformed credentials.json, is — both name the
-// offending path. A missing credentials.json is not an error either: no
-// command needs ESI auth yet (ticket #16 is the first that will).
+// config.toml is not an error — spec §13's first-run pilot has no file, so
+// the documented default path just yields defaults (ticket #15's "clear
+// error" applies to a malformed file, which does error naming the path). A
+// present-but-wrong-mode or malformed credentials.json is also an error,
+// naming the offending path. A missing credentials.json is not an error
+// either: no command needs ESI auth until Run does.
 func LoadConfig() (Config, error) {
 	cfg := DefaultConfig()
 

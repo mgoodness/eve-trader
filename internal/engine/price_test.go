@@ -7,6 +7,25 @@ import (
 	"github.com/mgoodness/eve-trader/internal/engine"
 )
 
+func TestPriceAppliesTheMinimumBrokerFeePerOrderWhenItBinds(t *testing.T) {
+	// At these prices the percentage broker fee is only ~19-23 ISK per leg,
+	// below the 100 ISK per-order minimum (spec §4, §8), so each leg is
+	// charged 100 ISK rather than the percentage. B* = 1050, S* = 1250.
+	rec, ok := engine.Price(34, "Tritanium", 1000, 1300, 50, 0.018, 0.05025)
+	if !ok {
+		t.Fatalf("Price reported not-recommendable for an uncrossed spread")
+	}
+
+	wantProfit := 1250.0 - 1050.0 - 100.0 - 100.0 - 0.05025*1250.0
+	wantMargin := wantProfit / 1250.0
+	if math.Abs(rec.ProfitPerUnit-wantProfit) > 1e-9 {
+		t.Errorf("got ProfitPerUnit=%v, want %v (both broker legs floored at 100 ISK)", rec.ProfitPerUnit, wantProfit)
+	}
+	if math.Abs(rec.NetMargin-wantMargin) > 1e-9 {
+		t.Errorf("got NetMargin=%v, want %v (the 100 ISK floor flows into the margin)", rec.NetMargin, wantMargin)
+	}
+}
+
 // A worked example at the pilot's real fee rates (Trade 4, Broker Relations
 // 4, Accounting 3 -> broker 1.8%, sales tax 5.025%, spec §4), against a live
 // Morphite book observed at Rens on 2026-09-30: best bid 18220, best ask

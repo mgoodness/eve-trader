@@ -50,6 +50,11 @@ The check asserts the functional acceptance criteria in `docs/spec.md`
   **1.8%**, sales tax **5.025%**, order limit **21**. The fake server mints a
   fake SSO token and serves these skills, exactly as the other CLI tests do.
   No `credentials.json` or live token is required.
+- Type names via `POST /universe/names/`: the acceptance check does not
+  exercise names and the snapshot holds no name data, so the fake server
+  returns a deterministic `"type <id>"` placeholder for each requested id.
+  This keeps the best-effort name lookup's warnings out of the
+  market-mechanics assertions.
 
 **Not synthesized:** nothing in the market data. The check exercises the
 real feed, real routes, and real history from the capture above.
@@ -61,11 +66,11 @@ verifies the structural acceptance criteria.
 ## Observed acceptance run
 
 At the pilot's default budget (150,000,000 ISK): 3,957 two-sided types →
-**1 funded** (committing 149,999,822 ISK), 164 unfunded, 3,792 excluded,
-**2 of 21 order slots** used. Because the budget — not the slots — binds
+**2 funded** (committing 149,997,679 ISK), 141 unfunded, 3,814 excluded,
+**4 of 21 orders** used. Because the budget — not the order limit — binds
 that run, the check additionally runs the same snapshot at a
 slot-binding budget (10,000,000,000 ISK), which funds 10 candidates across
-20 slots, so the order-limit criterion is exercised rather than vacuous.
+20 orders, so the order-limit criterion is exercised rather than vacuous.
 
 ## Refreshing
 

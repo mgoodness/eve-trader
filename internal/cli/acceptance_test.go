@@ -149,6 +149,20 @@ func acceptanceServer(t *testing.T, snap *acceptanceSnapshot) *httptest.Server {
 				return
 			}
 			w.Write(body)
+		case r.URL.Path == "/universe/names/":
+			// The acceptance check does not exercise names, and the snapshot
+			// holds no name data, so serve a deterministic placeholder for
+			// every requested id. This keeps the name lookup's warnings out
+			// of the market-mechanics assertions.
+			var ids []int32
+			if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+				t.Errorf("decoding /universe/names/ request: %v", err)
+			}
+			resolved := make([]map[string]any, 0, len(ids))
+			for _, id := range ids {
+				resolved = append(resolved, map[string]any{"id": id, "name": fmt.Sprintf("type %d", id), "category": "inventory_type"})
+			}
+			json.NewEncoder(w).Encode(resolved)
 		case strings.HasPrefix(r.URL.Path, "/route/"):
 			segment := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 			if len(segment) != 3 {
@@ -243,6 +257,8 @@ func TestAcceptanceAgainstFrozenSnapshot(t *testing.T) {
 
 	t.Run("the order limit binds and is respected under a larger budget", func(t *testing.T) {
 		result := runAcceptanceOnce(t, t.Context(), server.URL, acceptanceSlotBindingBudget)
+		t.Logf("slot-binding run: funded=%d, unfunded=%d, excluded=%d, orders=%d/%d",
+			len(result.Recommendations), len(result.Unfunded), len(result.Excluded), result.Summary.OrdersUsed, result.Summary.OrderLimit)
 		// Ten funded candidates (20 of the 21 slots) is the honest way to
 		// exercise the limit: with more budget available than slots, the
 		// limit — not the budget — is what caps the funded set. The same
@@ -318,9 +334,12 @@ func assertClearsTargetMargin(t *testing.T, result engine.Result) {
 	}
 
 	for _, rec := range result.Recommendations {
-		recomputed := (rec.SellPrice - rec.BuyPrice -
-			result.Meta.Fees.Broker*rec.BuyPrice -
-			result.Meta.Fees.Broker*rec.SellPrice -
+		// The broker fee is charged on each order leg with a 100 ISK minimum
+		// per order (spec §4, §8). Pricing works per unit, so each leg is
+		// floored at 100 ISK, matching engine.Price.
+		brokerBuy := math.Max(result.Meta.Fees.Broker*rec.BuyPrice, 100)
+		brokerSell := math.Max(result.Meta.Fees.Broker*rec.SellPrice, 100)
+		recomputed := (rec.SellPrice - rec.BuyPrice - brokerBuy - brokerSell -
 			result.Meta.Fees.SalesTax*rec.SellPrice) / rec.SellPrice
 		if recomputed < target-1e-9 {
 			t.Errorf("type %d: recomputed net margin %.6f is below the target %.6f", rec.TypeID, recomputed, target)

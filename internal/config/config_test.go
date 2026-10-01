@@ -81,21 +81,17 @@ func TestLoadReturnsAClearErrorForMalformedTOML(t *testing.T) {
 	}
 }
 
-func TestSaveThenLoadRoundTrips(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	want := config.Defaults()
-	want.Delta = 250
-	want.Filters.MinLiquidityADV = 42
-
-	if err := config.Save(path, want); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+func TestLoadFallsBackToDefaultsWhenTheConfigDirectoryIsMissing(t *testing.T) {
+	// The first-run case (spec §13): a pilot who has never written a config has
+	// no config directory at all. This must use the documented defaults, not
+	// produce the "clear error" ticket #15's AC reserved for a malformed file.
+	path := filepath.Join(t.TempDir(), "no-such-dir", "config.toml")
 
 	got, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Load(missing directory): %v", err)
 	}
-	if got != want {
-		t.Errorf("Load(Save(want)) = %+v, want %+v", got, want)
+	if got != config.Defaults() {
+		t.Errorf("Load(missing directory) = %+v, want defaults %+v", got, config.Defaults())
 	}
 }

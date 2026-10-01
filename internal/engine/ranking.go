@@ -1,8 +1,6 @@
 package engine
 
-import "sort"
-
-// ordersPerCandidate is the number of active-order slots one posted
+// ordersPerCandidate is the number of concurrent orders one posted
 // candidate costs: a buy order and a sell order (spec §10).
 const ordersPerCandidate = 2
 
@@ -22,8 +20,6 @@ func Rank(recommendations []Recommendation, captureRate float64) []Recommendatio
 		ranked[i] = rec
 	}
 
-	sort.SliceStable(ranked, func(i, j int) bool {
-		return ranked[i].ExpectedDailyProfit > ranked[j].ExpectedDailyProfit
-	})
+	sortByExpectedDailyProfitDescending(ranked)
 	return ranked
 }
