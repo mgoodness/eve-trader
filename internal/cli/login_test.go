@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +165,83 @@ func TestRunLoginAbortsAndWritesNothingOnAStateMismatch(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(cfg.ConfigDir, "credentials.json")); !os.IsNotExist(err) {
 		t.Errorf("got credentials.json present after a state mismatch (stat err: %v), want nothing written", err)
+	}
+}
+
+func TestRunLoginAcceptsAPastedCallbackURLOnStdinWhenNoCallbackArrives(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+
+	redirectURI := freeLoopbackRedirectURI(t)
+	stdinR, stdinW := io.Pipe()
+	cfg.Stdin = stdinR
+	// No fake browser ever hits the loopback callback here -- this simulates
+	// a pilot on an SSH session who opened the printed URL on a different
+	// machine and pasted the resulting (unreachable, 127.0.0.1) redirect URL
+	// back on stdin instead.
+	cfg.OpenBrowser = func(authorizeURL string) error {
+		u, err := url.Parse(authorizeURL)
+		if err != nil {
+			return err
+		}
+		state := u.Query().Get("state")
+		go func() {
+			fmt.Fprintf(stdinW, "%s?code=the-auth-code&state=%s\n", redirectURI, state)
+		}()
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	var buf strings.Builder
+	err := cli.RunLogin(ctx, cfg, cli.LoginParams{ClientID: "my-client-id", RedirectURI: redirectURI}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin: %v\noutput: %s", err, buf.String())
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.RefreshToken != "rotated-refresh-token" {
+		t.Errorf("got refresh token %q, want rotated-refresh-token from the pasted-callback exchange", creds.RefreshToken)
+	}
+}
+
+func TestRunLoginAcceptsABareAuthorizationCodeOnStdinWhenNoCallbackArrives(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+
+	// A bare code, no URL at all: the pilot copied just the `code` value out
+	// of the browser's address bar rather than the whole unreachable
+	// redirect URL.
+	cfg.Stdin = strings.NewReader("the-auth-code\n")
+	cfg.OpenBrowser = func(string) error { return nil }
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	var buf strings.Builder
+	err := cli.RunLogin(ctx, cfg, cli.LoginParams{ClientID: "my-client-id", RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin: %v\noutput: %s", err, buf.String())
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.RefreshToken != "rotated-refresh-token" {
+		t.Errorf("got refresh token %q, want rotated-refresh-token from the bare-code exchange", creds.RefreshToken)
 	}
 }
 

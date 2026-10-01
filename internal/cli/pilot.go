@@ -57,7 +57,7 @@ type PilotFacts struct {
 // single access-token/refresh code path end to end.
 func pilotFacts(ctx context.Context, cfg Config, store *cache.Store) (PilotFacts, error) {
 	if cfg.Credentials.RefreshToken == "" {
-		return PilotFacts{}, fmt.Errorf("no stored refresh token in credentials.json; run scripts/esi-sso-wizard.sh to authorize eve-trader")
+		return PilotFacts{}, fmt.Errorf("no stored refresh token in credentials.json; run `eve-trader login` to authorize eve-trader")
 	}
 
 	client := esi.NewClient(esi.ClientOptions{

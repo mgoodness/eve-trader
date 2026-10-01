@@ -153,6 +153,13 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 	// itself) would deadlock waiting for a response nothing is serving yet.
 	results, errs := serveOneCallback(ctx, listener, callbackPath)
 
+	// The headless fallback (ticket #31): when the browser authorizing the
+	// request can't reach this process's loopback listener at all (e.g. an
+	// SSH session, where the pilot authorizes on a different machine), a
+	// pasted callback URL or bare code on stdin races the loopback callback
+	// above -- whichever arrives first wins the select below.
+	stdinResults := awaitStdinCallback(cfg.Stdin, state)
+
 	open := cfg.OpenBrowser
 	if open == nil {
 		open = defaultOpenBrowser
@@ -163,44 +170,108 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 
 	select {
 	case result := <-results:
-		if result.state != state {
-			return fmt.Errorf("callback state %q does not match the state eve-trader sent; aborting (possible CSRF)", result.state)
-		}
-
-		client := esi.NewClient(esi.ClientOptions{
-			BaseURL:    cfg.ESIBaseURL,
-			SSOBaseURL: cfg.SSOBaseURL,
-			UserAgent:  cfg.UserAgent,
-			CompatDate: cfg.CompatDate,
-		})
-		token, err := client.ExchangeAuthorizationCode(ctx, clientID, redirectURI, result.code, verifier)
-		if err != nil {
-			return fmt.Errorf("exchanging authorization code: %w", err)
-		}
-
-		creds := config.Credentials{
-			ClientID:     clientID,
-			RedirectURI:  redirectURI,
-			RefreshToken: token.RefreshToken,
-		}
-		path := filepath.Join(cfg.ConfigDir, "credentials.json")
-		if err := config.SaveCredentials(path, creds); err != nil {
-			return fmt.Errorf("saving credentials: %w", err)
-		}
-
-		fmt.Fprintf(w, "Logged in; credentials saved to %s\n", path)
-
-		// Verification lives after credentials are written (RunLogin's doc
-		// comment above): a wrong scope or character still means eve-trader
-		// authorized against EVE SSO successfully, but RunLogin fails loudly
-		// rather than silently handing back a success a market scan would
-		// later fail on.
-		return verifyScopes(ctx, cfg, client, token.AccessToken, w)
+		return exchangeCallbackAndFinish(ctx, cfg, clientID, redirectURI, verifier, state, result, w)
+	case result := <-stdinResults:
+		return exchangeCallbackAndFinish(ctx, cfg, clientID, redirectURI, verifier, state, result, w)
 	case err := <-errs:
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// exchangeCallbackAndFinish is the shared tail of the loopback-callback and
+// stdin-fallback paths (ticket #31): it checks result.state against the
+// state eve-trader generated, exchanges result.code for tokens with no
+// client secret, writes credentials.json, and runs scope verification --
+// identically regardless of which path produced result.
+func exchangeCallbackAndFinish(ctx context.Context, cfg Config, clientID, redirectURI, verifier, state string, result callbackResult, w io.Writer) error {
+	if result.state != state {
+		return fmt.Errorf("callback state %q does not match the state eve-trader sent; aborting (possible CSRF)", result.state)
+	}
+
+	client := esi.NewClient(esi.ClientOptions{
+		BaseURL:    cfg.ESIBaseURL,
+		SSOBaseURL: cfg.SSOBaseURL,
+		UserAgent:  cfg.UserAgent,
+		CompatDate: cfg.CompatDate,
+	})
+	token, err := client.ExchangeAuthorizationCode(ctx, clientID, redirectURI, result.code, verifier)
+	if err != nil {
+		return fmt.Errorf("exchanging authorization code: %w", err)
+	}
+
+	creds := config.Credentials{
+		ClientID:     clientID,
+		RedirectURI:  redirectURI,
+		RefreshToken: token.RefreshToken,
+	}
+	path := filepath.Join(cfg.ConfigDir, "credentials.json")
+	if err := config.SaveCredentials(path, creds); err != nil {
+		return fmt.Errorf("saving credentials: %w", err)
+	}
+
+	fmt.Fprintf(w, "Logged in; credentials saved to %s\n", path)
+
+	// Verification lives after credentials are written (RunLogin's doc
+	// comment above): a wrong scope or character still means eve-trader
+	// authorized against EVE SSO successfully, but RunLogin fails loudly
+	// rather than silently handing back a success a market scan would
+	// later fail on.
+	return verifyScopes(ctx, cfg, client, token.AccessToken, w)
+}
+
+// awaitStdinCallback reads a single line off in (os.Stdin if nil) in the
+// background and parses it as a headless login response (ticket #31): a
+// pasted full callback URL (its code/state query params are used) or a
+// bare authorization code (expectedState -- the state eve-trader generated
+// for this run -- is used verbatim, since a manually typed code has no
+// separate state to compare against). Empty input or a read error (an
+// unused stdin, as in the normal browser round-trip) sends nothing, so the
+// returned channel simply never fires and the loopback callback path wins
+// the race in RunLogin's select.
+func awaitStdinCallback(in io.Reader, expectedState string) <-chan callbackResult {
+	results := make(chan callbackResult, 1)
+	go func() {
+		if in == nil {
+			in = os.Stdin
+		}
+		line, err := bufio.NewReader(in).ReadString('\n')
+		if err != nil && err != io.EOF {
+			return
+		}
+		result, err := parseCallbackInput(line, expectedState)
+		if err != nil {
+			return
+		}
+		select {
+		case results <- result:
+		default:
+		}
+	}()
+	return results
+}
+
+// parseCallbackInput turns one line of headless stdin input into a
+// callbackResult (ticket #31 acceptance criterion: "a pasted callback URL
+// or code is accepted"). A line that parses as a URL carrying a `code`
+// query parameter yields that code and its `state` parameter, exactly as
+// the loopback callback would have received them. Any other non-empty
+// line is treated as a bare authorization code pasted directly, paired
+// with expectedState since there is no separate state to compare against.
+func parseCallbackInput(line, expectedState string) (callbackResult, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return callbackResult{}, fmt.Errorf("empty callback input")
+	}
+
+	if u, err := url.Parse(line); err == nil {
+		if code := u.Query().Get("code"); code != "" {
+			return callbackResult{code: code, state: u.Query().Get("state")}, nil
+		}
+	}
+
+	return callbackResult{code: line, state: expectedState}, nil
 }
 
 // callbackResult is the authorization code and state the loopback
