@@ -36,6 +36,14 @@ type Config struct {
 	CompatDate string
 	CacheDir   string
 
+	// OpenBrowser launches url in the pilot's browser for `login` (ticket
+	// #28); it is a best-effort side channel — failure never aborts login,
+	// since the consent URL is always printed too. Left nil by
+	// DefaultConfig/LoadConfig, in which case RunLogin falls back to a real
+	// OS browser launcher. Tests inject a fake that drives the loopback
+	// callback itself, so no test opens a real browser.
+	OpenBrowser func(url string) error
+
 	// ConfigDir is where credentials.json lives, so Run can persist a
 	// rotated refresh token back to disk (spec §12). Set by LoadConfig;
 	// left empty by DefaultConfig, in which case Run skips persistence (no
@@ -225,6 +233,7 @@ func NewRootCmd(cfg Config) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.AddCommand(newRecommendCmd(cfg))
+	root.AddCommand(newLoginCmd(cfg))
 	return root
 }
 
