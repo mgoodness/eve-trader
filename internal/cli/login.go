@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 
+	"github.com/mgoodness/eve-trader/internal/cache"
 	"github.com/mgoodness/eve-trader/internal/config"
 	"github.com/mgoodness/eve-trader/internal/esi"
 	"github.com/spf13/cobra"
@@ -63,11 +64,21 @@ type LoginParams struct {
 // writes credentials.json at mode 600 with the client id, redirect URI,
 // and the (possibly rotated) refresh token.
 //
-// Scope verification, the reuse guard/--force, and the headless stdin
-// fallback are out of this ticket's scope and deliberately not called
-// here: RunLogin returns plainly on success, leaving its caller free to
-// run a verification step (or a reuse check before ever calling RunLogin)
-// without fighting an early os.Exit baked into this function.
+// Once the token exchange has succeeded and credentials are written, it
+// verifies the granted scopes by reading the character's skills and
+// standings through the same access-token path pilotFacts uses for a
+// normal run (ticket #29), with the access token the exchange just
+// minted -- never a second refresh-token exchange -- and prints the
+// character id, broker fee, sales tax, and order limit it derived. A
+// verification failure is returned as a plain error, so a wrong scope or
+// the wrong character fails at login rather than part-way through a
+// market scan.
+//
+// The reuse guard/--force and the headless stdin fallback are out of this
+// ticket's scope and deliberately not called here: RunLogin returns
+// plainly on success, leaving its caller free to run a reuse check before
+// ever calling RunLogin without fighting an early os.Exit baked into this
+// function.
 func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) error {
 	redirectURI := params.RedirectURI
 	if redirectURI == "" {
@@ -112,7 +123,12 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 			return fmt.Errorf("callback state %q does not match the state eve-trader sent; aborting (possible CSRF)", result.state)
 		}
 
-		client := esi.NewClient(esi.ClientOptions{SSOBaseURL: cfg.SSOBaseURL, UserAgent: cfg.UserAgent})
+		client := esi.NewClient(esi.ClientOptions{
+			BaseURL:    cfg.ESIBaseURL,
+			SSOBaseURL: cfg.SSOBaseURL,
+			UserAgent:  cfg.UserAgent,
+			CompatDate: cfg.CompatDate,
+		})
 		token, err := client.ExchangeAuthorizationCode(ctx, params.ClientID, redirectURI, result.code, verifier)
 		if err != nil {
 			return fmt.Errorf("exchanging authorization code: %w", err)
@@ -129,7 +145,13 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 		}
 
 		fmt.Fprintf(w, "Logged in; credentials saved to %s\n", path)
-		return nil
+
+		// Verification lives after credentials are written (RunLogin's doc
+		// comment above): a wrong scope or character still means eve-trader
+		// authorized against EVE SSO successfully, but RunLogin fails loudly
+		// rather than silently handing back a success a market scan would
+		// later fail on.
+		return verifyScopes(ctx, cfg, client, token.AccessToken, w)
 	case err := <-errs:
 		return err
 	case <-ctx.Done():
@@ -216,4 +238,35 @@ func randomState() (string, error) {
 		return "", fmt.Errorf("generating state: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// verifyScopes proves the scopes EVE SSO just granted are the ones
+// eve-trader needs by reading skills and standings through
+// pilotFactsForAccessToken with accessToken -- the one the authorization-code
+// exchange just minted -- rather than performing a second, redundant
+// refresh-token exchange (ticket #29: "reuses the existing pilot-facts path
+// for verification, so there is a single access-token/refresh code path").
+// On success it prints the character id and the derived fee rates/order
+// limit; any failure (a missing scope, the wrong character, a transient ESI
+// error) is returned as a plain error so RunLogin fails loudly rather than
+// reporting a success a later market scan would fail on.
+func verifyScopes(ctx context.Context, cfg Config, client *esi.Client, accessToken string, w io.Writer) error {
+	store, err := cache.Open(cfg.CacheDir)
+	if err != nil {
+		return fmt.Errorf("opening cache for scope verification: %w", err)
+	}
+
+	characterID, err := esi.CharacterIDFromAccessToken(accessToken)
+	if err != nil {
+		return fmt.Errorf("decoding character id from access token: %w", err)
+	}
+
+	facts, err := pilotFactsForAccessToken(ctx, cfg, store, client, accessToken)
+	if err != nil {
+		return fmt.Errorf("verifying granted scopes (reading skills and standings): %w", err)
+	}
+
+	fmt.Fprintf(w, "Verified scopes for character %d: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
+		characterID, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
+	return nil
 }

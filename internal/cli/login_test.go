@@ -18,6 +18,44 @@ import (
 	"github.com/mgoodness/eve-trader/internal/config"
 )
 
+// fakeLoginVerificationServer serves the SSO token endpoint (the
+// authorization-code exchange RunLogin performs) plus the ESI
+// skills/standings routes its verification step reads, and records every
+// grant_type the token endpoint saw -- so a test can prove verification
+// reuses the freshly minted access token rather than performing a second
+// refresh-token exchange.
+type fakeLoginVerificationServer struct {
+	*httptest.Server
+	grantTypes []string
+}
+
+func newFakeLoginVerificationServer(t *testing.T, characterIDClaim string, skills, standings []map[string]any) *fakeLoginVerificationServer {
+	t.Helper()
+	fake := &fakeLoginVerificationServer{}
+	fake.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v2/oauth/token":
+			_ = r.ParseForm()
+			fake.grantTypes = append(fake.grantTypes, r.PostForm.Get("grant_type"))
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  fakeJWT(characterIDClaim),
+				"token_type":    "Bearer",
+				"expires_in":    1200,
+				"refresh_token": "rotated-refresh-token",
+			})
+		case strings.HasSuffix(r.URL.Path, "/skills/"):
+			json.NewEncoder(w).Encode(map[string]any{"skills": skills})
+		case strings.HasSuffix(r.URL.Path, "/standings/"):
+			json.NewEncoder(w).Encode(standings)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(fake.Server.Close)
+	return fake
+}
+
 // fakeSSOServer serves only the SSO token endpoint RunLogin's code
 // exchange hits; the authorize endpoint is never actually requested in
 // these tests (a real browser or human would GET it; the fake opener
@@ -129,10 +167,12 @@ func TestRunLoginAbortsAndWritesNothingOnAStateMismatch(t *testing.T) {
 }
 
 func TestLoginCommandRedirectURIFlagOverridesTheDefaultAndBindsThatHostPort(t *testing.T) {
-	server := fakeSSOServer(t, "rotated-refresh-token")
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
 	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
 	cfg.SSOBaseURL = server.URL
 	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
 	cfg.OpenBrowser = simulateConsent("the-auth-code")
 
 	customRedirectURI := freeLoopbackRedirectURI(t)
@@ -160,10 +200,12 @@ func TestLoginCommandRedirectURIFlagOverridesTheDefaultAndBindsThatHostPort(t *t
 }
 
 func TestRunLoginCompletesThePKCERoundTripAndWritesCredentials(t *testing.T) {
-	server := fakeSSOServer(t, "rotated-refresh-token")
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
 	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
 	cfg.SSOBaseURL = server.URL
 	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
 	cfg.OpenBrowser = simulateConsent("the-auth-code")
 
 	redirectURI := freeLoopbackRedirectURI(t)
@@ -195,5 +237,69 @@ func TestRunLoginCompletesThePKCERoundTripAndWritesCredentials(t *testing.T) {
 	}
 	if creds.RefreshToken != "rotated-refresh-token" {
 		t.Errorf("got refresh token %q, want rotated-refresh-token", creds.RefreshToken)
+	}
+}
+
+func TestRunLoginVerifiesScopesAndPrintsThePilotFactsFromTheFreshAccessToken(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+
+	var buf strings.Builder
+	err := cli.RunLogin(t.Context(), cfg, cli.LoginParams{ClientID: "my-client-id", RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin: %v\noutput: %s", err, buf.String())
+	}
+
+	out := buf.String()
+	// pilotSkills() is Trade 4 / Broker Relations 4 / Accounting 3 at zero
+	// standings (spec §4): broker 1.800%, sales tax 5.025%, order limit 21.
+	for _, want := range []string{"932683762", "1.800%", "5.025%", "21"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("got output %q, want it to contain %q", out, want)
+		}
+	}
+
+	for _, gt := range server.grantTypes {
+		if gt == "refresh_token" {
+			t.Fatalf("got a refresh_token grant during login verification (grant types seen: %v), want verification to reuse the freshly minted access token instead of performing a second refresh", server.grantTypes)
+		}
+	}
+}
+
+func TestRunLoginFailsWithANonZeroErrorWhenScopeVerificationFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v2/oauth/token":
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  fakeJWT("CHARACTER:EVE:932683762"),
+				"token_type":    "Bearer",
+				"expires_in":    1200,
+				"refresh_token": "rotated-refresh-token",
+			})
+		default:
+			// No scope granted for skills/standings: ESI would 403 here for a
+			// token missing the required scopes.
+			http.Error(w, "missing scope", http.StatusForbidden)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+
+	var buf strings.Builder
+	err := cli.RunLogin(t.Context(), cfg, cli.LoginParams{ClientID: "my-client-id", RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err == nil {
+		t.Fatalf("got no error for a scope verification failure, want a non-zero error\noutput: %s", buf.String())
 	}
 }
