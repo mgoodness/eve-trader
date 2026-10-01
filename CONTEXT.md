@@ -177,6 +177,53 @@ The smallest committed capital worth posting; a partial fill below it is left
 idle rather than created. Default 1M ISK.
 _Avoid_: order floor, dust order
 
+### Inventory ledger
+
+**Lot**:
+A quantity of one item type acquired via a single buy order at a single
+acquisition price, tracked from the moment it starts delivering until every
+unit is sold. A buy order fills at one fixed price with no slippage, so
+acquisition price only ever varies *across* lots of the same type, never
+within one.
+_Avoid_: batch, parcel, position
+
+**Ledger**:
+The local record of every lot this pilot's own recommendations have bought
+and not yet sold — the sell-side source of truth, kept separate from raw ESI
+assets, which also hold personal items and stock bought for other characters.
+_Avoid_: inventory (broader — covers everything in the hangar, not just
+trading stock)
+
+**Held stock**:
+A lot's quantity that is both physically delivered and not already reserved
+for an open sell order — the only quantity eligible for a new sell-order
+recommendation.
+_Avoid_: inventory, stock on hand
+
+**Reservation**:
+The portion of a lot's quantity claimed by an open sell order; released back
+to held stock if that order is cancelled, finalized to sold once it fills.
+_Avoid_: hold (ambiguous with allocation)
+
+**Acquisition price**:
+The fixed per-unit price a lot's buy order posted at; a lot's basis for
+flagging a sale that clears less than the target net margin. Distinct from
+committed capital, which also counts escrow and fees.
+_Avoid_: cost basis
+
+**Ledger drift**:
+A mismatch between the ledger's held-stock quantity for a lot and what ESI's
+live assets actually show at the trade station; resolved by clamping the
+ledger down to the lower, asset-confirmed figure.
+_Avoid_: desync, discrepancy
+
+**Unknown outcome**:
+An order that disappeared from the active-orders list with units still
+unfilled and no matching cancelled/expired record in order history — ESI
+gives no way to tell whether it filled or vanished some other way, so the
+ledger surfaces it rather than guessing.
+_Avoid_: lost order, orphaned order
+
 ### Authentication
 
 **Login**:
