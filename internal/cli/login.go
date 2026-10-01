@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mgoodness/eve-trader/internal/cache"
 	"github.com/mgoodness/eve-trader/internal/config"
@@ -17,11 +20,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newLoginCmd builds the `login` command (spec §12; ticket #28): it runs
-// the Authorization Code + PKCE round-trip and stores the resulting
-// credentials. --client-id is required here; ticket #30 layers the
-// reuse guard, --force, and remembering a previously-used client id on
-// top.
+// newLoginCmd builds the `login` command (spec §12; tickets #28-#30): it
+// runs the Authorization Code + PKCE round-trip and stores the resulting
+// credentials. --client-id is optional: a previously-stored client id is
+// reused, and RunLogin prompts on stdin when neither is available. The
+// reuse guard (refuse to overwrite a working stored refresh token unless
+// --force is passed) and --force itself live in RunLogin.
 func newLoginCmd(cfg Config) *cobra.Command {
 	var params LoginParams
 
@@ -29,13 +33,17 @@ func newLoginCmd(cfg Config) *cobra.Command {
 		Use:   "login",
 		Short: "Authorize eve-trader against EVE SSO and store credentials",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunLogin(cmd.Context(), cfg, params, cmd.OutOrStdout())
+			runCfg := cfg
+			if runCfg.Stdin == nil {
+				runCfg.Stdin = cmd.InOrStdin()
+			}
+			return RunLogin(cmd.Context(), runCfg, params, cmd.OutOrStdout())
 		},
 	}
 
-	cmd.Flags().StringVar(&params.ClientID, "client-id", "", "the EVE SSO application client id")
+	cmd.Flags().StringVar(&params.ClientID, "client-id", "", "the EVE SSO application client id (remembered after the first successful login; prompted on stdin if neither given nor stored)")
 	cmd.Flags().StringVar(&params.RedirectURI, "redirect-uri", DefaultRedirectURI, "the registered loopback redirect URI")
-	cmd.MarkFlagRequired("client-id")
+	cmd.Flags().BoolVar(&params.Force, "force", false, "re-authorize even if the stored refresh token still works, replacing credentials.json")
 
 	return cmd
 }
@@ -52,6 +60,11 @@ const DefaultRedirectURI = "http://127.0.0.1:8000/callback"
 type LoginParams struct {
 	ClientID    string
 	RedirectURI string
+
+	// Force skips the reuse guard and re-authorizes even when the stored
+	// refresh token still works, atomically replacing credentials.json
+	// (ticket #30).
+	Force bool
 }
 
 // RunLogin drives the OAuth 2.0 Authorization Code + PKCE round-trip
@@ -74,15 +87,46 @@ type LoginParams struct {
 // the wrong character fails at login rather than part-way through a
 // market scan.
 //
-// The reuse guard/--force and the headless stdin fallback are out of this
-// ticket's scope and deliberately not called here: RunLogin returns
-// plainly on success, leaving its caller free to run a reuse check before
-// ever calling RunLogin without fighting an early os.Exit baked into this
-// function.
+// Before any of that, RunLogin runs the reuse guard (ticket #30): unless
+// params.Force is set, a stored refresh token (cfg.Credentials) that
+// still refreshes means eve-trader is already logged in, so RunLogin
+// prints the authenticated character (reusing pilotFacts -- the same
+// refresh+verify path a normal run uses, which also persists any token
+// rotation the check itself triggered) and returns a plain error without
+// ever starting a new authorization round-trip. A stored refresh token
+// that no longer refreshes is not a reuse-guard failure -- it falls
+// through to a fresh login below, which is what makes `login` "safe to
+// re-run" even after the stored session has gone stale.
+//
+// RunLogin also resolves the client id (ticket #30): params.ClientID
+// (the --client-id flag) wins, then cfg.Credentials.ClientID (remembered
+// from a previous successful login), and finally a prompt on cfg.Stdin
+// (os.Stdin if unset). Whichever id is resolved is the one written to
+// credentials.json on success, so it never needs to be passed or typed
+// again.
+//
+// The headless stdin fallback for the callback itself is out of this
+// ticket's scope.
 func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) error {
 	redirectURI := params.RedirectURI
 	if redirectURI == "" {
 		redirectURI = DefaultRedirectURI
+	}
+
+	store, err := cache.Open(cfg.CacheDir)
+	if err != nil {
+		return fmt.Errorf("opening cache: %w", err)
+	}
+
+	if !params.Force && cfg.Credentials.RefreshToken != "" {
+		if err := refuseIfStoredCredentialsStillWork(ctx, cfg, store, w); err != nil {
+			return err
+		}
+	}
+
+	clientID, err := resolveClientID(params.ClientID, cfg, w)
+	if err != nil {
+		return err
 	}
 
 	listener, callbackPath, err := newLoopbackListener(redirectURI)
@@ -100,7 +144,7 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 		return err
 	}
 
-	authorizeURL := esi.AuthorizeURL(cfg.SSOBaseURL, params.ClientID, redirectURI, state, challenge)
+	authorizeURL := esi.AuthorizeURL(cfg.SSOBaseURL, clientID, redirectURI, state, challenge)
 	fmt.Fprintf(w, "Open this URL to authorize eve-trader:\n%s\n", authorizeURL)
 
 	// The listener must already be serving before the browser (real or
@@ -129,13 +173,13 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 			UserAgent:  cfg.UserAgent,
 			CompatDate: cfg.CompatDate,
 		})
-		token, err := client.ExchangeAuthorizationCode(ctx, params.ClientID, redirectURI, result.code, verifier)
+		token, err := client.ExchangeAuthorizationCode(ctx, clientID, redirectURI, result.code, verifier)
 		if err != nil {
 			return fmt.Errorf("exchanging authorization code: %w", err)
 		}
 
 		creds := config.Credentials{
-			ClientID:     params.ClientID,
+			ClientID:     clientID,
 			RedirectURI:  redirectURI,
 			RefreshToken: token.RefreshToken,
 		}
@@ -269,4 +313,70 @@ func verifyScopes(ctx context.Context, cfg Config, client *esi.Client, accessTok
 	fmt.Fprintf(w, "Verified scopes for character %d: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
 		characterID, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
 	return nil
+}
+
+// refuseIfStoredCredentialsStillWork is `login`'s reuse guard (ticket #30,
+// parent #26: "If a stored refresh token still refreshes, login prints the
+// authenticated character and exits non-zero without --force"). It reuses
+// pilotFacts -- the same refresh+verify path (and rotated-refresh-token
+// persistence) a normal run uses -- against cfg.Credentials, so there is a
+// single access-token/refresh code path whether `login` or `recommend` is
+// checking it.
+//
+// A stored refresh token that still refreshes is reported as a non-nil
+// error naming the character, which the caller returns straight to the
+// pilot without ever starting a fresh authorization round-trip. A stored
+// refresh token that fails to refresh (expired, revoked, wrong client)
+// is not treated as a guard failure: it returns nil so RunLogin falls
+// through to a fresh login, which is what keeps `login` safe to re-run
+// even once the stored session has gone stale.
+func refuseIfStoredCredentialsStillWork(ctx context.Context, cfg Config, store *cache.Store, w io.Writer) error {
+	facts, err := pilotFacts(ctx, cfg, store)
+	if err != nil {
+		// The stored refresh token no longer works (or some other transient
+		// failure occurred) -- either way, there is nothing working to
+		// refuse overwriting, so fall through to a fresh login.
+		return nil
+	}
+
+	fmt.Fprintf(w, "Stored credentials already work for character %d: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
+		facts.CharacterID, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
+	return fmt.Errorf("refusing to overwrite working credentials for character %d; rerun with --force to re-authorize", facts.CharacterID)
+}
+
+// resolveClientID picks the client id a login run authorizes with (ticket
+// #30): the --client-id flag (flagClientID) wins, then a client id
+// remembered from a previous successful login (cfg.Credentials.ClientID),
+// and finally a prompt on cfg.Stdin (os.Stdin if unset) -- so a pilot
+// types or passes the client id exactly once, ever.
+func resolveClientID(flagClientID string, cfg Config, w io.Writer) (string, error) {
+	if flagClientID != "" {
+		return flagClientID, nil
+	}
+	if cfg.Credentials.ClientID != "" {
+		return cfg.Credentials.ClientID, nil
+	}
+	return promptForClientID(cfg.Stdin, w)
+}
+
+// promptForClientID prompts on w and reads a single line off in (os.Stdin
+// if in is nil), trimming surrounding whitespace. It is the fallback
+// resolveClientID uses when neither --client-id nor a stored
+// credentials.json gives a client id (ticket #30 acceptance criterion).
+func promptForClientID(in io.Reader, w io.Writer) (string, error) {
+	if in == nil {
+		in = os.Stdin
+	}
+
+	fmt.Fprint(w, "Enter your EVE SSO application client id: ")
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("reading client id from stdin: %w", err)
+	}
+
+	clientID := strings.TrimSpace(line)
+	if clientID == "" {
+		return "", fmt.Errorf("no client id given; pass --client-id or let a previous login remember one")
+	}
+	return clientID, nil
 }

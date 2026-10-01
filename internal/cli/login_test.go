@@ -271,6 +271,232 @@ func TestRunLoginVerifiesScopesAndPrintsThePilotFactsFromTheFreshAccessToken(t *
 	}
 }
 
+func TestRunLoginRefusesToOverwriteAWorkingStoredRefreshTokenAndNamesTheCharacter(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.Credentials = config.Credentials{
+		ClientID:     "existing-client-id",
+		RedirectURI:  cli.DefaultRedirectURI,
+		RefreshToken: "working-refresh-token",
+	}
+
+	browserOpened := false
+	cfg.OpenBrowser = func(string) error {
+		browserOpened = true
+		return nil
+	}
+
+	var buf strings.Builder
+	err := cli.RunLogin(t.Context(), cfg, cli.LoginParams{RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err == nil {
+		t.Fatalf("got no error for a working stored refresh token without --force, want a refusal\noutput: %s", buf.String())
+	}
+
+	if !strings.Contains(buf.String(), "932683762") {
+		t.Errorf("got output %q, want it to name character 932683762", buf.String())
+	}
+
+	if browserOpened {
+		t.Error("got the browser opened, want the reuse guard to refuse before ever starting a new authorization round-trip")
+	}
+
+	for _, gt := range server.grantTypes {
+		if gt == "authorization_code" {
+			t.Fatalf("got an authorization_code grant (grant types seen: %v), want only a refresh_token grant while checking reuse", server.grantTypes)
+		}
+	}
+}
+
+func TestRunLoginForceReauthorizesAndReplacesCredentialsEvenThoughTheStoredRefreshTokenStillWorks(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.Credentials = config.Credentials{
+		ClientID:     "existing-client-id",
+		RedirectURI:  cli.DefaultRedirectURI,
+		RefreshToken: "working-refresh-token",
+	}
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+
+	redirectURI := freeLoopbackRedirectURI(t)
+	var buf strings.Builder
+	err := cli.RunLogin(t.Context(), cfg, cli.LoginParams{ClientID: "existing-client-id", RedirectURI: redirectURI, Force: true}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin with --force: %v\noutput: %s", err, buf.String())
+	}
+
+	foundAuthCodeGrant := false
+	for _, gt := range server.grantTypes {
+		if gt == "authorization_code" {
+			foundAuthCodeGrant = true
+		}
+	}
+	if !foundAuthCodeGrant {
+		t.Fatalf("got grant types %v, want --force to perform a fresh authorization_code exchange even though the stored refresh token still works", server.grantTypes)
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.RedirectURI != redirectURI {
+		t.Errorf("got redirect uri %q, want the freshly re-authorized %q", creds.RedirectURI, redirectURI)
+	}
+}
+
+func TestRunLoginProceedsWithoutForceWhenTheStoredRefreshTokenNoLongerWorks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v2/oauth/token":
+			_ = r.ParseForm()
+			if r.PostForm.Get("grant_type") == "refresh_token" {
+				http.Error(w, "invalid_grant", http.StatusBadRequest)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  fakeJWT("CHARACTER:EVE:932683762"),
+				"token_type":    "Bearer",
+				"expires_in":    1200,
+				"refresh_token": "brand-new-refresh-token",
+			})
+		case strings.HasSuffix(r.URL.Path, "/skills/"):
+			json.NewEncoder(w).Encode(map[string]any{"skills": pilotSkills()})
+		case strings.HasSuffix(r.URL.Path, "/standings/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.Credentials = config.Credentials{
+		ClientID:     "existing-client-id",
+		RedirectURI:  cli.DefaultRedirectURI,
+		RefreshToken: "stale-refresh-token",
+	}
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+
+	var buf strings.Builder
+	err := cli.RunLogin(t.Context(), cfg, cli.LoginParams{ClientID: "existing-client-id", RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin with a stale stored refresh token (no --force): %v\noutput: %s", err, buf.String())
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.RefreshToken != "brand-new-refresh-token" {
+		t.Errorf("got refresh token %q, want the freshly authorized brand-new-refresh-token", creds.RefreshToken)
+	}
+}
+
+func TestRunLoginPromptsForTheClientIDWhenNeitherFlagNorStoredCredentialsGiveOne(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+	cfg.Stdin = strings.NewReader("prompted-client-id\n")
+
+	var buf strings.Builder
+	err := cli.RunLogin(t.Context(), cfg, cli.LoginParams{RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin with no --client-id and no stored credentials: %v\noutput: %s", err, buf.String())
+	}
+
+	if !strings.Contains(buf.String(), "client id") {
+		t.Errorf("got output %q, want a prompt mentioning the client id", buf.String())
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.ClientID != "prompted-client-id" {
+		t.Errorf("got client id %q, want the prompted prompted-client-id", creds.ClientID)
+	}
+}
+
+func TestLoginCommandForceFlagSkipsTheReuseGuard(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.Credentials = config.Credentials{
+		ClientID:     "existing-client-id",
+		RedirectURI:  cli.DefaultRedirectURI,
+		RefreshToken: "working-refresh-token",
+	}
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+
+	root := cli.NewRootCmd(cfg)
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"login", "--client-id", "existing-client-id", "--redirect-uri", freeLoopbackRedirectURI(t), "--force"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("login --force: %v\noutput: %s", err, out.String())
+	}
+
+	found := false
+	for _, gt := range server.grantTypes {
+		if gt == "authorization_code" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("got grant types %v, want --force wired through the command to perform a fresh authorization_code exchange", server.grantTypes)
+	}
+}
+
+func TestLoginCommandDoesNotRequireTheClientIDFlagWhenOneIsAlreadyStored(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	cfg.Credentials = config.Credentials{ClientID: "stored-client-id"}
+	cfg.OpenBrowser = simulateConsent("the-auth-code")
+
+	root := cli.NewRootCmd(cfg)
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"login", "--redirect-uri", freeLoopbackRedirectURI(t)})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("login with no --client-id flag but a stored client id: %v\noutput: %s", err, out.String())
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.ClientID != "stored-client-id" {
+		t.Errorf("got client id %q, want the remembered stored-client-id", creds.ClientID)
+	}
+}
+
 func TestRunLoginFailsWithANonZeroErrorWhenScopeVerificationFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

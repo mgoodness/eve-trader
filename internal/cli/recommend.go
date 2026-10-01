@@ -44,6 +44,13 @@ type Config struct {
 	// callback itself, so no test opens a real browser.
 	OpenBrowser func(url string) error
 
+	// Stdin is where `login` reads a pasted client id from when neither
+	// --client-id nor a stored credentials.json gives one (ticket #30). Left
+	// nil by DefaultConfig/LoadConfig, in which case RunLogin falls back to
+	// os.Stdin; newLoginCmd wires cmd.InOrStdin() so `root.SetIn` in tests
+	// reaches it without a direct Config override.
+	Stdin io.Reader
+
 	// ConfigDir is where credentials.json lives, so Run can persist a
 	// rotated refresh token back to disk (spec §12). Set by LoadConfig;
 	// left empty by DefaultConfig, in which case Run skips persistence (no
