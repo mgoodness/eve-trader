@@ -71,7 +71,31 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
 	}
+	return c.postTokenRequest(ctx, form)
+}
 
+// ExchangeAuthorizationCode exchanges an authorization code for an
+// access/refresh token pair (spec §12; docs/research/esi-sso-cli.md §1.2,
+// §1.3): POST https://login.eveonline.com/v2/oauth/token, form-encoded,
+// with the PKCE code_verifier and no client secret (public PKCE client,
+// no Authorization header) — reuses postTokenRequest so this and
+// RefreshAccessToken cannot drift.
+func (c *Client) ExchangeAuthorizationCode(ctx context.Context, clientID, redirectURI, code, codeVerifier string) (TokenResponse, error) {
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {codeVerifier},
+		"client_id":     {clientID},
+	}
+	return c.postTokenRequest(ctx, form)
+}
+
+// postTokenRequest POSTs form, form-encoded, to the SSO token endpoint
+// (docs/research/esi-sso-cli.md §3.1, §3.2) and decodes the JSON response
+// as a TokenResponse. It is shared by RefreshAccessToken's refresh grant
+// and the authorization-code exchange, which differ only in the form
+// values they send, so the two paths cannot drift.
+func (c *Client) postTokenRequest(ctx context.Context, form url.Values) (TokenResponse, error) {
 	reqURL := c.ssoBaseURL + "/v2/oauth/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -90,7 +114,7 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("reading refresh response: %w", err)
+		return TokenResponse{}, fmt.Errorf("reading token response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -99,7 +123,7 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 
 	var token TokenResponse
 	if err := json.Unmarshal(body, &token); err != nil {
-		return TokenResponse{}, fmt.Errorf("decoding refresh response: %w", err)
+		return TokenResponse{}, fmt.Errorf("decoding token response: %w", err)
 	}
 	return token, nil
 }

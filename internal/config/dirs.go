@@ -10,9 +10,8 @@ import (
 // config.toml both live directly under it (spec §13). It honors
 // $XDG_CONFIG_HOME if set, falling back to ~/.config/eve-trader otherwise —
 // deliberately not os.UserConfigDir(), which would resolve to
-// "~/Library/Application Support/eve-trader" on macOS and disagree with the
-// credentials file already provisioned on disk at ~/.config/eve-trader (see
-// scripts/esi-sso-wizard.sh).
+// "~/Library/Application Support/eve-trader" on macOS and disagree with
+// ~/.config/eve-trader, where `eve-trader login` writes credentials.json.
 func ConfigDir() (string, error) {
 	return xdgDir("XDG_CONFIG_HOME", ".config")
 }

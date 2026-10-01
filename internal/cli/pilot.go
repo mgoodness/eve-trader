@@ -30,6 +30,12 @@ type PilotFacts struct {
 	Fees       engine.Fees
 	OrderLimit int
 
+	// CharacterID is the character pilotFacts minted an access token for,
+	// decoded from that token's JWT sub claim. `login`'s reuse guard (ticket
+	// #30) uses it to name the character a working stored refresh token
+	// belongs to without a second decode.
+	CharacterID int32
+
 	// Accounting, BrokerRelations, FactionStanding, and CorpStanding are the
 	// raw skill levels and standings Fees was derived from (spec §4),
 	// echoed into the output contract's Meta.Params (ticket #23) so a run
@@ -44,12 +50,14 @@ type PilotFacts struct {
 // persists any rotated refresh token back to credentials.json, decodes the
 // character id from the access token's JWT sub claim, and reads the
 // character's skills and standings to derive the pilot's live fee rates
-// and order limit (spec §4, §12; ticket #16). No code path here assumes
-// max skills: a skill or standing ESI doesn't report for the character is
-// treated as untrained/zero by engine.DeriveFees and engine.OrderLimit.
+// and order limit (spec §4, §12; ticket #16). It is the only code path
+// that mints an access token from a stored refresh token; pilotFactsForAccessToken
+// below is the shared tail both this and `login`'s verification step
+// (ticket #29) call once an access token already exists, so there is a
+// single access-token/refresh code path end to end.
 func pilotFacts(ctx context.Context, cfg Config, store *cache.Store) (PilotFacts, error) {
 	if cfg.Credentials.RefreshToken == "" {
-		return PilotFacts{}, fmt.Errorf("no stored refresh token in credentials.json; run scripts/esi-sso-wizard.sh to authorize eve-trader")
+		return PilotFacts{}, fmt.Errorf("no stored refresh token in credentials.json; run `eve-trader login` to authorize eve-trader")
 	}
 
 	client := esi.NewClient(esi.ClientOptions{
@@ -68,17 +76,29 @@ func pilotFacts(ctx context.Context, cfg Config, store *cache.Store) (PilotFacts
 		return PilotFacts{}, err
 	}
 
-	characterID, err := esi.CharacterIDFromAccessToken(token.AccessToken)
+	return pilotFactsForAccessToken(ctx, cfg, store, client, token.AccessToken)
+}
+
+// pilotFactsForAccessToken decodes the character id from accessToken's JWT
+// sub claim and reads that character's skills and standings through client
+// to derive PilotFacts, without minting any token itself (ticket #29:
+// `login` calls this directly with the access token its authorization-code
+// exchange just minted, so verifying scopes never triggers a second,
+// redundant refresh-token exchange). No code path here assumes max
+// skills: a skill or standing ESI doesn't report for the character is
+// treated as untrained/zero by engine.DeriveFees and engine.OrderLimit.
+func pilotFactsForAccessToken(ctx context.Context, cfg Config, store *cache.Store, client *esi.Client, accessToken string) (PilotFacts, error) {
+	characterID, err := esi.CharacterIDFromAccessToken(accessToken)
 	if err != nil {
 		return PilotFacts{}, fmt.Errorf("decoding character id from access token: %w", err)
 	}
 
-	skills, err := cachedSkills(ctx, store, client, characterID, token.AccessToken)
+	skills, err := cachedSkills(ctx, store, client, characterID, accessToken)
 	if err != nil {
 		return PilotFacts{}, err
 	}
 
-	standings, err := cachedStandings(ctx, store, client, characterID, token.AccessToken)
+	standings, err := cachedStandings(ctx, store, client, characterID, accessToken)
 	if err != nil {
 		return PilotFacts{}, err
 	}
@@ -94,6 +114,7 @@ func pilotFacts(ctx context.Context, cfg Config, store *cache.Store) (PilotFacts
 	}
 
 	return PilotFacts{
+		CharacterID:     characterID,
 		Fees:            engine.DeriveFees(skills, factionStanding, corpStanding),
 		OrderLimit:      engine.OrderLimit(skills),
 		Accounting:      skills[engine.AccountingSkillID],
