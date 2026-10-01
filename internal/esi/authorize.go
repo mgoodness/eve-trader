@@ -8,10 +8,14 @@ import (
 	"net/url"
 )
 
-// Scopes is the exact, fixed scope set eve-trader requests (spec §12):
-// just enough to read skills and standings for live fee/order-limit
-// derivation.
-const Scopes = "esi-skills.read_skills.v1 esi-characters.read_standings.v1"
+// Scopes is the exact, fixed scope set eve-trader requests. The first two
+// (spec §12) read skills and standings for live fee/order-limit derivation;
+// the latter three (wayfinder map "eve-trader inventory-aware
+// recommendations", ticket "Provision expanded ESI scopes and
+// re-authorize the CLI token") read assets, character orders, and wallet
+// transactions for the inventory ledger's reconciliation and cost-basis
+// work.
+const Scopes = "esi-skills.read_skills.v1 esi-characters.read_standings.v1 esi-assets.read_assets.v1 esi-markets.read_character_orders.v1 esi-wallet.read_character_wallet.v1"
 
 // GeneratePKCE returns a fresh PKCE verifier/challenge pair, generated per
 // EVE SSO's non-RFC-7636 behaviour (docs/research/esi-sso-cli.md §1.3):
