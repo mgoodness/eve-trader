@@ -205,6 +205,9 @@ func TestRunFailsClearlyWithoutCredentials(t *testing.T) {
 	if err == nil {
 		t.Fatal("got no error running without credentials, want a clear one")
 	}
+	if !strings.Contains(err.Error(), "eve-trader login") {
+		t.Errorf("got error %q, want it to name `eve-trader login`", err.Error())
+	}
 }
 
 func TestRecommendCommandDefaultsToTheDenseTableWithoutJSON(t *testing.T) {
