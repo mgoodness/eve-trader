@@ -113,6 +113,21 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 		redirectURI = DefaultRedirectURI
 	}
 
+	// One shared *bufio.Reader for the whole invocation, over cfg.Stdin
+	// (os.Stdin if unset). The client-id prompt and the stdin callback
+	// fallback below both read off it, rather than each wrapping its own
+	// bufio.Reader over the same underlying stream: a second, independent
+	// bufio.Reader would over-read and buffer whatever the first one left
+	// unconsumed, silently losing it -- the real failure mode for a
+	// headless, piped stdin that delivers the client-id line and the
+	// callback line in one underlying Read (login over SSH, first run, no
+	// client id yet).
+	stdin := cfg.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	stdinReader := bufio.NewReader(stdin)
+
 	store, err := cache.Open(cfg.CacheDir)
 	if err != nil {
 		return fmt.Errorf("opening cache: %w", err)
@@ -124,7 +139,7 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 		}
 	}
 
-	clientID, err := resolveClientID(params.ClientID, cfg, w)
+	clientID, err := resolveClientID(params.ClientID, cfg, stdinReader, w)
 	if err != nil {
 		return err
 	}
@@ -158,7 +173,7 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 	// SSH session, where the pilot authorizes on a different machine), a
 	// pasted callback URL or bare code on stdin races the loopback callback
 	// above -- whichever arrives first wins the select below.
-	stdinResults := awaitStdinCallback(cfg.Stdin, state)
+	stdinResults := awaitStdinCallback(stdinReader, state)
 
 	open := cfg.OpenBrowser
 	if open == nil {
@@ -221,22 +236,25 @@ func exchangeCallbackAndFinish(ctx context.Context, cfg Config, clientID, redire
 	return verifyScopes(ctx, cfg, client, token.AccessToken, w)
 }
 
-// awaitStdinCallback reads a single line off in (os.Stdin if nil) in the
-// background and parses it as a headless login response (ticket #31): a
-// pasted full callback URL (its code/state query params are used) or a
-// bare authorization code (expectedState -- the state eve-trader generated
-// for this run -- is used verbatim, since a manually typed code has no
-// separate state to compare against). Empty input or a read error (an
+// awaitStdinCallback reads a single line off in in the background and
+// parses it as a headless login response (ticket #31): a pasted full
+// callback URL (its code/state query params are used) or a bare
+// authorization code (expectedState -- the state eve-trader generated for
+// this run -- is used verbatim, since a manually typed code has no
+// separate state to compare against). in is the single *bufio.Reader
+// RunLogin shares with promptForClientID for the whole invocation (never a
+// fresh bufio.Reader of its own): a second, independent bufio.Reader
+// wrapping the same underlying stdin would over-read and silently drop
+// whatever the first one buffered but didn't consume, losing the callback
+// line entirely when stdin delivers both the client-id answer and the
+// callback in a single underlying Read. Empty input or a read error (an
 // unused stdin, as in the normal browser round-trip) sends nothing, so the
 // returned channel simply never fires and the loopback callback path wins
 // the race in RunLogin's select.
-func awaitStdinCallback(in io.Reader, expectedState string) <-chan callbackResult {
+func awaitStdinCallback(in *bufio.Reader, expectedState string) <-chan callbackResult {
 	results := make(chan callbackResult, 1)
 	go func() {
-		if in == nil {
-			in = os.Stdin
-		}
-		line, err := bufio.NewReader(in).ReadString('\n')
+		line, err := in.ReadString('\n')
 		if err != nil && err != io.EOF {
 			return
 		}
@@ -259,6 +277,18 @@ func awaitStdinCallback(in io.Reader, expectedState string) <-chan callbackResul
 // the loopback callback would have received them. Any other non-empty
 // line is treated as a bare authorization code pasted directly, paired
 // with expectedState since there is no separate state to compare against.
+//
+// Pairing a bare code with expectedState verbatim, with no actual state to
+// check, is an accepted, intentional trade-off (ticket #26 story 13, ticket
+// #31), not a bypass of the CSRF guard: a bare pasted code -- the pilot
+// copied just the `code` value out of the browser's address bar rather
+// than the whole URL -- has no state parameter at all to carry, so the
+// state check that exchangeCallbackAndFinish runs afterward is inherently
+// inapplicable to this input shape; there is nothing independent left to
+// compare expectedState against. The CSRF protection that principally
+// matters -- rejecting a state an attacker supplied -- is the one on the
+// full-callback-URL path above, where the state parameter actually
+// originates from whoever sent the callback.
 func parseCallbackInput(line, expectedState string) (callbackResult, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -330,7 +360,7 @@ func serveOneCallback(ctx context.Context, listener net.Listener, path string) (
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			select {
-			case errs <- err:
+			case errs <- fmt.Errorf("serving loopback callback: %w", err):
 			default:
 			}
 		}
@@ -418,29 +448,33 @@ func refuseIfStoredCredentialsStillWork(ctx context.Context, cfg Config, store *
 // resolveClientID picks the client id a login run authorizes with (ticket
 // #30): the --client-id flag (flagClientID) wins, then a client id
 // remembered from a previous successful login (cfg.Credentials.ClientID),
-// and finally a prompt on cfg.Stdin (os.Stdin if unset) -- so a pilot
-// types or passes the client id exactly once, ever.
-func resolveClientID(flagClientID string, cfg Config, w io.Writer) (string, error) {
+// and finally a prompt read off in -- so a pilot types or passes the
+// client id exactly once, ever. in is the single *bufio.Reader RunLogin
+// shares with awaitStdinCallback for the whole invocation; see
+// promptForClientID.
+func resolveClientID(flagClientID string, cfg Config, in *bufio.Reader, w io.Writer) (string, error) {
 	if flagClientID != "" {
 		return flagClientID, nil
 	}
 	if cfg.Credentials.ClientID != "" {
 		return cfg.Credentials.ClientID, nil
 	}
-	return promptForClientID(cfg.Stdin, w)
+	return promptForClientID(in, w)
 }
 
-// promptForClientID prompts on w and reads a single line off in (os.Stdin
-// if in is nil), trimming surrounding whitespace. It is the fallback
-// resolveClientID uses when neither --client-id nor a stored
-// credentials.json gives a client id (ticket #30 acceptance criterion).
-func promptForClientID(in io.Reader, w io.Writer) (string, error) {
-	if in == nil {
-		in = os.Stdin
-	}
-
+// promptForClientID prompts on w and reads a single line off in, trimming
+// surrounding whitespace. It is the fallback resolveClientID uses when
+// neither --client-id nor a stored credentials.json gives a client id
+// (ticket #30 acceptance criterion). in must be the single *bufio.Reader
+// RunLogin shares with awaitStdinCallback for the whole invocation, never
+// a fresh bufio.Reader of its own: a second, independent bufio.Reader
+// wrapping the same underlying stdin would over-read and silently drop
+// whatever this prompt's read buffered but didn't consume, losing a
+// headless callback line that arrived in the same underlying Read as the
+// client-id answer.
+func promptForClientID(in *bufio.Reader, w io.Writer) (string, error) {
 	fmt.Fprint(w, "Enter your EVE SSO application client id: ")
-	line, err := bufio.NewReader(in).ReadString('\n')
+	line, err := in.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", fmt.Errorf("reading client id from stdin: %w", err)
 	}

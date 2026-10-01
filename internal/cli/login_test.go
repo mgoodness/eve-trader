@@ -245,6 +245,44 @@ func TestRunLoginAcceptsABareAuthorizationCodeOnStdinWhenNoCallbackArrives(t *te
 	}
 }
 
+func TestRunLoginSharesOneStdinReaderBetweenTheClientIDPromptAndTheCallbackFallback(t *testing.T) {
+	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
+	cfg := cli.DefaultConfig()
+	cfg.ESIBaseURL = server.URL
+	cfg.SSOBaseURL = server.URL
+	cfg.ConfigDir = t.TempDir()
+	cfg.CacheDir = t.TempDir()
+	// A single piped stdin stream delivering both the client-id prompt's
+	// answer and the headless callback fallback's bare code in one
+	// underlying read -- the real "login over SSH, first run, no client id
+	// yet" scenario, where a stacked second bufio.Reader over the same
+	// stream could over-read and lose the second line.
+	cfg.Stdin = strings.NewReader("prompted-client-id\nthe-auth-code\n")
+	// No browser ever reaches the loopback listener, so only the stdin
+	// fallback can produce the callback.
+	cfg.OpenBrowser = func(string) error { return nil }
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	var buf strings.Builder
+	err := cli.RunLogin(ctx, cfg, cli.LoginParams{RedirectURI: freeLoopbackRedirectURI(t)}, &buf)
+	if err != nil {
+		t.Fatalf("RunLogin with the client-id prompt and the stdin callback fallback sharing one stdin stream: %v\noutput: %s", err, buf.String())
+	}
+
+	creds, err := config.LoadCredentials(filepath.Join(cfg.ConfigDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if creds.ClientID != "prompted-client-id" {
+		t.Errorf("got client id %q, want the prompted prompted-client-id", creds.ClientID)
+	}
+	if creds.RefreshToken != "rotated-refresh-token" {
+		t.Errorf("got refresh token %q, want rotated-refresh-token from the stdin-fallback exchange", creds.RefreshToken)
+	}
+}
+
 func TestLoginCommandRedirectURIFlagOverridesTheDefaultAndBindsThatHostPort(t *testing.T) {
 	server := newFakeLoginVerificationServer(t, "CHARACTER:EVE:932683762", pilotSkills(), []map[string]any{})
 	cfg := cli.DefaultConfig()
