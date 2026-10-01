@@ -71,7 +71,15 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
 	}
+	return c.postTokenRequest(ctx, form)
+}
 
+// postTokenRequest POSTs form, form-encoded, to the SSO token endpoint
+// (docs/research/esi-sso-cli.md §3.1, §3.2) and decodes the JSON response
+// as a TokenResponse. It is shared by RefreshAccessToken's refresh grant
+// and the authorization-code exchange, which differ only in the form
+// values they send, so the two paths cannot drift.
+func (c *Client) postTokenRequest(ctx context.Context, form url.Values) (TokenResponse, error) {
 	reqURL := c.ssoBaseURL + "/v2/oauth/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -90,7 +98,7 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("reading refresh response: %w", err)
+		return TokenResponse{}, fmt.Errorf("reading token response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -99,7 +107,7 @@ func (c *Client) RefreshAccessToken(ctx context.Context, clientID, refreshToken 
 
 	var token TokenResponse
 	if err := json.Unmarshal(body, &token); err != nil {
-		return TokenResponse{}, fmt.Errorf("decoding refresh response: %w", err)
+		return TokenResponse{}, fmt.Errorf("decoding token response: %w", err)
 	}
 	return token, nil
 }

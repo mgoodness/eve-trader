@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mgoodness/eve-trader/internal/esi"
@@ -89,6 +90,24 @@ func TestRefreshAccessTokenPostsTheRefreshGrantAndReturnsTheNewTokens(t *testing
 		if !containsParam(gotBody, want) {
 			t.Errorf("request body %q missing %q", gotBody, want)
 		}
+	}
+}
+
+func TestRefreshAccessTokenSurfacesANonOKStatusAsAClearError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer server.Close()
+
+	client := esi.NewClient(esi.ClientOptions{SSOBaseURL: server.URL})
+
+	_, err := client.RefreshAccessToken(t.Context(), "client-id", "old-refresh-token")
+	if err == nil {
+		t.Fatal("got no error for a non-200 response, want one")
+	}
+	if !strings.Contains(err.Error(), "400") || !strings.Contains(err.Error(), "invalid_grant") {
+		t.Errorf("got error %q, want it to mention the status and body", err.Error())
 	}
 }
 
