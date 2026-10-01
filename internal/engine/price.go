@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // Recommendation is a candidate paired with the front-of-queue prices, the
 // resulting net margin, and (in later tickets) a unit quantity. Field names
 // match the JSON output contract (spec §11).
@@ -25,13 +27,25 @@ type Recommendation struct {
 	RoiPerDay                       float64 `json:"roi_per_day"`
 	ExpectedDailyProfitPerOrderSlot float64 `json:"expected_daily_profit_per_order_slot"`
 
-	// Units, CommittedCapital, and DaysToClear are Allocate's outputs (spec
+	// Units, CommittedCapital, and DaysOfSupply are Allocate's outputs (spec
 	// §10): zero until Allocate runs. A candidate Allocate could not fund
-	// (the unfunded set) always has Units == 0.
+	// (the unfunded set) always has Units == 0. The JSON tag stays
+	// `days_to_clear` because spec §11 mandates it, but the Go identifier
+	// follows CONTEXT.md's "Days of supply".
 	Units            int64   `json:"units"`
 	CommittedCapital float64 `json:"committed_capital"`
-	DaysToClear      float64 `json:"days_to_clear"`
+	DaysOfSupply     float64 `json:"days_to_clear"`
+
+	// Flags are pipeline-known notes for this recommendation (spec §11). The
+	// only flag v1 sets is FlagPartialFill; the slice is never nil so the
+	// JSON contract emits [] rather than null.
+	Flags []string `json:"flags"`
 }
+
+// FlagPartialFill marks a recommendation whose allocated units were reduced
+// below its units cap by the remaining budget (a partial fill, spec §10
+// step 4).
+const FlagPartialFill = "partial_fill"
 
 // Price computes the front-of-queue recommendation (spec §8) for a single
 // candidate: B* = best bid + δ, S* = best ask − δ, and the net margin at the
@@ -45,7 +59,14 @@ func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, sales
 
 	buyPrice := bestBid + delta
 	sellPrice := bestAsk - delta
-	profitPerUnit := sellPrice - buyPrice - brokerRate*buyPrice - brokerRate*sellPrice - salesTaxRate*sellPrice
+	// The broker fee is charged on each leg at the minimum of 100 ISK per
+	// order (spec §4, §8). Pricing does not know the eventual order size, so
+	// it prices the smallest possible order, one unit: each leg is floored at
+	// MinBrokerFee, keeping the filter conservative about thin, low-value
+	// spreads. Allocate applies the same floor to the real order value.
+	brokerBuy := math.Max(brokerRate*buyPrice, MinBrokerFee)
+	brokerSell := math.Max(brokerRate*sellPrice, MinBrokerFee)
+	profitPerUnit := sellPrice - buyPrice - brokerBuy - brokerSell - salesTaxRate*sellPrice
 	netMargin := profitPerUnit / sellPrice
 
 	return Recommendation{
@@ -58,5 +79,6 @@ func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, sales
 		SellPrice:     sellPrice,
 		NetMargin:     netMargin,
 		ProfitPerUnit: profitPerUnit,
+		Flags:         []string{},
 	}, true
 }

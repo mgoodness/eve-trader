@@ -26,9 +26,10 @@ func TestRankedUniverseSortsSurvivorsByExpectedDailyProfitDescending(t *testing.
 		// Morphite: profit/unit \u2248 3693.605, ADV 100 -> EDP \u2248 73,872 at the
 		// default 20% capture rate.
 		11399: historyDays(30, 100, 30000, 15000),
-		// Type 40: profit/unit \u2248 650.525, ADV 1000 -> EDP \u2248 130,105 -- higher
-		// than Morphite despite the thinner per-unit profit, because of the
-		// much larger volume.
+		// Type 40: profit/unit \u2248 504.525 (\u2248 650.525 before the 100 ISK per-order
+		// broker floor binds on both legs), ADV 1000 -> EDP \u2248 100,905 -- still
+		// higher than Morphite despite the thinner per-unit profit, because of
+		// the much larger volume.
 		40: historyDays(30, 1000, 3000, 500),
 	}
 	server, _ := historyFilteredFixtureServer(t, rankedFilteredOrders(), history)
@@ -50,7 +51,7 @@ func TestRankedUniverseSortsSurvivorsByExpectedDailyProfitDescending(t *testing.
 		t.Fatalf("got order %d, %d; want type 40 ranked ahead of Morphite (11399) by expected daily profit", recs[0].TypeID, recs[1].TypeID)
 	}
 
-	wantEDPHigh := 650.525 * 0.20 * 1000.0
+	wantEDPHigh := 504.525 * 0.20 * 1000.0
 	wantEDPLow := 3693.605 * 0.20 * 100.0
 	if math.Abs(recs[0].ExpectedDailyProfit-wantEDPHigh) > 1e-3 {
 		t.Errorf("got type 40 ExpectedDailyProfit=%v, want %v", recs[0].ExpectedDailyProfit, wantEDPHigh)

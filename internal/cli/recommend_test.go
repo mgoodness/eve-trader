@@ -223,10 +223,10 @@ func TestRecommendCommandDefaultsToTheDenseTableWithoutJSON(t *testing.T) {
 	if !strings.Contains(out.String(), "FUNDED RECOMMENDATIONS") {
 		t.Fatalf("got table %q, want the funded recommendations section by default", out.String())
 	}
-	// Names aren't resolved yet (engine.PricingRule's doc comment); the
-	// table identifies funded Morphite (11399) by its type_id.
-	if !strings.Contains(out.String(), "11399") {
-		t.Errorf("got table %q, want the funded Morphite (type 11399) recommendation", out.String())
+	// Morphite's real name is resolved through the batched type-name lookup,
+	// so the table shows it rather than a type-id placeholder.
+	if !strings.Contains(out.String(), "Morphite") {
+		t.Errorf("got table %q, want the funded Morphite recommendation", out.String())
 	}
 	if strings.Contains(out.String(), "thin book") {
 		t.Errorf("got table %q, want excluded reasons hidden without --explain", out.String())
@@ -246,10 +246,10 @@ func TestRecommendExplainFlagListsExcludedReasons(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	// Tritanium is type 34; names aren't resolved yet, so --explain
-	// identifies it by type_id alongside its reason.
-	if !strings.Contains(out.String(), "34") || !strings.Contains(out.String(), "thin book") {
-		t.Errorf("got table %q, want Tritanium (type 34) and its exclusion reason under --explain", out.String())
+	// Tritanium's real name is resolved through the batched type-name lookup,
+	// so --explain names it alongside its reason.
+	if !strings.Contains(out.String(), "Tritanium") || !strings.Contains(out.String(), "thin book") {
+		t.Errorf("got table %q, want Tritanium and its exclusion reason under --explain", out.String())
 	}
 }
 
@@ -295,6 +295,12 @@ func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
 	}
 	if result.Recommendations[0].RoiPerDay == 0 {
 		t.Errorf("got RoiPerDay=0, want it populated in the JSON contract")
+	}
+	if result.Recommendations[0].Name != "Morphite" {
+		t.Errorf("got Name=%q, want the resolved Morphite from /universe/names/", result.Recommendations[0].Name)
+	}
+	if result.Recommendations[0].Flags == nil {
+		t.Errorf("got nil Flags in the JSON contract, want [] not null")
 	}
 }
 

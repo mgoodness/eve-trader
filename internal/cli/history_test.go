@@ -30,6 +30,14 @@ func historyDays(n int, volume int, highest, lowest float64) []map[string]any {
 	return records
 }
 
+// fixtureTypeNames is the small type-id → name map the fake ESI servers
+// resolve POST /universe/names/ against, so tests can assert the pipeline
+// populates the output contract's `name` field (spec §11).
+var fixtureTypeNames = map[int32]string{
+	11399: "Morphite",
+	34:    "Tritanium",
+}
+
 // historyFilteredFixtureServer extends bookFilteredFixtureServer with the
 // region's market-history route, keyed by type_id, and records every
 // type_id a history request was made for (regardless of whether it was
@@ -49,6 +57,18 @@ func historyFilteredFixtureServer(t *testing.T, orders []map[string]any, history
 			requested = append(requested, int32(typeID))
 			mu.Unlock()
 			json.NewEncoder(w).Encode(history[int32(typeID)])
+		case r.URL.Path == "/universe/names/":
+			var ids []int32
+			if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+				t.Errorf("decoding /universe/names/ request: %v", err)
+			}
+			resolved := make([]map[string]any, 0, len(ids))
+			for _, id := range ids {
+				if name, ok := fixtureTypeNames[id]; ok {
+					resolved = append(resolved, map[string]any{"id": id, "name": name, "category": "inventory_type"})
+				}
+			}
+			json.NewEncoder(w).Encode(resolved)
 		case strings.HasPrefix(r.URL.Path, "/markets/") && strings.Contains(r.URL.Path, "/orders"):
 			w.Header().Set("X-Pages", "1")
 			json.NewEncoder(w).Encode(orders)

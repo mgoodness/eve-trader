@@ -22,14 +22,14 @@ type Meta struct {
 
 // RunParams are the run's configurable inputs (spec §13), echoed back in
 // the JSON contract (spec §11) so an adapter can audit or reproduce a run
-// without re-reading config.toml or ESI. Tick is the pricing rule's δ (spec
+// without re-reading config.toml or ESI. Delta is the pricing rule's δ (spec
 // §8); Accounting, BrokerRelations, FactionStanding, and CorpStanding are
 // the live skill/standing inputs Fees and OrderLimit were derived from
 // (spec §4).
 type RunParams struct {
 	Budget          int64   `json:"budget"`
 	TargetMargin    float64 `json:"target_margin"`
-	Tick            float64 `json:"tick"`
+	Delta           float64 `json:"delta"`
 	HorizonDays     int     `json:"horizon_days"`
 	CaptureRate     float64 `json:"capture_rate"`
 	Accounting      int     `json:"accounting"`

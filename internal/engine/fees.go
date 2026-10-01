@@ -13,6 +13,11 @@ const (
 	TycoonSkillID             int32 = 18580
 )
 
+// MinBrokerFee is the minimum ISK broker charge on each order leg, buy or
+// sell (spec §4: "charged on each order leg at creation, minimum 100 ISK
+// per order"; §8). It is per order, not per unit.
+const MinBrokerFee = 100.0
+
 // DeriveFees computes the pilot's NPC-station broker fee and sales tax
 // (spec §4) from active skill levels and unmodified standings toward the
 // trade station's owning corporation and faction. A skill absent from

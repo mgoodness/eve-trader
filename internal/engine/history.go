@@ -1,6 +1,9 @@
 package engine
 
-import "sort"
+import (
+	"sort"
+	"time"
+)
 
 // historyWindowDays is the trailing window the history-dependent filters
 // read (spec §6 "History funnel", §7 steps 3, 4, 7: "30-day history",
@@ -29,28 +32,80 @@ type CandidateHistory struct {
 	History        []HistoryRecord
 }
 
-// historyWindow returns the trailing historyWindowDays records of history,
-// sorted ascending by date. ESI's history response is not documented as
-// pre-sorted (research eve-market-mechanics-and-esi.md §6.2), so this sorts
-// defensively before trimming.
+// historyLayout is the date format ESI market history uses (research
+// eve-market-mechanics-and-esi.md §6.2: "date").
+const historyLayout = "2006-01-02"
+
+// historyWindow returns the trailing historyWindowDays calendar days of
+// history, sorted ascending by date: the records whose date falls within
+// the window ending on the newest record's date (spec §7 steps 3, 4, 7:
+// "30-day history", "30-day ADV", "30-day low/high"). A record older than
+// that window is not 30-day history even when it is among the last 30
+// records — ESI returns up to ~425 days, so record-count trimming would let
+// stale volume count toward ADV and would let a long-dead history satisfy
+// min-history.
+//
+// The anchor is the newest record rather than the wall clock: the engine is
+// pure and reads no clock, and the window is defined by the data the run
+// fetched. ESI's history response is not documented as pre-sorted, so this
+// sorts defensively first.
 func historyWindow(history []HistoryRecord) []HistoryRecord {
+	if len(history) == 0 {
+		return nil
+	}
+
 	sorted := make([]HistoryRecord, len(history))
 	copy(sorted, history)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date < sorted[j].Date })
-	if len(sorted) > historyWindowDays {
-		sorted = sorted[len(sorted)-historyWindowDays:]
+
+	anchor, err := time.Parse(historyLayout, sorted[len(sorted)-1].Date)
+	if err != nil {
+		// A malformed newest date leaves the window undefined; fall back to
+		// the trailing record count so behaviour stays deterministic rather
+		// than dropping the whole history.
+		if len(sorted) > historyWindowDays {
+			sorted = sorted[len(sorted)-historyWindowDays:]
+		}
+		return sorted
 	}
-	return sorted
+	cutoff := anchor.AddDate(0, 0, -(historyWindowDays - 1))
+
+	window := make([]HistoryRecord, 0, len(sorted))
+	for _, r := range sorted {
+		date, err := time.Parse(historyLayout, r.Date)
+		if err != nil {
+			continue
+		}
+		if !date.Before(cutoff) && !date.After(anchor) {
+			window = append(window, r)
+		}
+	}
+	return window
+}
+
+// distinctHistoryDays counts the days with a record in an already-sorted,
+// already-windowed history slice. One ESI record is one day, but counting
+// distinct dates (not rows) is what spec §7 step 3's "days of history"
+// asks for and is robust to a duplicated record.
+func distinctHistoryDays(records []HistoryRecord) int {
+	days := 0
+	last := ""
+	for _, r := range records {
+		if r.Date != last {
+			days++
+			last = r.Date
+		}
+	}
+	return days
 }
 
 // MinHistory reports the subset of candidates with at least minDays of
-// recent trade history (spec §7 step 3): the count of daily records within
-// the trailing 30-day window (historyWindow), not the full history ESI may
-// return (up to 425 days observed).
+// recent trade history (spec §7 step 3): at least minDays distinct days
+// within the trailing 30-day window (historyWindow), not the count of rows
+// ESI may return (up to 425 days observed).
 func MinHistory(candidates []CandidateHistory, minDays int) (passed []CandidateHistory, excluded []Excluded) {
 	for _, c := range candidates {
-		window := historyWindow(c.History)
-		if len(window) < minDays {
+		if distinctHistoryDays(historyWindow(c.History)) < minDays {
 			excluded = append(excluded, Excluded{
 				TypeID: c.Recommendation.TypeID,
 				Reason: "history too short: fewer than the required days of recent trade history",

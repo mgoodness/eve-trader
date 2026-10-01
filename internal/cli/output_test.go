@@ -60,6 +60,58 @@ func TestBuildResultAssemblesTheOutputContractFromTheAllocatedUniverse(t *testin
 	}
 }
 
+func TestBuildResultPopulatesNamesFromTheBatchedTypeNameLookup(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	server, _ := historyFilteredFixtureServer(t, rankedFilteredOrders(), history)
+	cfg := testConfig(t, server.URL)
+	cfg.Values.Budget = 150_000_000
+
+	result, warnings, err := cli.BuildResult(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("got warnings %v, want none", warnings)
+	}
+
+	byType := map[int32]engine.Recommendation{}
+	for _, rec := range result.Recommendations {
+		byType[rec.TypeID] = rec
+	}
+	if rec, ok := byType[11399]; !ok || rec.Name != "Morphite" {
+		t.Errorf("got funded Morphite=%+v (present=%v), want Name=Morphite", rec, ok)
+	}
+
+	for _, e := range result.Excluded {
+		if e.TypeID == 34 && e.Name != "Tritanium" {
+			t.Errorf("got excluded Tritanium Name=%q, want Tritanium", e.Name)
+		}
+	}
+}
+
+func TestBuildResultLeavesAnUnresolvedNameEmptyForTheTypeIDFallback(t *testing.T) {
+	// Type 40 is not in fixtureTypeNames, so its Name stays empty and the
+	// table renderer falls back to "type 40" (spec §11 name is best-effort).
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	server, _ := historyFilteredFixtureServer(t, rankedFilteredOrders(), history)
+	result, _, err := cli.BuildResult(t.Context(), testConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+
+	for _, rec := range result.Recommendations {
+		if rec.TypeID == 40 && rec.Name != "" {
+			t.Errorf("got type 40 Name=%q, want it left empty (unresolved)", rec.Name)
+		}
+	}
+}
+
 // TestBuildResultSplitsEveryTwoSidedTypeAcrossTheThreeGroupsWhenTheBudgetIsTight
 // locks the output contract's first invariant (spec §11, §14): a candidate
 // that clears the filters but cannot be funded is reported in the unfunded

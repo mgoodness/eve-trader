@@ -1,7 +1,7 @@
 // Package config resolves eve-trader's on-disk configuration and state
 // surface (spec §13): documented defaults for the values a run needs
 // (budget, target net margin, δ, horizon, minimum order, capture rate, and
-// the filter thresholds), a TOML reader/writer for the user's overrides at
+// the filter thresholds), a TOML reader for the user's overrides at
 // config.toml, the credentials file, and the config/cache directory
 // resolution every other package builds its disk paths from.
 //
@@ -46,9 +46,12 @@ type FilterThresholds struct {
 // Load reads a config.toml at path and overlays it on Defaults(): any field
 // the file doesn't set keeps its documented default. A missing file is not
 // an error — it returns Defaults() unchanged, so a fresh install runs with
-// sane behaviour before the pilot has written a config.toml at all. A
-// present-but-malformed file is a clear error naming path and the decode
-// failure; callers should treat that as fatal, not fall back silently.
+// sane behaviour before the pilot has written a config.toml at all. That is
+// the spec-consistent reading of §13 ("defaults live in config.toml") and of
+// ticket #15's "documented default path": the first-run pilot has no file,
+// so "missing" cannot be fatal. A present-but-malformed file is a clear error
+// naming path and the decode failure; callers should treat that as fatal, not
+// fall back silently.
 func Load(path string) (Values, error) {
 	values := Defaults()
 
@@ -74,24 +77,6 @@ func Load(path string) (Values, error) {
 // ceiling, a thin-book test of 2 orders within a 5% band of best, 7 days of
 // required history, a 20 units/day minimum ADV, and a 0.75×/1.25× 30-day
 // low/high price band.
-// Save writes values to path as TOML, creating or truncating the file
-// (mode 644 — unlike credentials.json, config.toml holds no secrets). It is
-// the write side of the config.toml reader/writer (spec §13); nothing in
-// eve-trader calls it yet (no command writes a starter config.toml), but it
-// exists so one can be added, and so Load/Save round-trip in tests.
-func Save(path string, values Values) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("writing config %s: %w", path, err)
-	}
-	defer f.Close()
-
-	if err := toml.NewEncoder(f).Encode(values); err != nil {
-		return fmt.Errorf("writing config %s: %w", path, err)
-	}
-	return nil
-}
-
 func Defaults() Values {
 	return Values{
 		Budget:       150_000_000,

@@ -20,6 +20,12 @@ func BuildResult(ctx context.Context, cfg Config) (engine.Result, []string, erro
 		return engine.Result{}, nil, err
 	}
 
+	nameWarnings, err := populateNames(ctx, cfg, funded, unfunded, excluded)
+	if err != nil {
+		return engine.Result{}, nil, err
+	}
+	warnings = append(warnings, nameWarnings...)
+
 	meta := engine.Meta{
 		GeneratedAt:  time.Now().UTC(),
 		RegionID:     cfg.RegionID,
@@ -27,7 +33,7 @@ func BuildResult(ctx context.Context, cfg Config) (engine.Result, []string, erro
 		Params: engine.RunParams{
 			Budget:          cfg.Values.Budget,
 			TargetMargin:    cfg.Values.TargetMargin,
-			Tick:            cfg.Values.Delta,
+			Delta:           cfg.Values.Delta,
 			HorizonDays:     cfg.Values.HorizonDays,
 			CaptureRate:     cfg.Values.CaptureRate,
 			Accounting:      facts.Accounting,

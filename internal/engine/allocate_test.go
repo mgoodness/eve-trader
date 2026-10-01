@@ -2,10 +2,109 @@ package engine_test
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/mgoodness/eve-trader/internal/engine"
 )
+
+func TestAllocateFlagsAPartialFill(t *testing.T) {
+	// units cap = 0.20*100*3 = 60; a 20,000 budget covers only ~19 units, so
+	// the allocation is a partial fill and must say so (spec §10 step 4, §11
+	// flags).
+	rec := engine.Recommendation{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100, ExpectedDailyProfit: 10}
+	params := engine.AllocationParams{
+		Budget:      20_000,
+		OrderLimit:  21,
+		MinOrder:    1_000,
+		CaptureRate: 0.20,
+		HorizonDays: 3,
+		Broker:      0.018,
+	}
+
+	funded, _ := engine.Allocate([]engine.Recommendation{rec}, params)
+
+	if len(funded) != 1 {
+		t.Fatalf("got funded=%+v, want one partially filled candidate", funded)
+	}
+	if funded[0].Units >= 60 {
+		t.Fatalf("got Units=%d, want fewer than the 60-unit cap for this to be a partial fill", funded[0].Units)
+	}
+	if !slices.Contains(funded[0].Flags, engine.FlagPartialFill) {
+		t.Errorf("got Flags=%v, want it to contain %q", funded[0].Flags, engine.FlagPartialFill)
+	}
+}
+
+func TestAllocateDoesNotFlagAFullFill(t *testing.T) {
+	rec := engine.Recommendation{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100, ExpectedDailyProfit: 10}
+	params := engine.AllocationParams{
+		Budget:      150_000,
+		OrderLimit:  21,
+		MinOrder:    1_000,
+		CaptureRate: 0.20,
+		HorizonDays: 3,
+		Broker:      0.018,
+	}
+
+	funded, _ := engine.Allocate([]engine.Recommendation{rec}, params)
+
+	if len(funded) != 1 {
+		t.Fatalf("got funded=%+v, want one candidate", funded)
+	}
+	if funded[0].Units != 60 {
+		t.Fatalf("got Units=%d, want the full 60-unit cap", funded[0].Units)
+	}
+	if slices.Contains(funded[0].Flags, engine.FlagPartialFill) {
+		t.Errorf("got Flags=%v, want no partial-fill flag on a full fill", funded[0].Flags)
+	}
+	if funded[0].Flags == nil {
+		t.Errorf("got nil Flags, want a non-nil slice so JSON emits [] not null")
+	}
+}
+
+func TestCapitalNeededFloorsEachBrokerLegAtTheMinimumOrderFee(t *testing.T) {
+	rec := engine.Recommendation{BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 1}
+
+	// units cap = 1 * 1 * 5 = 5, giving an order value of 5,000 ISK: each
+	// leg's percentage broker fee (90 and 99 ISK) is below the 100 ISK
+	// per-order minimum (spec §4, §8), so each leg is charged 100.
+	// committed = 5*1000 + 100 + 100 = 5,200.
+	got := engine.CapitalNeeded(rec, 0.018, 1, 5)
+	if math.Abs(got-5200) > 1e-6 {
+		t.Errorf("got CapitalNeeded=%v, want 5200 (both broker legs floored at 100 ISK)", got)
+	}
+}
+
+func TestAllocateFloorsEachBrokerLegAtTheMinimumOrderFee(t *testing.T) {
+	// cap = 1 * 1 * 5 = 5 units; the 3,500 budget affords only 3 units. At
+	// that order value each leg's percentage fee (54, 59.4 ISK) is below the
+	// 100 ISK floor, so committed capital is 3*1000 + 100 + 100 = 3,200.
+	rec := engine.Recommendation{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 1, ExpectedDailyProfit: 5}
+	params := engine.AllocationParams{
+		Budget:      3_500,
+		OrderLimit:  21,
+		MinOrder:    1,
+		CaptureRate: 1,
+		HorizonDays: 5,
+		Broker:      0.018,
+	}
+
+	funded, unfunded := engine.Allocate([]engine.Recommendation{rec}, params)
+
+	if len(unfunded) != 0 {
+		t.Fatalf("got unfunded=%+v, want none", unfunded)
+	}
+	if len(funded) != 1 {
+		t.Fatalf("got funded=%+v, want one candidate", funded)
+	}
+	got := funded[0]
+	if got.Units != 3 {
+		t.Errorf("got Units=%d, want 3", got.Units)
+	}
+	if math.Abs(got.CommittedCapital-3200) > 1e-6 {
+		t.Errorf("got CommittedCapital=%v, want 3200 (both broker legs floored at 100 ISK)", got.CommittedCapital)
+	}
+}
 
 func TestCapitalNeededReportsWhatACandidateWouldNeedToBeFundedAtItsUnitsCap(t *testing.T) {
 	rec := engine.Recommendation{BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100}
@@ -44,7 +143,7 @@ func TestAllocateFundsACandidateAtItsUnitsCapWhenBudgetComfortablyCoversIt(t *te
 	wantUnits := int64(60)
 	// committed capital/unit = B*(1+broker) + S*broker = 1000*1.018 + 1100*0.018 = 1037.8
 	wantCapital := 1037.8 * 60
-	wantDaysToClear := 3.0 // units / (captureRate * ADV) = 60 / 20
+	wantDaysOfSupply := 3.0 // units / (captureRate * ADV) = 60 / 20
 
 	got := funded[0]
 	if got.Units != wantUnits {
@@ -53,8 +152,8 @@ func TestAllocateFundsACandidateAtItsUnitsCapWhenBudgetComfortablyCoversIt(t *te
 	if math.Abs(got.CommittedCapital-wantCapital) > 1e-6 {
 		t.Errorf("got CommittedCapital=%v, want %v", got.CommittedCapital, wantCapital)
 	}
-	if math.Abs(got.DaysToClear-wantDaysToClear) > 1e-9 {
-		t.Errorf("got DaysToClear=%v, want %v", got.DaysToClear, wantDaysToClear)
+	if math.Abs(got.DaysOfSupply-wantDaysOfSupply) > 1e-9 {
+		t.Errorf("got DaysOfSupply=%v, want %v", got.DaysOfSupply, wantDaysOfSupply)
 	}
 }
 
@@ -99,22 +198,25 @@ func TestAllocatePartiallyFillsACandidateWhenBudgetFallsShortOfItsUnitsCap(t *te
 }
 
 func TestAllocateLeavesAPartialFillBelowTheMinimumOrderIdleAndContinuesToTheNextCandidate(t *testing.T) {
-	// Zero broker fee and CaptureRate/HorizonDays of 1 keep the arithmetic
-	// simple: capital/unit == BuyPrice, units cap == AverageDailyVolume.
-	// Density (spec \u00a710 step 1) is ExpectedDailyProfit/capital-per-unit,
-	// so A (0.5) sorts ahead of B (0.1), ahead of C (0.04) -- shuffled here
-	// to prove Allocate does its own sort rather than trusting input order.
+	// CaptureRate/HorizonDays of 1 keep the units cap equal to
+	// AverageDailyVolume, and a zero broker rate isolates the per-order
+	// 100 ISK floor (spec §4, §8): every posted order's committed capital is
+	// units×BuyPrice + 100 (buy leg) + 100 (sell leg). Density (spec §10 step
+	// 1) is ExpectedDailyProfit/capital-per-unit, so A sorts ahead of B,
+	// ahead of C -- shuffled here to prove Allocate does its own sort rather
+	// than trusting input order.
 	candidateA := engine.Recommendation{TypeID: 1, BuyPrice: 100, SellPrice: 110, AverageDailyVolume: 10, ExpectedDailyProfit: 50}
 	candidateB := engine.Recommendation{TypeID: 2, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 60, ExpectedDailyProfit: 100}
 	candidateC := engine.Recommendation{TypeID: 3, BuyPrice: 50, SellPrice: 55, AverageDailyVolume: 5, ExpectedDailyProfit: 2}
 	ranked := []engine.Recommendation{candidateC, candidateB, candidateA}
 
 	params := engine.AllocationParams{
-		// A's full fill (10 units * 100) costs 1,000, leaving 500. B's full
-		// fill would cost 60,000, so it gets whatever floor(500/1000)
-		// buys -- zero units, below the 200 ISK minimum order: left idle,
-		// not skipped, so the 500 remains available and reaches C, whose
-		// full fill (5 units * 50) costs exactly 250 of it.
+		// A's full fill (10 units * 100, plus both 100 ISK broker floors)
+		// costs 1,200, leaving 300. B's cheapest legal order (one unit:
+		// 1,000 plus both floors) costs 1,200 > 300, so it gets zero units --
+		// below the 200 ISK minimum order: left idle, not skipped, so the 300
+		// remains available and reaches C, whose 2 units (2*50 plus both
+		// floors) cost exactly 300 of it.
 		Budget:      1_500,
 		OrderLimit:  21,
 		MinOrder:    200,
@@ -132,11 +234,11 @@ func TestAllocateLeavesAPartialFillBelowTheMinimumOrderIdleAndContinuesToTheNext
 		t.Fatalf("got funded=%+v, want candidates A and C funded", funded)
 	}
 	fundedByType := map[int32]engine.Recommendation{funded[0].TypeID: funded[0], funded[1].TypeID: funded[1]}
-	if got := fundedByType[1]; got.Units != 10 || got.CommittedCapital != 1000 {
-		t.Errorf("got candidate A funded=%+v, want Units=10, CommittedCapital=1000", got)
+	if got := fundedByType[1]; got.Units != 10 || got.CommittedCapital != 1200 {
+		t.Errorf("got candidate A funded=%+v, want Units=10, CommittedCapital=1200", got)
 	}
-	if got := fundedByType[3]; got.Units != 5 || got.CommittedCapital != 250 {
-		t.Errorf("got candidate C funded=%+v, want Units=5, CommittedCapital=250 (reached using the budget candidate B left idle)", got)
+	if got := fundedByType[3]; got.Units != 2 || got.CommittedCapital != 300 {
+		t.Errorf("got candidate C funded=%+v, want Units=2, CommittedCapital=300 (reached using the budget candidate B left idle)", got)
 	}
 }
 
@@ -210,7 +312,7 @@ func TestAllocatePartialFillingCommitsMoreBudgetAndProfitThanWholeOrderSkipping(
 }
 
 func TestAllocateLeavesLaterCandidatesUnfundedOnceTheOrderLimitIsReached(t *testing.T) {
-	// Each candidate costs two order slots (buy + sell); an order limit of
+	// Each candidate costs two orders (buy and sell); an order limit of
 	// 2 admits exactly one candidate.
 	ranked := []engine.Recommendation{
 		{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100},
