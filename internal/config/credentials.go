@@ -59,11 +59,20 @@ func LoadCredentials(path string) (Credentials, error) {
 // directory, then rename). Ticket #16 uses this to persist a rotated
 // refresh token (spec §12: "the refresh token ... rotates — persist the
 // returned one every time") without ever leaving a partially-written or
-// wrong-permission credentials.json on disk.
+// wrong-permission credentials.json on disk. The config directory itself
+// is created (mode 700, matching the 600 file it will hold) if it doesn't
+// exist yet: `eve-trader login` is the first command that ever writes
+// here, so on a fresh install ~/.config/eve-trader has never been created
+// by anything else (diagnosed: CreateTemp below failed with "no such file
+// or directory" the first time a pilot logged in on a clean machine).
 func SaveCredentials(path string, creds Credentials) error {
 	body, err := json.MarshalIndent(creds, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding credentials %s: %w", path, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("creating config directory for %s: %w", path, err)
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")

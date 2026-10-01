@@ -71,6 +71,29 @@ func TestLoadCredentialsReturnsAClearErrorForMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestSaveCredentialsCreatesTheConfigDirectoryWhenMissing is a regression
+// test (diagnosed bug: a fresh install's ~/.config/eve-trader has never
+// been created by anything before `eve-trader login` writes the first
+// credentials.json to it, so SaveCredentials failed with "no such file or
+// directory"). SaveCredentials must create its directory, matching
+// cache.Open's existing MkdirAll-on-open behavior.
+func TestSaveCredentialsCreatesTheConfigDirectoryWhenMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "eve-trader", "credentials.json")
+	want := config.Credentials{ClientID: "abc123", RefreshToken: "a-refresh-token"}
+
+	if err := config.SaveCredentials(path, want); err != nil {
+		t.Fatalf("SaveCredentials into a not-yet-existing directory: %v", err)
+	}
+
+	got, err := config.LoadCredentials(path)
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if got != want {
+		t.Errorf("LoadCredentials() = %+v, want %+v", got, want)
+	}
+}
+
 func TestSaveCredentialsRoundTripsWithLoadCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	want := config.Credentials{
