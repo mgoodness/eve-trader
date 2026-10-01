@@ -176,3 +176,36 @@ _Avoid_: turnover, holding time
 The smallest committed capital worth posting; a partial fill below it is left
 idle rather than created. Default 1M ISK.
 _Avoid_: order floor, dust order
+
+### Authentication
+
+**Login**:
+The one interactive browser round-trip that establishes the pilot's credentials
+at the EVE SSO consent screen. A verb for the pilot's action; the protocol step
+it performs is *authorization*.
+_Avoid_: sign in, authenticate (as a command name)
+
+**Credentials**:
+The pilot's stored OAuth client identity and refresh state, held in
+`credentials.json` at mode 600 — the single source of auth (spec §13).
+_Avoid_: tokens, auth file
+
+**Client ID**:
+The ESI application's public identifier, sent with both the authorization
+request and the refresh. Public by design under PKCE; never a secret.
+_Avoid_: app key, API key
+
+**Authorization code**:
+The one-time code EVE SSO returns to the loopback callback, traded for an
+access/refresh token pair. Lives five minutes.
+_Avoid_: callback code, auth token
+
+**Access token**:
+The short-lived JWT (20 min) minted from a refresh token; its `sub` claim carries
+the character id.
+_Avoid_: session token
+
+**Refresh token**:
+The long-lived token that mints access tokens; it rotates on every exchange, so
+the returned one is always persisted.
+_Avoid_: long-lived token, offline token
