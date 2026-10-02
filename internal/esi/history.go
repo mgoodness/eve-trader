@@ -55,7 +55,7 @@ func (c *Client) FetchHistory(ctx context.Context, regionID, typeID int32, ifNon
 	if err != nil {
 		return HistoryResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
 		return HistoryResult{NotModified: true, ETag: ifNoneMatch}, nil

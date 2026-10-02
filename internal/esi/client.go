@@ -197,7 +197,7 @@ func (c *Client) FetchRegionOrdersPage(ctx context.Context, regionID int32, orde
 	if err != nil {
 		return PageResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
 		return PageResult{NotModified: true, ETag: ifNoneMatch}, nil
@@ -253,7 +253,7 @@ func (c *Client) getWithBackoff(ctx context.Context, reqURL, ifNoneMatch string)
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == statusErrorLimited {
 			retryAfter := retryAfterDuration(resp.Header.Get("Retry-After"))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if attempt >= maxBackoffAttempts {
 				return nil, fmt.Errorf("GET %s: status %s after %d attempts", reqURL, resp.Status, attempt)
 			}

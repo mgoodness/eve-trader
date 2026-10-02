@@ -87,10 +87,10 @@ func SaveLedger(path string, lots []engine.Lot) error {
 	if err != nil {
 		return fmt.Errorf("writing ledger %s: %w", path, err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if _, err := tmp.Write(body); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("writing ledger %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -281,17 +281,17 @@ func newLedgerCmd(cfg Config) *cobra.Command {
 			}
 			for _, n := range notes {
 				if n.Kind == engine.NoteDriftClamp {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", n.Detail)
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", n.Detail)
 					continue
 				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s\n", n.Kind, n.Detail)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s\n", n.Kind, n.Detail)
 			}
 			names, nameWarnings, err := populateLotNames(cmd.Context(), cfg, lots)
 			if err != nil {
 				return err
 			}
 			for _, w := range nameWarnings {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
 			return renderLots(cmd.OutOrStdout(), lots, names)
 		},
@@ -307,13 +307,13 @@ func newLedgerCmd(cfg Config) *cobra.Command {
 // human-scannable way to tell same-item lots apart.
 func renderLots(w io.Writer, lots []engine.Lot, names map[int32]string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "LOT ID\tITEM\tSTATUS\tTOTAL\tAVAILABLE\tACQUIRED\tACQUISITION PRICE")
+	_, _ = fmt.Fprintln(tw, "LOT ID\tITEM\tSTATUS\tTOTAL\tAVAILABLE\tACQUIRED\tACQUISITION PRICE")
 	for _, lot := range lots {
 		price := "-"
 		if lot.AcquisitionPrice != nil {
 			price = strconv.FormatFloat(*lot.AcquisitionPrice, 'f', 2, 64)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
 			lot.LotID, displayName(lot.TypeID, names[lot.TypeID]), lot.Status, lot.QuantityTotal, lot.QuantityAvailable,
 			lot.AcquiredAt.Format("2006-01-02"), price)
 	}

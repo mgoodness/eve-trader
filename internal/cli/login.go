@@ -148,7 +148,7 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 	if err != nil {
 		return fmt.Errorf("binding loopback listener for %s: %w", redirectURI, err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	verifier, challenge, err := esi.GeneratePKCE()
 	if err != nil {
@@ -160,7 +160,7 @@ func RunLogin(ctx context.Context, cfg Config, params LoginParams, w io.Writer) 
 	}
 
 	authorizeURL := esi.AuthorizeURL(cfg.SSOBaseURL, clientID, redirectURI, state, challenge)
-	fmt.Fprintf(w, "Open this URL to authorize eve-trader:\n%s\n", authorizeURL)
+	_, _ = fmt.Fprintf(w, "Open this URL to authorize eve-trader:\n%s\n", authorizeURL)
 
 	// The listener must already be serving before the browser (real or
 	// faked) can be opened: a real browser's request would otherwise just
@@ -226,7 +226,7 @@ func exchangeCallbackAndFinish(ctx context.Context, cfg Config, clientID, redire
 		return fmt.Errorf("saving credentials: %w", err)
 	}
 
-	fmt.Fprintf(w, "Logged in; credentials saved to %s\n", path)
+	_, _ = fmt.Fprintf(w, "Logged in; credentials saved to %s\n", path)
 
 	// Verification lives after credentials are written (RunLogin's doc
 	// comment above): a wrong scope or character still means eve-trader
@@ -345,16 +345,16 @@ func serveOneCallback(ctx context.Context, listener net.Listener, path string) (
 			case errs <- fmt.Errorf("EVE SSO returned an authorization error: %s", authErr):
 			default:
 			}
-			go server.Shutdown(context.Background())
+			go func() { _ = server.Shutdown(context.Background()) }()
 			return
 		}
 
-		fmt.Fprintln(rw, "You may close this window and return to eve-trader.")
+		_, _ = fmt.Fprintln(rw, "You may close this window and return to eve-trader.")
 		select {
 		case results <- callbackResult{code: q.Get("code"), state: q.Get("state")}:
 		default:
 		}
-		go server.Shutdown(context.Background())
+		go func() { _ = server.Shutdown(context.Background()) }()
 	})
 
 	go func() {
@@ -368,7 +368,7 @@ func serveOneCallback(ctx context.Context, listener net.Listener, path string) (
 
 	go func() {
 		<-ctx.Done()
-		server.Shutdown(context.Background())
+		_ = server.Shutdown(context.Background())
 	}()
 
 	return results, errs
@@ -406,7 +406,7 @@ func verifyScopes(ctx context.Context, cfg Config, client *esi.Client, accessTok
 		return fmt.Errorf("verifying granted scopes (reading skills and standings): %w", err)
 	}
 
-	fmt.Fprintf(w, "Verified scopes for character %s: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
+	_, _ = fmt.Fprintf(w, "Verified scopes for character %s: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
 		facts.CharacterName, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
 	return nil
 }
@@ -435,7 +435,7 @@ func refuseIfStoredCredentialsStillWork(ctx context.Context, cfg Config, store *
 		return nil
 	}
 
-	fmt.Fprintf(w, "Stored credentials already work for character %s: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
+	_, _ = fmt.Fprintf(w, "Stored credentials already work for character %s: broker fee %.3f%%, sales tax %.3f%%, order limit %d\n",
 		facts.CharacterName, facts.Fees.Broker*100, facts.Fees.SalesTax*100, facts.OrderLimit)
 	return fmt.Errorf("refusing to overwrite working credentials for character %s; rerun with --force to re-authorize", facts.CharacterName)
 }
@@ -468,7 +468,7 @@ func resolveClientID(flagClientID string, cfg Config, in *bufio.Reader, w io.Wri
 // headless callback line that arrived in the same underlying Read as the
 // client-id answer.
 func promptForClientID(in *bufio.Reader, w io.Writer) (string, error) {
-	fmt.Fprint(w, "Enter your EVE SSO application client id: ")
+	_, _ = fmt.Fprint(w, "Enter your EVE SSO application client id: ")
 	line, err := in.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", fmt.Errorf("reading client id from stdin: %w", err)

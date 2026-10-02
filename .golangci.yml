@@ -1,0 +1,17 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - staticcheck
+  exclusions:
+    rules:
+      # Test fixtures write fixed, always-marshalable literals
+      # (map[string]any{...}) to an httptest ResponseWriter; a write or
+      # Encode failure there is not a reachable bug worth a checked-error
+      # or _ = ... at every one of ~100 call sites across the suite.
+      # Production code keeps errcheck at full strength.
+      - path: '(.+)_test\.go'
+        linters:
+          - errcheck

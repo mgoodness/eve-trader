@@ -146,7 +146,7 @@ func (c *Client) postTokenRequest(ctx context.Context, form url.Values) (TokenRe
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

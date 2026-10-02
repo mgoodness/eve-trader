@@ -213,7 +213,7 @@ func newRecommendCmd(cfg Config) *cobra.Command {
 			// order was treated as not covering the station) go to stderr,
 			// never into the JSON contract (spec §11 has no warnings field).
 			for _, w := range warnings {
-				fmt.Fprintln(cmd.ErrOrStderr(), w)
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), w)
 			}
 
 			if jsonOutput {

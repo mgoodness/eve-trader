@@ -169,10 +169,6 @@ func TestHistoryFilteredUniverseDropsCandidatesFailingAHistoryFilter(t *testing.
 	if len(recs) != 0 {
 		t.Fatalf("got recs=%+v, want none (Morphite fails min history, Tritanium fails book-only)", recs)
 	}
-	var reasons []string
-	for _, e := range excluded {
-		reasons = append(reasons, e.Reason)
-	}
 	if len(excluded) != 2 {
 		t.Fatalf("got excluded=%+v, want two entries (Tritanium book-only, Morphite history)", excluded)
 	}

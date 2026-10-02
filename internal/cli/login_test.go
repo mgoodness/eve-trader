@@ -54,7 +54,7 @@ func newFakeLoginVerificationServer(t *testing.T, characterIDClaim string, skill
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(fake.Server.Close)
+	t.Cleanup(fake.Close)
 	return fake
 }
 
@@ -617,8 +617,8 @@ func TestLoginCommandDoesNotRequireTheClientIDFlagWhenOneIsAlreadyStored(t *test
 func TestRunLoginFailsWithANonZeroErrorWhenScopeVerificationFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/v2/oauth/token":
+		switch r.URL.Path {
+		case "/v2/oauth/token":
 			json.NewEncoder(w).Encode(map[string]any{
 				"access_token":  fakeJWT("CHARACTER:EVE:932683762"),
 				"token_type":    "Bearer",

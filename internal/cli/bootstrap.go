@@ -71,13 +71,13 @@ func RunBootstrap(ctx context.Context, cfg Config, in io.Reader, out io.Writer) 
 
 	untracked := engine.UntrackedHoldings(lots, assets, cfg.TradeStationID)
 	if len(untracked) == 0 {
-		fmt.Fprintln(out, "No untracked hangar stock at the trade station.")
+		_, _ = fmt.Fprintln(out, "No untracked hangar stock at the trade station.")
 		return nil
 	}
 
 	confirmed := confirmUntracked(bufio.NewReader(in), untracked, out)
 	if len(confirmed) == 0 {
-		fmt.Fprintln(out, "Nothing seeded.")
+		_, _ = fmt.Fprintln(out, "Nothing seeded.")
 		return nil
 	}
 
@@ -87,7 +87,7 @@ func RunBootstrap(ctx context.Context, cfg Config, in io.Reader, out io.Writer) 
 	}
 
 	names, _ := cachedTypeNames(ctx, store, client, lotTypeIDs(seeded))
-	fmt.Fprintln(out, "Seeded:")
+	_, _ = fmt.Fprintln(out, "Seeded:")
 	return renderLots(out, seeded, names)
 }
 
@@ -95,20 +95,20 @@ func RunBootstrap(ctx context.Context, cfg Config, in io.Reader, out io.Writer) 
 // confirm each one on in, returning only the confirmed holdings. A blank,
 // EOF, or non-affirmative answer declines; nothing is assumed.
 func confirmUntracked(in *bufio.Reader, untracked []engine.UntrackedHolding, out io.Writer) []engine.UntrackedHolding {
-	fmt.Fprintln(out, "Untracked hangar stock at the trade station:")
+	_, _ = fmt.Fprintln(out, "Untracked hangar stock at the trade station:")
 	for _, holding := range untracked {
-		fmt.Fprintf(out, "  type %d: %d units\n", holding.TypeID, holding.Quantity)
+		_, _ = fmt.Fprintf(out, "  type %d: %d units\n", holding.TypeID, holding.Quantity)
 	}
 
 	var confirmed []engine.UntrackedHolding
 	for _, holding := range untracked {
-		fmt.Fprintf(out, "Seed type %d (%d units) as trading stock? [y/N] ", holding.TypeID, holding.Quantity)
+		_, _ = fmt.Fprintf(out, "Seed type %d (%d units) as trading stock? [y/N] ", holding.TypeID, holding.Quantity)
 		line, err := in.ReadString('\n')
 		answer := strings.TrimSpace(line)
 		if err != nil && answer == "" {
 			// EOF with no answer: treat everything still unasked as
 			// declined rather than seeding it.
-			fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out)
 			break
 		}
 		if isAffirmative(answer) {
