@@ -233,7 +233,7 @@ func TestAcceptanceAgainstFrozenSnapshot(t *testing.T) {
 	// The canonical run: the pilot's documented default budget (spec §13).
 	result := runAcceptanceOnce(t, t.Context(), server.URL, acceptanceDefaultBudget)
 	t.Logf("frozen snapshot: two-sided=%d, funded=%d, unfunded=%d, excluded=%d, committed=%.0f, orders=%d/%d (budget %d)",
-		len(snap.twoSided), len(result.Recommendations), len(result.Unfunded), len(result.Excluded),
+		len(snap.twoSided), len(result.BuyRecommendations), len(result.Unfunded), len(result.Excluded),
 		result.Summary.CommittedCapital, result.Summary.OrdersUsed, result.Summary.OrderLimit, result.Summary.Budget)
 
 	t.Run("every funded recommendation is postable", func(t *testing.T) {
@@ -246,7 +246,7 @@ func TestAcceptanceAgainstFrozenSnapshot(t *testing.T) {
 
 	t.Run("the budget and the order limit are respected", func(t *testing.T) {
 		assertBudgetAndOrderLimit(t, result)
-		if len(result.Recommendations) == 0 {
+		if len(result.BuyRecommendations) == 0 {
 			t.Fatal("frozen snapshot funded nothing at the default budget; the acceptance check would be vacuous")
 		}
 	})
@@ -258,7 +258,7 @@ func TestAcceptanceAgainstFrozenSnapshot(t *testing.T) {
 	t.Run("the order limit binds and is respected under a larger budget", func(t *testing.T) {
 		result := runAcceptanceOnce(t, t.Context(), server.URL, acceptanceSlotBindingBudget)
 		t.Logf("slot-binding run: funded=%d, unfunded=%d, excluded=%d, orders=%d/%d",
-			len(result.Recommendations), len(result.Unfunded), len(result.Excluded), result.Summary.OrdersUsed, result.Summary.OrderLimit)
+			len(result.BuyRecommendations), len(result.Unfunded), len(result.Excluded), result.Summary.OrdersUsed, result.Summary.OrderLimit)
 		// Ten funded candidates (20 of the 21 slots) is the honest way to
 		// exercise the limit: with more budget available than slots, the
 		// limit — not the budget — is what caps the funded set. The same
@@ -294,7 +294,7 @@ func assertPostable(t *testing.T, result engine.Result, twoSided []engine.Candid
 		universe[c.TypeID] = c
 	}
 
-	for _, rec := range result.Recommendations {
+	for _, rec := range result.BuyRecommendations {
 		c, ok := universe[rec.TypeID]
 		if !ok {
 			t.Errorf("funded type %d is not in the snapshot's two-sided universe", rec.TypeID)
@@ -333,7 +333,7 @@ func assertClearsTargetMargin(t *testing.T, result engine.Result) {
 		t.Fatalf("got target margin %v, want a positive configured target", target)
 	}
 
-	for _, rec := range result.Recommendations {
+	for _, rec := range result.BuyRecommendations {
 		// The broker fee is charged on each order leg with a 100 ISK minimum
 		// per order (spec §4, §8). Pricing works per unit, so each leg is
 		// floored at 100 ISK, matching engine.Price.
@@ -360,9 +360,9 @@ func assertBudgetAndOrderLimit(t *testing.T, result engine.Result) {
 	if result.Summary.OrderLimit != 21 {
 		t.Errorf("got order limit %d, want the pilot's frozen 21", result.Summary.OrderLimit)
 	}
-	if result.Summary.OrdersUsed != 2*len(result.Recommendations) {
+	if result.Summary.OrdersUsed != 2*len(result.BuyRecommendations) {
 		t.Errorf("got OrdersUsed=%d for %d funded recommendations, want %d (two slots each)",
-			result.Summary.OrdersUsed, len(result.Recommendations), 2*len(result.Recommendations))
+			result.Summary.OrdersUsed, len(result.BuyRecommendations), 2*len(result.BuyRecommendations))
 	}
 	if result.Summary.OrdersUsed > result.Summary.OrderLimit {
 		t.Errorf("got OrdersUsed=%d, exceeding the order limit %d", result.Summary.OrdersUsed, result.Summary.OrderLimit)
@@ -372,7 +372,7 @@ func assertBudgetAndOrderLimit(t *testing.T, result engine.Result) {
 	}
 
 	var committed float64
-	for _, rec := range result.Recommendations {
+	for _, rec := range result.BuyRecommendations {
 		committed += rec.CommittedCapital
 	}
 	if math.Abs(committed-result.Summary.CommittedCapital) > 1 {
@@ -388,12 +388,12 @@ func assertBudgetAndOrderLimit(t *testing.T, result engine.Result) {
 func assertThreeWaySplit(t *testing.T, result engine.Result, twoSided []engine.CandidateType) {
 	t.Helper()
 
-	if got := len(result.Recommendations) + len(result.Unfunded) + len(result.Excluded); got != len(twoSided) {
+	if got := len(result.BuyRecommendations) + len(result.Unfunded) + len(result.Excluded); got != len(twoSided) {
 		t.Errorf("got funded+unfunded+excluded=%d, want every two-sided type (%d)", got, len(twoSided))
 	}
 
 	placements := map[int32]int{}
-	for _, rec := range result.Recommendations {
+	for _, rec := range result.BuyRecommendations {
 		placements[rec.TypeID]++
 	}
 	for _, rec := range result.Unfunded {

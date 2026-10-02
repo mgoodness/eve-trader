@@ -11,7 +11,7 @@ import (
 // for typeID paired with the given daily history records.
 func historyCandidate(typeID int32, bestBid, bestAsk float64, history []engine.HistoryRecord) engine.CandidateHistory {
 	return engine.CandidateHistory{
-		Recommendation: engine.Recommendation{TypeID: typeID, BestBid: bestBid, BestAsk: bestAsk},
+		BuyRecommendation: engine.BuyRecommendation{TypeID: typeID, BestBid: bestBid, BestAsk: bestAsk},
 		History:        history,
 	}
 }

@@ -53,7 +53,7 @@ func TestBuildResultAssemblesTheOutputContractFromTheAllocatedUniverse(t *testin
 		t.Errorf("got Excluded=%d, want 1", result.Summary.Excluded)
 	}
 
-	for _, rec := range result.Recommendations {
+	for _, rec := range result.BuyRecommendations {
 		if rec.RoiPerDay == 0 {
 			t.Errorf("got recommendation %+v with zero RoiPerDay, want it populated", rec)
 		}
@@ -77,8 +77,8 @@ func TestBuildResultPopulatesNamesFromTheBatchedTypeNameLookup(t *testing.T) {
 		t.Fatalf("got warnings %v, want none", warnings)
 	}
 
-	byType := map[int32]engine.Recommendation{}
-	for _, rec := range result.Recommendations {
+	byType := map[int32]engine.BuyRecommendation{}
+	for _, rec := range result.BuyRecommendations {
 		byType[rec.TypeID] = rec
 	}
 	if rec, ok := byType[11399]; !ok || rec.Name != "Morphite" {
@@ -105,7 +105,7 @@ func TestBuildResultLeavesAnUnresolvedNameEmptyForTheTypeIDFallback(t *testing.T
 		t.Fatalf("BuildResult: %v", err)
 	}
 
-	for _, rec := range result.Recommendations {
+	for _, rec := range result.BuyRecommendations {
 		if rec.TypeID == 40 && rec.Name != "" {
 			t.Errorf("got type 40 Name=%q, want it left empty (unresolved)", rec.Name)
 		}
@@ -132,8 +132,8 @@ func TestBuildResultSplitsEveryTwoSidedTypeAcrossTheThreeGroupsWhenTheBudgetIsTi
 		t.Fatalf("BuildResult: %v", err)
 	}
 
-	if len(result.Recommendations) != 0 {
-		t.Errorf("got %d funded, want 0 with a budget below the minimum order", len(result.Recommendations))
+	if len(result.BuyRecommendations) != 0 {
+		t.Errorf("got %d funded, want 0 with a budget below the minimum order", len(result.BuyRecommendations))
 	}
 	if len(result.Unfunded) != 2 {
 		t.Fatalf("got %d unfunded, want the 2 filtered survivors", len(result.Unfunded))

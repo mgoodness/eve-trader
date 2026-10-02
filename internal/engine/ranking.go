@@ -11,8 +11,8 @@ const ordersPerCandidate = 2
 // it).
 //
 //	EDP = net profit per unit × capture rate × 30-day ADV
-func Rank(recommendations []Recommendation, captureRate float64) []Recommendation {
-	ranked := make([]Recommendation, len(recommendations))
+func Rank(recommendations []BuyRecommendation, captureRate float64) []BuyRecommendation {
+	ranked := make([]BuyRecommendation, len(recommendations))
 	for i, rec := range recommendations {
 		rec.ExpectedDailyProfit = rec.ProfitPerUnit * captureRate * rec.AverageDailyVolume
 		rec.RoiPerDay = rec.ProfitPerUnit / rec.BuyPrice

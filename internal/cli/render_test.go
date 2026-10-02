@@ -8,9 +8,9 @@ import (
 	"github.com/mgoodness/eve-trader/internal/engine"
 )
 
-func TestRenderTableListsFundedRecommendationsInExactISKSortedByExpectedDailyProfit(t *testing.T) {
+func TestRenderTableListsFundedBuyRecommendationsInExactISKSortedByExpectedDailyProfit(t *testing.T) {
 	result := engine.Result{
-		Recommendations: []engine.Recommendation{
+		BuyRecommendations: []engine.BuyRecommendation{
 			{Name: "1600mm Steel Plates II", BuyPrice: 1720100, SellPrice: 3697900, NetMargin: 0.4791, Units: 17, CommittedCapital: 30623290, ExpectedDailyProfit: 10039780},
 			{Name: "Gyrostabilizer II", BuyPrice: 700200, SellPrice: 927200, NetMargin: 0.1847, Units: 110, CommittedCapital: 79707210, ExpectedDailyProfit: 6280853},
 		},
@@ -40,7 +40,7 @@ func TestRenderTableShowsNotFundedByBudgetSectionWithMarginEDPAndCapitalNeeded(t
 			Fees:   engine.Fees{Broker: 0.018},
 			Params: engine.RunParams{CaptureRate: 0.20, HorizonDays: 3},
 		},
-		Unfunded: []engine.Recommendation{
+		Unfunded: []engine.BuyRecommendation{
 			{Name: "Multispectrum Shield Hardener II", BuyPrice: 1415100, SellPrice: 1994900, NetMargin: 0.2313, ExpectedDailyProfit: 11379279, AverageDailyVolume: 124.9},
 		},
 	}
@@ -105,7 +105,7 @@ func TestRenderTableFallsBackToTheTypeIDWhenNameIsNotYetResolved(t *testing.T) {
 	// whole-universe pipeline yet; the table must still identify every
 	// item rather than rendering a blank column.
 	result := engine.Result{
-		Recommendations: []engine.Recommendation{{TypeID: 11399, ExpectedDailyProfit: 1}},
+		BuyRecommendations: []engine.BuyRecommendation{{TypeID: 11399, ExpectedDailyProfit: 1}},
 		Excluded:        []engine.Excluded{{TypeID: 34, Reason: "thin book"}},
 	}
 

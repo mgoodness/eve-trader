@@ -20,7 +20,7 @@ import (
 // survivors this returns. It also returns the pilot's live facts (fees,
 // order limit) read to do so, so later stages (allocation, ticket #22)
 // don't trigger a second live ESI call for the same run.
-func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendation, []engine.Excluded, PilotFacts, []string, error) {
+func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.BuyRecommendation, []engine.Excluded, PilotFacts, []string, error) {
 	twoSided, warnings, err := TwoSidedUniverse(ctx, cfg)
 	if err != nil {
 		return nil, nil, PilotFacts{}, nil, err

@@ -17,7 +17,7 @@ import "sort"
 // so NewResult re-sorts both, descending, before returning them —
 // ensuring the JSON contract's recommendations/unfunded arrays carry the
 // same invariant the table displays.
-func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta, orderLimit int) Result {
+func NewResult(funded, unfunded []BuyRecommendation, excluded []Excluded, meta Meta, orderLimit int) Result {
 	funded = sortedByExpectedDailyProfit(funded)
 	unfunded = sortedByExpectedDailyProfit(unfunded)
 	for i := range funded {
@@ -54,7 +54,7 @@ func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta
 			Excluded:            len(excluded),
 			Unfunded:            len(unfunded),
 		},
-		Recommendations: funded,
+		BuyRecommendations: funded,
 		Unfunded:        unfunded,
 		Excluded:        excluded,
 	}
@@ -62,8 +62,8 @@ func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta
 
 // sortedByExpectedDailyProfit returns a copy of recs sorted by expected
 // daily profit, descending, never nil (so JSON emits [] rather than null).
-func sortedByExpectedDailyProfit(recs []Recommendation) []Recommendation {
-	sorted := make([]Recommendation, len(recs))
+func sortedByExpectedDailyProfit(recs []BuyRecommendation) []BuyRecommendation {
+	sorted := make([]BuyRecommendation, len(recs))
 	copy(sorted, recs)
 	sortByExpectedDailyProfitDescending(sorted)
 	return sorted
@@ -73,7 +73,7 @@ func sortedByExpectedDailyProfit(recs []Recommendation) []Recommendation {
 // expected daily profit, stably. Rank and NewResult share this one
 // comparator so the JSON contract's ordering invariant (spec §11) lives in
 // exactly one place.
-func sortByExpectedDailyProfitDescending(recs []Recommendation) {
+func sortByExpectedDailyProfitDescending(recs []BuyRecommendation) {
 	sort.SliceStable(recs, func(i, j int) bool {
 		return recs[i].ExpectedDailyProfit > recs[j].ExpectedDailyProfit
 	})

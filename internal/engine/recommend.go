@@ -66,8 +66,8 @@ type Excluded struct {
 type Result struct {
 	Meta            Meta             `json:"meta"`
 	Summary         Summary          `json:"summary"`
-	Recommendations []Recommendation `json:"recommendations"`
-	Unfunded        []Recommendation `json:"unfunded"`
+	BuyRecommendations []BuyRecommendation `json:"buy_recommendations"`
+	Unfunded        []BuyRecommendation `json:"unfunded"`
 	Excluded        []Excluded       `json:"excluded"`
 }
 

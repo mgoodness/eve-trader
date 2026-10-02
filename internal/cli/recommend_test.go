@@ -136,19 +136,19 @@ func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
 		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, out.String())
 	}
-	if len(result.Recommendations) != 1 {
-		t.Errorf("got %d recommendations, want 1", len(result.Recommendations))
+	if len(result.BuyRecommendations) != 1 {
+		t.Errorf("got %d recommendations, want 1", len(result.BuyRecommendations))
 	}
 	if result.Summary.Excluded != 1 {
 		t.Errorf("got Excluded=%d, want 1 (Tritanium)", result.Summary.Excluded)
 	}
-	if result.Recommendations[0].RoiPerDay == 0 {
+	if result.BuyRecommendations[0].RoiPerDay == 0 {
 		t.Errorf("got RoiPerDay=0, want it populated in the JSON contract")
 	}
-	if result.Recommendations[0].Name != "Morphite" {
-		t.Errorf("got Name=%q, want the resolved Morphite from /universe/names/", result.Recommendations[0].Name)
+	if result.BuyRecommendations[0].Name != "Morphite" {
+		t.Errorf("got Name=%q, want the resolved Morphite from /universe/names/", result.BuyRecommendations[0].Name)
 	}
-	if result.Recommendations[0].Flags == nil {
+	if result.BuyRecommendations[0].Flags == nil {
 		t.Errorf("got nil Flags in the JSON contract, want [] not null")
 	}
 }
@@ -171,10 +171,10 @@ func TestRecommendDeltaFlagOverridesTheConfiguredValue(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
 		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, out.String())
 	}
-	if len(result.Recommendations) != 1 {
-		t.Fatalf("got %d recommendations, want 1: %+v", len(result.Recommendations), result.Recommendations)
+	if len(result.BuyRecommendations) != 1 {
+		t.Fatalf("got %d recommendations, want 1: %+v", len(result.BuyRecommendations), result.BuyRecommendations)
 	}
-	rec := result.Recommendations[0]
+	rec := result.BuyRecommendations[0]
 	// best bid 18220, best ask 24080 (see historyFilteredOrders); δ=250
 	// overrides the default of 100, so buy_price/sell_price must move by
 	// the difference.

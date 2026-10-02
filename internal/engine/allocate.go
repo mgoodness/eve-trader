@@ -25,8 +25,8 @@ type AllocationParams struct {
 // and a sell. ranked's order is preserved for funded and unfunded; callers
 // wanting the funded set sorted by expected daily profit for display (spec
 // §11) sort ranked before calling Allocate, or re-sort the result.
-func Allocate(ranked []Recommendation, params AllocationParams) (funded, unfunded []Recommendation) {
-	byDensity := make([]Recommendation, len(ranked))
+func Allocate(ranked []BuyRecommendation, params AllocationParams) (funded, unfunded []BuyRecommendation) {
+	byDensity := make([]BuyRecommendation, len(ranked))
 	copy(byDensity, ranked)
 	sort.SliceStable(byDensity, func(i, j int) bool {
 		return density(byDensity[i], params) > density(byDensity[j], params)
@@ -79,13 +79,13 @@ func Allocate(ranked []Recommendation, params AllocationParams) (funded, unfunde
 // the output contract's "not funded by budget" section (spec §11) can
 // show what an unfunded candidate needs, without Allocate itself ever
 // setting Units or CommittedCapital on a candidate it did not fund.
-func CapitalNeeded(rec Recommendation, broker, captureRate float64, horizonDays int) float64 {
+func CapitalNeeded(rec BuyRecommendation, broker, captureRate float64, horizonDays int) float64 {
 	return committedCapitalAt(rec, broker, unitsCap(rec, captureRate, horizonDays))
 }
 
 // unitsCap is the most units a candidate may be posted at (spec §10 step
 // 2): capture rate × 30-day ADV × horizon.
-func unitsCap(rec Recommendation, captureRate float64, horizonDays int) int64 {
+func unitsCap(rec BuyRecommendation, captureRate float64, horizonDays int) int64 {
 	return int64(captureRate * rec.AverageDailyVolume * float64(horizonDays))
 }
 
@@ -93,7 +93,7 @@ func unitsCap(rec Recommendation, captureRate float64, horizonDays int) int64 {
 // "Committed capital", spec §10 step 3): units × B* escrow plus the broker
 // fee on each leg, each floored at MinBrokerFee per order (spec §4, §8).
 // Sales tax is netted from sale proceeds, not committed.
-func committedCapitalAt(rec Recommendation, brokerRate float64, units int64) float64 {
+func committedCapitalAt(rec BuyRecommendation, brokerRate float64, units int64) float64 {
 	if units <= 0 {
 		return 0
 	}
@@ -106,7 +106,7 @@ func committedCapitalAt(rec Recommendation, brokerRate float64, units int64) flo
 // committedCapitalPerUnit is committedCapitalAt amortised over units, for
 // ranking (density) and per-unit comparisons. A non-positive units is
 // treated as one unit so the result is always a defined per-unit figure.
-func committedCapitalPerUnit(rec Recommendation, brokerRate float64, units int64) float64 {
+func committedCapitalPerUnit(rec BuyRecommendation, brokerRate float64, units int64) float64 {
 	if units <= 0 {
 		units = 1
 	}
@@ -117,7 +117,7 @@ func committedCapitalPerUnit(rec Recommendation, brokerRate float64, units int64
 // capital fits remaining (spec §10 step 4: partially fill rather than
 // skip). committedCapitalAt is monotonically non-decreasing in units, so
 // the affordability predicate is monotone and a binary search is exact.
-func affordableUnits(remaining float64, rec Recommendation, brokerRate float64, cap int64) int64 {
+func affordableUnits(remaining float64, rec BuyRecommendation, brokerRate float64, cap int64) int64 {
 	lo, hi := int64(0), cap
 	for lo < hi {
 		mid := lo + (hi-lo+1)/2
@@ -138,7 +138,7 @@ func affordableUnits(remaining float64, rec Recommendation, brokerRate float64, 
 // actually available. The per-unit capital is taken at the units cap, where
 // the 100 ISK per-order broker floor is most amortised. A non-positive
 // per-unit capital ranks last, not first: it cannot be financed at all.
-func density(rec Recommendation, params AllocationParams) float64 {
+func density(rec BuyRecommendation, params AllocationParams) float64 {
 	units := unitsCap(rec, params.CaptureRate, params.HorizonDays)
 	capitalPerUnit := committedCapitalPerUnit(rec, params.Broker, units)
 	if capitalPerUnit <= 0 {

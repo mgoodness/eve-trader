@@ -8,7 +8,7 @@ import (
 )
 
 func TestRankSortsDescendingByExpectedDailyProfit(t *testing.T) {
-	recs := []engine.Recommendation{
+	recs := []engine.BuyRecommendation{
 		{TypeID: 1, ProfitPerUnit: 10, AverageDailyVolume: 100},  // EDP 200
 		{TypeID: 2, ProfitPerUnit: 100, AverageDailyVolume: 100}, // EDP 2000
 		{TypeID: 3, ProfitPerUnit: 50, AverageDailyVolume: 100},  // EDP 1000
@@ -28,7 +28,7 @@ func TestRankSortsDescendingByExpectedDailyProfit(t *testing.T) {
 func TestRankSortIsStableWhenExpectedDailyProfitTies(t *testing.T) {
 	// All three share EDP 1000 (10*0.2*500 == 20*0.2*250 == 100*0.2*50);
 	// stable sort must preserve their original relative order.
-	recs := []engine.Recommendation{
+	recs := []engine.BuyRecommendation{
 		{TypeID: 1, ProfitPerUnit: 10, AverageDailyVolume: 500},
 		{TypeID: 2, ProfitPerUnit: 20, AverageDailyVolume: 250},
 		{TypeID: 3, ProfitPerUnit: 100, AverageDailyVolume: 50},
@@ -47,7 +47,7 @@ func TestRankSortIsStableWhenExpectedDailyProfitTies(t *testing.T) {
 
 func TestRankComputesExpectedDailyProfitPerOrderSlotAsEDPOverTwoOrders(t *testing.T) {
 	// Each candidate costs 2 orders, a buy and a sell (spec \u00a710).
-	recs := []engine.Recommendation{
+	recs := []engine.BuyRecommendation{
 		{TypeID: 1, ProfitPerUnit: 100, AverageDailyVolume: 50},
 	}
 
@@ -60,7 +60,7 @@ func TestRankComputesExpectedDailyProfitPerOrderSlotAsEDPOverTwoOrders(t *testin
 }
 
 func TestRankComputesRoiOnEscrowAsProfitPerUnitOverBuyPrice(t *testing.T) {
-	recs := []engine.Recommendation{
+	recs := []engine.BuyRecommendation{
 		{TypeID: 1, ProfitPerUnit: 3693.605, BuyPrice: 18320},
 	}
 
@@ -73,7 +73,7 @@ func TestRankComputesRoiOnEscrowAsProfitPerUnitOverBuyPrice(t *testing.T) {
 }
 
 func TestRankComputesExpectedDailyProfitAsProfitPerUnitTimesCaptureRateTimesADV(t *testing.T) {
-	recs := []engine.Recommendation{
+	recs := []engine.BuyRecommendation{
 		{TypeID: 1, ProfitPerUnit: 100, AverageDailyVolume: 50},
 	}
 

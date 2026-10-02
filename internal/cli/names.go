@@ -26,7 +26,7 @@ const namesBatchSize = 1000
 // batch becomes a warning and leaves its ids' Names empty, so the table's
 // "type <id>" fallback is reserved for a genuinely unresolved id rather than
 // failing the run.
-func populateNames(ctx context.Context, cfg Config, funded, unfunded []engine.Recommendation, excluded []engine.Excluded) ([]string, error) {
+func populateNames(ctx context.Context, cfg Config, funded, unfunded []engine.BuyRecommendation, excluded []engine.Excluded) ([]string, error) {
 	ids := collectTypeIDs(funded, unfunded, excluded)
 	if len(ids) == 0 {
 		return nil, nil
@@ -49,7 +49,7 @@ func populateNames(ctx context.Context, cfg Config, funded, unfunded []engine.Re
 
 // collectTypeIDs returns the distinct type ids the output contract names:
 // every funded and unfunded recommendation plus every excluded reason.
-func collectTypeIDs(funded, unfunded []engine.Recommendation, excluded []engine.Excluded) []int32 {
+func collectTypeIDs(funded, unfunded []engine.BuyRecommendation, excluded []engine.Excluded) []int32 {
 	seen := make(map[int32]struct{}, len(funded)+len(unfunded)+len(excluded))
 	ids := make([]int32, 0, len(funded)+len(unfunded)+len(excluded))
 	add := func(id int32) {
@@ -111,7 +111,7 @@ func cachedTypeNames(ctx context.Context, store *cache.Store, client *esi.Client
 	return names, warnings
 }
 
-func applyTypeNames(names map[int32]string, funded, unfunded []engine.Recommendation, excluded []engine.Excluded) {
+func applyTypeNames(names map[int32]string, funded, unfunded []engine.BuyRecommendation, excluded []engine.Excluded) {
 	for i := range funded {
 		if name, ok := names[funded[i].TypeID]; ok {
 			funded[i].Name = name

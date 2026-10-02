@@ -34,22 +34,22 @@ func RenderTable(result engine.Result, explain bool) string {
 }
 
 func renderFunded(b *strings.Builder, result engine.Result) {
-	fmt.Fprintf(b, "FUNDED RECOMMENDATIONS (%d)\n", len(result.Recommendations))
-	if len(result.Recommendations) == 0 {
+	fmt.Fprintf(b, "FUNDED RECOMMENDATIONS (%d)\n", len(result.BuyRecommendations))
+	if len(result.BuyRecommendations) == 0 {
 		b.WriteString("  none\n\n")
 		return
 	}
 
 	fmt.Fprintf(b, "  %3s  %-30s%14s%14s%9s%9s%16s%15s\n",
 		"#", "ITEM", "BUY", "SELL", "MARGIN", "UNITS", "COMMITTED", "EDP/DAY")
-	for i, rec := range result.Recommendations {
+	for i, rec := range result.BuyRecommendations {
 		fmt.Fprintf(b, "  %3d  %-30s%14s%14s%9s%9s%16s%15s\n",
 			i+1, displayName(rec.TypeID, rec.Name), formatISK(rec.BuyPrice), formatISK(rec.SellPrice),
 			formatPercent(rec.NetMargin, 1), formatISK(float64(rec.Units)),
 			formatISK(rec.CommittedCapital), formatISK(rec.ExpectedDailyProfit))
 	}
 	fmt.Fprintf(b, "\n  %d flip(s) \u00b7 committed %s / %s ISK (%s of budget) \u00b7 total EDP/day %s\n\n",
-		len(result.Recommendations), formatISK(result.Summary.CommittedCapital), formatISK(float64(result.Summary.Budget)),
+		len(result.BuyRecommendations), formatISK(result.Summary.CommittedCapital), formatISK(float64(result.Summary.Budget)),
 		formatPercent(result.Summary.BudgetUsed, 1), formatISK(result.Summary.ExpectedDailyProfit))
 }
 
