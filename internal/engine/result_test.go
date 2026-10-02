@@ -23,7 +23,7 @@ func TestNewResultSummarisesCommittedCapitalBudgetAndExpectedDailyProfitFromFund
 		{TypeID: 2, CommittedCapital: 79_707_210, ExpectedDailyProfit: 6_280_853.33},
 	}
 
-	result := engine.NewResult(funded, nil, nil, meta, 21)
+	result := engine.NewResult(funded, nil, nil, nil, nil, meta, 21)
 
 	if result.Meta.GeneratedAt != generatedAt {
 		t.Errorf("got GeneratedAt=%v, want %v", result.Meta.GeneratedAt, generatedAt)
@@ -66,7 +66,7 @@ func TestNewResultSortsFundedAndUnfundedByExpectedDailyProfitDescending(t *testi
 		{TypeID: 4, ExpectedDailyProfit: 900},
 	}
 
-	result := engine.NewResult(funded, unfunded, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
+	result := engine.NewResult(funded, unfunded, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
 
 	if result.BuyRecommendations[0].TypeID != 2 || result.BuyRecommendations[1].TypeID != 1 {
 		t.Fatalf("got funded order %+v, want type 2 (EDP 500) before type 1 (EDP 100)", result.BuyRecommendations)
@@ -80,7 +80,7 @@ func TestNewResultAccountsForUnfundedAndExcludedCounts(t *testing.T) {
 	unfunded := []engine.BuyRecommendation{{TypeID: 9}, {TypeID: 10}}
 	excluded := []engine.Excluded{{TypeID: 34, Name: "Tritanium", Reason: "thin book"}}
 
-	result := engine.NewResult(nil, unfunded, excluded, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
+	result := engine.NewResult(nil, unfunded, excluded, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
 
 	if result.Summary.Unfunded != 2 {
 		t.Errorf("got Unfunded=%d, want 2", result.Summary.Unfunded)
@@ -100,7 +100,7 @@ func TestNewResultRendersFlagsAsEmptyArraysNotNull(t *testing.T) {
 	result := engine.NewResult(
 		[]engine.BuyRecommendation{{TypeID: 1}},
 		[]engine.BuyRecommendation{{TypeID: 2}},
-		nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21,
+		nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21,
 	)
 
 	if result.BuyRecommendations[0].Flags == nil {
@@ -123,12 +123,34 @@ func TestNewResultRendersFlagsAsEmptyArraysNotNull(t *testing.T) {
 }
 
 func TestNewResultRendersEmptyResultCleanlyWithZeroBudgetUsed(t *testing.T) {
-	result := engine.NewResult(nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 0}}, 21)
+	result := engine.NewResult(nil, nil, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 0}}, 21)
 
 	if result.Summary.BudgetUsed != 0 {
 		t.Errorf("got BudgetUsed=%v, want 0 (no division by zero with a zero budget)", result.Summary.BudgetUsed)
 	}
-	if result.BuyRecommendations == nil || result.Unfunded == nil || result.Excluded == nil {
+	if result.BuyRecommendations == nil || result.Unfunded == nil || result.Excluded == nil || result.SellRecommendations == nil || result.Pending == nil {
 		t.Errorf("got nil slice(s) in %+v, want empty slices so JSON emits [] not null", result)
+	}
+}
+
+func TestNewResultCarriesSellRecommendationsAndPending(t *testing.T) {
+	sells := []engine.SellRecommendation{{TypeID: 34, Quantity: 100}}
+	pending := []engine.Pending{{TypeID: 35, Reason: engine.PendingAwaitingBuyFill, Quantity: 5}}
+
+	result := engine.NewResult(nil, nil, nil, sells, pending, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
+
+	if len(result.SellRecommendations) != 1 || result.SellRecommendations[0].TypeID != 34 {
+		t.Errorf("got SellRecommendations=%+v, want the supplied sell recommendation", result.SellRecommendations)
+	}
+	if len(result.Pending) != 1 || result.Pending[0].TypeID != 35 {
+		t.Errorf("got Pending=%+v, want the supplied pending entry", result.Pending)
+	}
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(body), `"sell_recommendations"`) || !strings.Contains(string(body), `"buy_recommendations"`) {
+		t.Errorf("got JSON without the buy_recommendations/sell_recommendations keys:\n%s", body)
 	}
 }
