@@ -331,14 +331,20 @@ limit**:
    sort buy candidates by **expected daily profit per ISK of committed
    capital**, descending;
 5. per candidate, units are capped at `capture rate × 30-day ADV × horizon`
-   (default horizon **3 days**; configurable 1/3/7);
+   (default horizon **3 days**; configurable 1/3/7), floored down to the
+   nearest 100-unit lot (**v1.1**; fixed, not configurable) so a posted
+   order's quantity is always a round number against the in-game UI;
 6. **committed capital** per unit = `B* + broker·B* + broker·S*` (escrow + both
    broker fees; sales tax is netted at sale);
 7. add candidates while budget and slots allow — but where a whole order does not
    fit the remainder, **fill it partially** rather than skip: buy as many units as
-   the remainder affords;
+   the remainder affords, again floored to the nearest 100-unit lot — never
+   rounded up, since that would exceed either the units cap or the budget
+   the floor itself just computed;
 8. a partial fill below the **minimum order** (default **1M ISK committed**,
-   configurable) is not posted; leave the remainder idle and continue.
+   configurable) is not posted; leave the remainder idle and continue — this
+   now also catches a cap under 100 units, which floors to zero and is
+   never postable regardless of budget.
 
 Partial filling is the fractional-knapsack optimum for the budget constraint. At
 the pilot's real skills and a 150M budget it commits 99% of budget and 20.9M/day,

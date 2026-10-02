@@ -213,6 +213,13 @@ The smallest committed capital worth posting; a partial fill below it is left
 idle rather than created. Default 1M ISK.
 _Avoid_: order floor, dust order
 
+**Unit rounding step**:
+The lot size every posted buy order's unit count is floored to — never up,
+since that would exceed the units cap or the budget the floor itself just
+computed. Fixed at 100, not configurable; a units cap under 100 floors to
+zero and is never postable regardless of budget.
+_Avoid_: lot size (reserve for the in-game term), rounding
+
 ### Inventory ledger
 
 **Lot**:

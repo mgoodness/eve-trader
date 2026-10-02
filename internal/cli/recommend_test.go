@@ -154,7 +154,9 @@ func TestRecommendJSONCommandEmitsEmptyArraysNotNullForAnEmptyUniverse(t *testin
 }
 
 func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
-	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
+	// ADV 1000, not the usual fixture's 100: a 100-ADV cap floors to zero
+	// under UnitRoundingStep, which would leave Morphite unfunded here.
+	history := map[int32][]map[string]any{11399: historyDays(30, 1000, 30000, 15000)}
 	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	root := cli.NewRootCmd(testConfig(t, server.URL))
 	var out strings.Builder
@@ -188,7 +190,9 @@ func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
 }
 
 func TestRecommendDeltaFlagOverridesTheConfiguredValue(t *testing.T) {
-	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
+	// ADV 1000, not the usual fixture's 100: a 100-ADV cap floors to zero
+	// under UnitRoundingStep, which would leave Morphite unfunded here.
+	history := map[int32][]map[string]any{11399: historyDays(30, 1000, 30000, 15000)}
 	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
 	cfg := testConfig(t, server.URL)
 	root := cli.NewRootCmd(cfg)

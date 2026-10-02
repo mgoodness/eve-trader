@@ -121,7 +121,7 @@ func Allocate(ranked []BuyRecommendation, params AllocationParams) (funded, unfu
 
 		units := cap
 		if committedCapitalAt(rec, params.Broker, cap) > remaining {
-			units = affordableUnits(remaining, rec, params.Broker, cap)
+			units = roundDownToStep(affordableUnits(remaining, rec, params.Broker, cap))
 		}
 		spent := committedCapitalAt(rec, params.Broker, units)
 
@@ -155,10 +155,31 @@ func CapitalNeeded(rec BuyRecommendation, broker, captureRate float64, horizonDa
 	return committedCapitalAt(rec, broker, unitsCap(rec, captureRate, horizonDays))
 }
 
+// UnitRoundingStep is the lot size buy order units are floored to: a
+// pilot posting 1,237 units when they could've posted 1,200 gains nothing
+// and just makes the order harder to eyeball against the in-game UI, so
+// every units figure this package produces or displays is a multiple of
+// it. Fixed for now rather than threaded through AllocationParams; promote
+// it to a config.Values field (alongside MinOrder) if a pilot ever needs a
+// different lot size.
+const UnitRoundingStep = 100
+
+// roundDownToStep floors units to the nearest multiple of UnitRoundingStep,
+// never up: unitsCap is a hard upper bound (spec §10 step 2) and
+// affordableUnits' result is a hard budget ceiling (spec §10 step 4), so
+// rounding either up would silently violate the guarantee the caller just
+// computed.
+func roundDownToStep(units int64) int64 {
+	return (units / UnitRoundingStep) * UnitRoundingStep
+}
+
 // unitsCap is the most units a candidate may be posted at (spec §10 step
-// 2): capture rate × 30-day ADV × horizon.
+// 2): capture rate × 30-day ADV × horizon, floored to UnitRoundingStep so
+// every consumer — Allocate, CapitalNeeded, density — agrees on the same
+// rounded ceiling.
 func unitsCap(rec BuyRecommendation, captureRate float64, horizonDays int) int64 {
-	return int64(captureRate * rec.AverageDailyVolume * float64(horizonDays))
+	raw := int64(captureRate * rec.AverageDailyVolume * float64(horizonDays))
+	return roundDownToStep(raw)
 }
 
 // committedCapitalAt is the ISK a posted order of units ties up (CONTEXT.md

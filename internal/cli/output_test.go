@@ -68,8 +68,11 @@ func TestBuildResultAssemblesTheOutputContractFromTheAllocatedUniverse(t *testin
 }
 
 func TestBuildResultPopulatesNamesFromTheBatchedTypeNameLookup(t *testing.T) {
+	// Morphite's ADV is 1000, not the usual fixture's 100: a 100-ADV cap
+	// (0.2*100*3=60) floors to zero under UnitRoundingStep, which would
+	// make it unfundable regardless of budget and defeat this test.
 	history := map[int32][]map[string]any{
-		11399: historyDays(30, 100, 30000, 15000),
+		11399: historyDays(30, 1000, 30000, 15000),
 		40:    historyDays(30, 1000, 3000, 500),
 	}
 	server, _ := historyFilteredFixtureServer(t, rankedFilteredOrders(), history)
@@ -126,8 +129,11 @@ func TestBuildResultLeavesAnUnresolvedNameEmptyForTheTypeIDFallback(t *testing.T
 // for every two-sided type. A budget below the minimum order forces both of
 // the fixture's survivors out of the funded set.
 func TestBuildResultSplitsEveryTwoSidedTypeAcrossTheThreeGroupsWhenTheBudgetIsTight(t *testing.T) {
+	// Morphite's ADV is 1000, not the usual fixture's 100, so its rounded
+	// units cap stays positive (CapitalNeeded must be positive below) even
+	// though the tight budget still leaves it unfunded.
 	history := map[int32][]map[string]any{
-		11399: historyDays(30, 100, 30000, 15000),
+		11399: historyDays(30, 1000, 30000, 15000),
 		40:    historyDays(30, 1000, 3000, 500),
 	}
 	server, _ := historyFilteredFixtureServer(t, rankedFilteredOrders(), history)
