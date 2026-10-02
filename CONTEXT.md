@@ -197,6 +197,12 @@ The ISK a posted buy order ties up: its escrow plus the broker fees of the round
 trip. Sales tax is netted from sale proceeds, not committed.
 _Avoid_: investment, cost basis
 
+**Net proceeds**:
+The ISK a sell recommendation would actually add to the wallet: gross revenue
+minus sales tax and that sell order's own broker fee. Never netted against the
+lot's acquisition price — that comparison is net margin's job, not this one's.
+_Avoid_: capital freed, revenue
+
 **Days of supply**:
 `units ÷ (capture rate × average daily volume)` — the expected number of days an
 order size takes to sell; caps the units posted per item.
