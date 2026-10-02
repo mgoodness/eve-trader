@@ -103,12 +103,18 @@ _Avoid_: reputation, social standing
 **Net margin**:
 Profit per unit as a fraction of sell price:
 `(S − B − broker·B − broker·S − tax·S) / S`, fees taken at the pilot's skills and
-standings.
+standings. For a buy recommendation, `B` is the front-of-queue bid; for a sell
+recommendation on held stock, `B` is the lot's acquisition price instead —
+still a prediction (computed before the sale posts), never to be confused with
+realised margin.
 _Avoid_: markup, ROI, profit margin (on cost)
 
 **Target net margin**:
-The minimum net margin a candidate must clear to be recommended. It acts as a
-filter at front-of-queue prices, not as a lever that moves them.
+The minimum net margin a candidate must clear to be recommended. For a buy
+recommendation it's a hard filter at front-of-queue prices, not a lever that
+moves them; for a sell recommendation on held stock it's a flag threshold
+instead — falling short never excludes the sale, since the capital is already
+spent.
 _Avoid_: required return, threshold profit
 
 **Aggression tick (δ)**:
