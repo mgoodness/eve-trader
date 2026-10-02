@@ -153,13 +153,36 @@ profit rate, independent of how many units the pilot posts.
 _Avoid_: daily yield, potential profit
 
 **Recommendation**:
-A candidate paired with the front-of-queue prices, the resulting net margin, and
-a unit quantity, subject to the pilot's budget and order limit.
+Either a buy recommendation or a sell recommendation. The two no longer imply
+each other: posting a sell order needs held stock a buy order hasn't
+necessarily delivered yet.
 _Avoid_: signal, call
 
+**Buy recommendation**:
+A candidate paired with the front-of-queue buy price, the resulting net
+margin, and a unit quantity, subject to the pilot's budget and order limit.
+Carries no assumption that a matching sell order follows immediately.
+_Avoid_: round trip
+
+**Sell recommendation**:
+A type with held-unlisted stock, paired with the front-of-queue sell price and
+its full available quantity — never partial, since stock already paid for is
+never worth holding back. Bypasses the filter layer and ranking entirely;
+flagged, not excluded, when its realised margin falls under target.
+_Avoid_: round trip
+
+**Pending**:
+A lot or order awaiting an outcome this run cannot act on: an open-buy lot not
+yet filled, an open sell order already covering stock (not re-recommended), or
+an unknown-outcome lot. Never counted toward funded, unfunded, excluded, or
+sell recommendations.
+_Avoid_: in-flight, outstanding
+
 **Allocation**:
-The selection of which recommendations to post and how many units each, under
-the pilot's ISK budget, order limit, and buy-order escrow.
+The selection of which buy recommendations to post and how many units each,
+under the pilot's ISK budget, order limit, and buy-order escrow. Sell
+recommendations are not allocated — they compete for an order slot, not
+budget (see the allocation-of-pre-existing-orders decision).
 _Avoid_: portfolio, basket
 
 **Committed capital**:
