@@ -149,6 +149,15 @@ func acceptanceServer(t *testing.T, snap *acceptanceSnapshot) *httptest.Server {
 				return
 			}
 			w.Write(body)
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/orders/history/"):
+			// Ledger reconciliation routes: the frozen snapshot has no open
+			// character orders, history, or assets, so the sell plan is empty
+			// and the buy-side acceptance criteria are unaffected.
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/orders/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/assets/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
 		case r.URL.Path == "/universe/names/":
 			// The acceptance check does not exercise names, and the snapshot
 			// holds no name data, so serve a deterministic placeholder for
@@ -205,6 +214,9 @@ func acceptanceConfig(t *testing.T, serverURL string, budget int64) cli.Config {
 	cfg.ESIBaseURL = serverURL
 	cfg.SSOBaseURL = serverURL
 	cfg.CacheDir = t.TempDir()
+	// A temp state dir keeps the ledger BuildResult reconciles out of the
+	// real user state directory.
+	cfg.StateDir = t.TempDir()
 	cfg.Values.Budget = budget
 	cfg.Credentials = config.Credentials{ClientID: "acceptance-client", RefreshToken: "acceptance-refresh-token"}
 	return cfg

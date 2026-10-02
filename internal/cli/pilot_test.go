@@ -22,6 +22,12 @@ func realPathPilotFactsServer(t *testing.T, skills, standings []map[string]any, 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/orders/history/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/orders/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/assets/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
 		case strings.HasPrefix(r.URL.Path, "/markets/") && strings.Contains(r.URL.Path, "/orders"):
 			w.Header().Set("X-Pages", "1")
 			json.NewEncoder(w).Encode([]map[string]any{})

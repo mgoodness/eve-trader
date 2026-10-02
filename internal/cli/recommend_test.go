@@ -49,6 +49,9 @@ func testConfig(t *testing.T, esiBaseURL string) cli.Config {
 	cfg.ESIBaseURL = esiBaseURL
 	cfg.SSOBaseURL = esiBaseURL
 	cfg.CacheDir = t.TempDir()
+	// A temp state dir keeps the trading-stock ledger BuildResult now reads
+	// and writes out of the real user state directory.
+	cfg.StateDir = t.TempDir()
 	cfg.Credentials = config.Credentials{
 		ClientID:     "client-id",
 		RefreshToken: "original-refresh-token",

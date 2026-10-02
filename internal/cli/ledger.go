@@ -111,19 +111,40 @@ func SaveLedger(path string, lots []engine.Lot) error {
 // folds them through the pure engine.Reconcile, and atomically saves the
 // result. Both `recommend` and the `ledger` inspection command call it.
 func ReconcileLedger(ctx context.Context, cfg Config) ([]engine.Lot, []engine.ReconcileNote, error) {
-	path, err := ledgerPathFor(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
+	lots, notes, _, err := reconcileLedger(ctx, cfg)
+	return lots, notes, err
+}
 
+// reconcileLedger is ReconcileLedger's implementation, additionally
+// returning the open character orders it fetched: the sell plan needs them
+// to reserve held stock already covered by an open station sell order
+// (spec §11). It mints the run's pilot facts, so a caller that already has
+// them (BuildResult) should call reconcileLedgerWithPilotFacts instead to
+// avoid a second refresh-token exchange.
+func reconcileLedger(ctx context.Context, cfg Config) ([]engine.Lot, []engine.ReconcileNote, []engine.CharacterOrder, error) {
 	store, err := cache.Open(cfg.CacheDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	facts, err := pilotFacts(ctx, cfg, store)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading live pilot facts: %w", err)
+		return nil, nil, nil, fmt.Errorf("reading live pilot facts: %w", err)
+	}
+
+	return reconcileLedgerWithPilotFacts(ctx, cfg, store, facts)
+}
+
+// reconcileLedgerWithPilotFacts folds fresh ESI snapshots into the stored
+// ledger using caller-supplied pilot facts (spec §7; decision 6): a run
+// that already minted its one access token — BuildResult, via
+// AllocatedUniverse — passes it here rather than triggering a second
+// refresh-token exchange, which would replay an already-rotated refresh
+// token.
+func reconcileLedgerWithPilotFacts(ctx context.Context, cfg Config, store *cache.Store, facts PilotFacts) ([]engine.Lot, []engine.ReconcileNote, []engine.CharacterOrder, error) {
+	path, err := ledgerPathFor(cfg)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	client := esi.NewClient(esi.ClientOptions{
@@ -134,27 +155,27 @@ func ReconcileLedger(ctx context.Context, cfg Config) ([]engine.Lot, []engine.Re
 
 	orders, err := cachedCharacterOrders(ctx, store, client, facts.CharacterID, facts.AccessToken)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	history, err := cachedCharacterOrderHistory(ctx, store, client, facts.CharacterID, facts.AccessToken)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	assets, err := cachedCharacterAssets(ctx, store, client, facts.CharacterID, facts.AccessToken)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	lots, err := LoadLedger(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	updated, notes := engine.Reconcile(lots, orders, history, assets, cfg.TradeStationID)
 	if err := SaveLedger(path, updated); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return updated, notes, nil
+	return updated, notes, orders, nil
 }
 
 func cachedCharacterOrders(ctx context.Context, store *cache.Store, client *esi.Client, characterID int32, accessToken string) ([]engine.CharacterOrder, error) {
