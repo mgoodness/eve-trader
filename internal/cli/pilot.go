@@ -30,6 +30,12 @@ type PilotFacts struct {
 	Fees       engine.Fees
 	OrderLimit int
 
+	// AccessToken is the run's single live access token, minted by
+	// pilotFacts (or handed to pilotFactsForAccessToken by `login`). The
+	// ledger fetches (spec §7) reuse it rather than triggering a second
+	// refresh-token exchange.
+	AccessToken string
+
 	// CharacterID is the character pilotFacts minted an access token for,
 	// decoded from that token's JWT sub claim. `login`'s reuse guard (ticket
 	// #30) uses it to name the character a working stored refresh token
@@ -131,6 +137,7 @@ func pilotFactsForAccessToken(ctx context.Context, cfg Config, store *cache.Stor
 	return PilotFacts{
 		CharacterID:     characterID,
 		CharacterName:   characterName,
+		AccessToken:     accessToken,
 		Fees:            engine.DeriveFees(skills, factionStanding, corpStanding),
 		OrderLimit:      engine.OrderLimit(skills),
 		Accounting:      skills[engine.AccountingSkillID],

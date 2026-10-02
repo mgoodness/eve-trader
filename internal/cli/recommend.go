@@ -36,6 +36,12 @@ type Config struct {
 	CompatDate string
 	CacheDir   string
 
+	// StateDir is where the trading-stock ledger lives (spec §13, §16):
+	// ledger.json, the project's first persistent user state. Set by
+	// LoadConfig from config.StateDir(); DefaultConfig leaves the compiled-in
+	// default. Tests point it at a temp directory.
+	StateDir string
+
 	// OpenBrowser launches url in the pilot's browser for `login` (ticket
 	// #28); it is a best-effort side channel — failure never aborts login,
 	// since the consent URL is always printed too. Left nil by
@@ -99,6 +105,7 @@ func DefaultConfig() Config {
 		UserAgent:          "eve-trader/0.1 (+https://github.com/mgoodness/eve-trader)",
 		CompatDate:         "2026-09-30",
 		CacheDir:           defaultCacheDir(),
+		StateDir:           defaultStateDir(),
 		RegionID:           10000030, // Heimatar
 		TradeStationID:     60004588, // Rens VI - Moon 8 - Brutor Tribe Treasury
 		TradeSystemID:      30002510, // Rens
@@ -152,11 +159,25 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.CacheDir = cacheDir
 
+	stateDir, err := config.StateDir()
+	if err != nil {
+		return Config{}, fmt.Errorf("resolving state directory: %w", err)
+	}
+	cfg.StateDir = stateDir
+
 	return cfg, nil
 }
 
 func defaultCacheDir() string {
 	dir, err := config.CacheDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "eve-trader")
+	}
+	return dir
+}
+
+func defaultStateDir() string {
+	dir, err := config.StateDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), "eve-trader")
 	}
@@ -241,6 +262,7 @@ func NewRootCmd(cfg Config) *cobra.Command {
 	}
 	root.AddCommand(newRecommendCmd(cfg))
 	root.AddCommand(newLoginCmd(cfg))
+	root.AddCommand(newLedgerCmd(cfg))
 	return root
 }
 
