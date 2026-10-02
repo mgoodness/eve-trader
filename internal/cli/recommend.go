@@ -181,6 +181,7 @@ func NewRootCmd(cfg Config) *cobra.Command {
 	root.AddCommand(newRecommendCmd(cfg))
 	root.AddCommand(newLoginCmd(cfg))
 	root.AddCommand(newLedgerCmd(cfg))
+	root.AddCommand(newBootstrapCmd(cfg))
 	return root
 }
 
