@@ -22,6 +22,14 @@ func CacheDir() (string, error) {
 	return xdgDir("XDG_CACHE_HOME", ".cache")
 }
 
+// StateDir resolves eve-trader's persistent-state directory (spec §13,
+// §16), which holds the trading-stock ledger (spec §7, ADR 0003). Same
+// XDG-over-os.UserConfigDir() reasoning as ConfigDir; the XDG default for
+// user state is $XDG_STATE_HOME, falling back to ~/.local/state.
+func StateDir() (string, error) {
+	return xdgDir("XDG_STATE_HOME", filepath.Join(".local", "state"))
+}
+
 func xdgDir(envVar, fallbackUnderHome string) (string, error) {
 	if dir := os.Getenv(envVar); dir != "" {
 		return filepath.Join(dir, "eve-trader"), nil

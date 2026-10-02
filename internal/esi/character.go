@@ -71,9 +71,17 @@ func (c *Client) Standings(ctx context.Context, characterID int32, accessToken s
 // route, setting the same X-Compatibility-Date/User-Agent headers as every
 // other ESI call.
 func (c *Client) getAuthenticated(ctx context.Context, reqURL, accessToken string) ([]byte, error) {
+	body, _, err := c.getAuthenticatedWithHeaders(ctx, reqURL, accessToken)
+	return body, err
+}
+
+// getAuthenticatedWithHeaders is getAuthenticated plus the response
+// headers, so a paginated route (character assets/order history) can read
+// X-Pages.
+func (c *Client) getAuthenticatedWithHeaders(ctx context.Context, reqURL, accessToken string) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	if c.compatDate != "" {
@@ -85,16 +93,16 @@ func (c *Client) getAuthenticated(ctx context.Context, reqURL, accessToken strin
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: unexpected status %s: %s", reqURL, resp.Status, body)
+		return nil, nil, fmt.Errorf("GET %s: unexpected status %s: %s", reqURL, resp.Status, body)
 	}
-	return body, nil
+	return body, resp.Header, nil
 }

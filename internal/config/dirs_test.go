@@ -56,3 +56,28 @@ func TestCacheDirFallsBackToDotCacheUnderHome(t *testing.T) {
 		t.Errorf("CacheDir() = %q, want %q", got, want)
 	}
 }
+
+func TestStateDirHonorsXDGStateHome(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "/xdg-state")
+
+	got, err := config.StateDir()
+	if err != nil {
+		t.Fatalf("StateDir: %v", err)
+	}
+	if want := filepath.Join("/xdg-state", "eve-trader"); got != want {
+		t.Errorf("StateDir() = %q, want %q", got, want)
+	}
+}
+
+func TestStateDirFallsBackToDotLocalStateUnderHome(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", "/home/pilot")
+
+	got, err := config.StateDir()
+	if err != nil {
+		t.Fatalf("StateDir: %v", err)
+	}
+	if want := filepath.Join("/home/pilot", ".local", "state", "eve-trader"); got != want {
+		t.Errorf("StateDir() = %q, want %q", got, want)
+	}
+}
