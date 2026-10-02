@@ -170,24 +170,52 @@ func TestBootstrapSeededLotIsVisibleViaTheLedgerCommand(t *testing.T) {
 	}
 }
 
+// TestRecommendNeverSeedsLotsOnItsOwn pins ADR 0004's invariant — a normal
+// `recommend` run never turns untracked hangar clutter into trading stock. The
+// hangar holds stock that `bootstrap` would offer to seed, so if the recommend
+// path ran bootstrap, this would create a seeded (or held-unlisted) lot.
+//
+// Reconciliation may persist its run state (#47 calls SaveLedger
+// unconditionally so last_seen_volume_remain survives across runs and fill
+// detection works), so an empty ledger file after a recommend run is expected:
+// the invariant is "no seeded lot," not "no ledger file."
 func TestRecommendNeverSeedsLotsOnItsOwn(t *testing.T) {
 	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
-	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)
+	server, _ := sellFixtureServer(t, historyFilteredOrders(), history, bootstrapFixture())
 	cfg := testConfig(t, server.URL)
-	cfg.StateDir = t.TempDir()
 
 	root := cli.NewRootCmd(cfg)
-	root.SetOut(&strings.Builder{})
-	root.SetErr(&strings.Builder{})
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&out)
 	root.SetArgs([]string{"recommend"})
 	if err := root.ExecuteContext(t.Context()); err != nil {
 		t.Fatalf("recommend command: %v", err)
 	}
 
-	// Seeding is an explicit pilot action (ADR 0004); a normal recommend run
-	// must never create a seeded lot — or a ledger at all on its own.
-	path := filepath.Join(cfg.StateDir, "ledger.json")
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("recommend wrote %s (stat err = %v); it must never seed", path, err)
+	// Reconciliation may write an empty (or unchanged) ledger; what matters is
+	// that it holds no lot recommend created. Seeding is an explicit pilot
+	// action (ADR 0004), so nothing may be auto-seeded or promoted from the
+	// hangar.
+	lots, err := cli.LoadLedger(filepath.Join(cfg.StateDir, "ledger.json"))
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	for _, lot := range lots {
+		if lot.SourceOrderID == engine.SourceOrderSeeded {
+			t.Errorf("recommend created a seeded lot %+v; seeding is explicit (ADR 0004)", lot)
+		}
+		if lot.Status == engine.LotHeldUnlisted {
+			t.Errorf("recommend turned untracked hangar stock into a held-unlisted lot %+v", lot)
+		}
+	}
+	if len(lots) != 0 {
+		t.Errorf("recommend wrote %d lots %+v, want the ledger unchanged and empty", len(lots), lots)
+	}
+
+	// Bootstrap never runs automatically: recommend must not reach its
+	// confirmation prompt.
+	if strings.Contains(out.String(), "Seed type") {
+		t.Errorf("recommend output %q ran bootstrap's confirmation prompt", out.String())
 	}
 }
