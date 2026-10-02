@@ -37,21 +37,28 @@ type RunParams struct {
 	CorpStanding    float64 `json:"corp_standing"`
 }
 
-// Summary is the three-way split of the candidate universe (spec §11):
-// every candidate is funded, unfunded, or excluded. CommittedCapital and
-// ExpectedDailyProfit total the funded set; BudgetUsed is CommittedCapital
-// as a fraction of Budget; OrdersUsed is the funded set's active-order
-// cost (spec §10: two slots per candidate).
+// Summary is the three-way split of the candidate universe (spec §11),
+// plus the run's resource split (spec §13, §14): the stated budget and the
+// skill-derived order limit each divided into what pre-existing open orders
+// already reserved, what was therefore available to allocate, and what this
+// run actually used. CommittedCapital and ExpectedDailyProfit total the
+// funded buy set; BudgetUsed is CommittedCapital as a fraction of Budget;
+// OrdersUsed is the funded set's active-order cost (spec §13: one slot per
+// recommendation, buy or sell).
 type Summary struct {
-	Recommendations     int     `json:"recommendations"`
-	CommittedCapital    float64 `json:"committed_capital"`
-	Budget              int64   `json:"budget"`
-	BudgetUsed          float64 `json:"budget_used"`
-	OrdersUsed          int     `json:"orders_used"`
-	OrderLimit          int     `json:"order_limit"`
-	ExpectedDailyProfit float64 `json:"expected_daily_profit"`
-	Excluded            int     `json:"excluded"`
-	Unfunded            int     `json:"unfunded"`
+	Recommendations          int     `json:"recommendations"`
+	CommittedCapital         float64 `json:"committed_capital"`
+	Budget                   int64   `json:"budget"`
+	BudgetReservedByExisting float64 `json:"budget_reserved_by_existing"`
+	BudgetAvailable          float64 `json:"budget_available"`
+	BudgetUsed               float64 `json:"budget_used"`
+	OrdersUsed               int     `json:"orders_used"`
+	OrdersReservedByExisting int     `json:"orders_reserved_by_existing"`
+	OrdersAvailable          int     `json:"orders_available"`
+	OrderLimit               int     `json:"order_limit"`
+	ExpectedDailyProfit      float64 `json:"expected_daily_profit"`
+	Excluded                 int     `json:"excluded"`
+	Unfunded                 int     `json:"unfunded"`
 }
 
 // Excluded records a candidate that failed a filter, and why (spec §7, §11).

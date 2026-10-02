@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"math"
 	"sort"
 )
@@ -9,7 +10,9 @@ import (
 // §13): the pilot's self-reported budget, the skill-derived order limit
 // (ticket #16, engine.OrderLimit), the minimum committed capital worth
 // posting, the flat capture rate (spec §9), the capture horizon in days,
-// and the broker fee rate committed capital is priced at.
+// the broker fee rate committed capital is priced at, and the resources
+// the pilot's pre-existing open orders already reserve (spec §13 steps 1–2;
+// ticket #49).
 type AllocationParams struct {
 	Budget      int64
 	OrderLimit  int
@@ -17,14 +20,65 @@ type AllocationParams struct {
 	CaptureRate float64
 	HorizonDays int
 	Broker      float64
+
+	// ReservedSlots is the number of order-limit slots every currently-open
+	// order (buy or sell, any origin) occupies before this run allocates
+	// anything (spec §13 step 1).
+	ReservedSlots int
+
+	// ReservedBudget is the ISK already escrowed against open buy orders,
+	// sum of price × volume_remain; open sell orders carry no escrow, and an
+	// unknown-outcome lot is absent from the orders snapshot so it reserves
+	// nothing (spec §13 step 2; ADR 0003).
+	ReservedBudget float64
+}
+
+// AllocateWithSells allocates sell recommendations first, then new buy
+// recommendations, against the resources left after ReservedSlots and
+// ReservedBudget (spec §13; ADR 0007). Sells cost one order slot each and no
+// budget — recovering already-spent capital takes priority over deploying
+// fresh capital. A sell inside the headroom is funded in its existing order
+// (the sell plan's worst-margin-shortfall sort, spec §11); once the slots
+// run out, the excess land in Pending with reason order-limit-exhausted
+// rather than being dropped. Buy allocation then runs, unchanged, on
+// whatever slots and budget remain.
+func AllocateWithSells(sells []SellRecommendation, buys []BuyRecommendation, params AllocationParams) (fundedSells []SellRecommendation, pendingSells []Pending, fundedBuys, unfundedBuys []BuyRecommendation) {
+	availableSlots := params.OrderLimit - params.ReservedSlots
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
+
+	for _, sell := range sells {
+		if len(fundedSells) >= availableSlots {
+			pendingSells = append(pendingSells, Pending{
+				TypeID:   sell.TypeID,
+				Name:     sell.Name,
+				Reason:   PendingOrderLimit,
+				Quantity: sell.Quantity,
+				Detail: fmt.Sprintf("no free order-limit slot: %d of %d slots reserved before this sell (orders already open plus higher-priority sells)",
+					params.ReservedSlots+len(fundedSells), params.OrderLimit),
+			})
+			continue
+		}
+		fundedSells = append(fundedSells, sell)
+	}
+
+	// The funded sells hold their slots against the buy allocation too: buy
+	// params reserve them on top of the pre-existing orders.
+	buyParams := params
+	buyParams.ReservedSlots = params.ReservedSlots + len(fundedSells)
+	fundedBuys, unfundedBuys = Allocate(buys, buyParams)
+	return fundedSells, pendingSells, fundedBuys, unfundedBuys
 }
 
 // Allocate selects which ranked candidates to post and how many units each
 // (spec §10, CONTEXT.md "Allocation"), under the budget and the
-// skill-derived order limit — each posted candidate costs two orders, a buy
-// and a sell. ranked's order is preserved for funded and unfunded; callers
-// wanting the funded set sorted by expected daily profit for display (spec
-// §11) sort ranked before calling Allocate, or re-sort the result.
+// skill-derived order limit less the resources already reserved by
+// pre-existing orders (spec §13 steps 1–2). Each posted candidate costs one
+// order slot (decision 3: a single order per recommendation). ranked's order
+// is preserved for funded and unfunded; callers wanting the funded set
+// sorted by expected daily profit for display (spec §11) sort ranked before
+// calling Allocate, or re-sort the result.
 func Allocate(ranked []BuyRecommendation, params AllocationParams) (funded, unfunded []BuyRecommendation) {
 	byDensity := make([]BuyRecommendation, len(ranked))
 	copy(byDensity, ranked)
@@ -32,8 +86,8 @@ func Allocate(ranked []BuyRecommendation, params AllocationParams) (funded, unfu
 		return density(byDensity[i], params) > density(byDensity[j], params)
 	})
 
-	remaining := float64(params.Budget)
-	ordersUsed := 0
+	remaining := float64(params.Budget) - params.ReservedBudget
+	ordersUsed := params.ReservedSlots
 
 	for _, rec := range byDensity {
 		rec.Units = 0

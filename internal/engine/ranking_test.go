@@ -45,15 +45,17 @@ func TestRankSortIsStableWhenExpectedDailyProfitTies(t *testing.T) {
 	}
 }
 
-func TestRankComputesExpectedDailyProfitPerOrderSlotAsEDPOverTwoOrders(t *testing.T) {
-	// Each candidate costs 2 orders, a buy and a sell (spec \u00a710).
+func TestRankComputesExpectedDailyProfitPerOrderSlotAsEDPOverOneOrder(t *testing.T) {
+	// Each recommendation now costs one order slot (decision 3: a single
+	// buy or sell order, spec §13), so the EDP-per-slot figure is the EDP
+	// itself.
 	recs := []engine.BuyRecommendation{
 		{TypeID: 1, ProfitPerUnit: 100, AverageDailyVolume: 50},
 	}
 
 	ranked := engine.Rank(recs, 0.20)
 
-	want := (100.0 * 0.20 * 50.0) / 2
+	want := 100.0 * 0.20 * 50.0
 	if len(ranked) != 1 || math.Abs(ranked[0].ExpectedDailyProfitPerOrderSlot-want) > 1e-9 {
 		t.Fatalf("got %+v, want ExpectedDailyProfitPerOrderSlot=%v", ranked, want)
 	}

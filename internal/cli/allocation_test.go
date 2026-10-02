@@ -19,10 +19,11 @@ func TestAllocatedUniverseFundsSurvivorsWithinBudgetAndOrderLimit(t *testing.T) 
 	cfg.Values.Budget = 150_000_000
 	cfg.Values.MinOrder = 1_000_000
 
-	funded, unfunded, excluded, _, _, err := cli.AllocatedUniverse(t.Context(), cfg)
+	alloc, err := cli.AllocatedUniverse(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("AllocatedUniverse: %v", err)
 	}
+	funded, unfunded, excluded := alloc.FundedBuys, alloc.UnfundedBuys, alloc.Excluded
 
 	// Tritanium (34) is still excluded by the book-only stage, unchanged
 	// by allocation.

@@ -312,15 +312,16 @@ func TestAllocatePartialFillingCommitsMoreBudgetAndProfitThanWholeOrderSkipping(
 }
 
 func TestAllocateLeavesLaterCandidatesUnfundedOnceTheOrderLimitIsReached(t *testing.T) {
-	// Each candidate costs two orders (buy and sell); an order limit of
-	// 2 admits exactly one candidate.
+	// Each recommendation now costs one order slot (decision 3: a single
+	// buy or sell order, spec §13), so an order limit of 1 admits exactly
+	// one candidate.
 	ranked := []engine.BuyRecommendation{
 		{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100},
 		{TypeID: 2, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100},
 	}
 	params := engine.AllocationParams{
 		Budget:      150_000,
-		OrderLimit:  2,
+		OrderLimit:  1,
 		MinOrder:    1_000,
 		CaptureRate: 0.20,
 		HorizonDays: 3,
@@ -334,5 +335,132 @@ func TestAllocateLeavesLaterCandidatesUnfundedOnceTheOrderLimitIsReached(t *test
 	}
 	if len(unfunded) != 1 || unfunded[0].TypeID != 2 || unfunded[0].Units != 0 {
 		t.Fatalf("got unfunded=%+v, want type 2 unfunded with zero units", unfunded)
+	}
+}
+
+func TestAllocateWithSellsGivesSellRecommendationsSlotsBeforeNewBuys(t *testing.T) {
+	// One sell recommendation and one buy candidate compete for a single
+	// remaining order slot (spec §13 step 3; ADR 0007): the sell recovers
+	// already-spent capital, so it takes the slot and the buy is left
+	// unfunded even though the budget comfortably covers it.
+	sells := []engine.SellRecommendation{{TypeID: 34, Name: "Tritanium", Quantity: 100}}
+	buys := []engine.BuyRecommendation{
+		{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100, ExpectedDailyProfit: 10},
+	}
+	params := engine.AllocationParams{
+		Budget:      150_000,
+		OrderLimit:  1,
+		MinOrder:    1_000,
+		CaptureRate: 0.20,
+		HorizonDays: 3,
+		Broker:      0.018,
+	}
+
+	fundedSells, pendingSells, fundedBuys, unfundedBuys := engine.AllocateWithSells(sells, buys, params)
+
+	if len(fundedSells) != 1 || fundedSells[0].TypeID != 34 {
+		t.Fatalf("got fundedSells=%+v, want the sell recommendation funded first", fundedSells)
+	}
+	if len(pendingSells) != 0 {
+		t.Errorf("got pendingSells=%+v, want none", pendingSells)
+	}
+	if len(fundedBuys) != 0 {
+		t.Errorf("got fundedBuys=%+v, want none once the sell took the only slot", fundedBuys)
+	}
+	if len(unfundedBuys) != 1 || unfundedBuys[0].TypeID != 1 || unfundedBuys[0].Units != 0 {
+		t.Fatalf("got unfundedBuys=%+v, want the buy left unfunded with zero units", unfundedBuys)
+	}
+}
+
+func TestAllocateWithSellsMarksExcessSellRecommendationsPendingWithTheOrderLimitReason(t *testing.T) {
+	// Three sell recommendations, two order slots, no reserved resources:
+	// the first two claim slots in their existing order and the third is
+	// pending order-limit-exhausted rather than silently dropped (spec §11,
+	// §13 step 3; ADR 0007).
+	sells := []engine.SellRecommendation{
+		{TypeID: 1, Name: "first", Quantity: 10},
+		{TypeID: 2, Name: "second", Quantity: 20},
+		{TypeID: 3, Name: "third", Quantity: 30},
+	}
+	params := engine.AllocationParams{OrderLimit: 2}
+
+	fundedSells, pendingSells, _, _ := engine.AllocateWithSells(sells, nil, params)
+
+	if len(fundedSells) != 2 || fundedSells[0].TypeID != 1 || fundedSells[1].TypeID != 2 {
+		t.Fatalf("got fundedSells=%+v, want the first two in order", fundedSells)
+	}
+	if len(pendingSells) != 1 {
+		t.Fatalf("got pendingSells=%+v, want exactly one pending entry", pendingSells)
+	}
+	got := pendingSells[0]
+	if got.TypeID != 3 || got.Quantity != 30 {
+		t.Errorf("got pending %+v, want type 3 with its 30 held units", got)
+	}
+	if got.Reason != engine.PendingOrderLimit {
+		t.Errorf("got Reason=%q, want %q", got.Reason, engine.PendingOrderLimit)
+	}
+	if got.Detail == "" {
+		t.Errorf("got empty Detail, want a human-readable reason the slot was withheld")
+	}
+}
+
+func TestAllocateWithSellsShrinksHeadroomByReservedSlotsBeforeSellsAndBuys(t *testing.T) {
+	// One pre-existing open order reserves a slot, leaving one of the two
+	// for this run. The sell takes it; without the reservation the buy would
+	// also have been funded.
+	sells := []engine.SellRecommendation{{TypeID: 34, Name: "Tritanium", Quantity: 100}}
+	buys := []engine.BuyRecommendation{
+		{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100, ExpectedDailyProfit: 10},
+	}
+	params := engine.AllocationParams{
+		Budget:        150_000,
+		OrderLimit:    2,
+		MinOrder:      1_000,
+		CaptureRate:   0.20,
+		HorizonDays:   3,
+		Broker:        0.018,
+		ReservedSlots: 1,
+	}
+
+	fundedSells, _, fundedBuys, unfundedBuys := engine.AllocateWithSells(sells, buys, params)
+
+	if len(fundedSells) != 1 {
+		t.Fatalf("got fundedSells=%+v, want the sell funded from the one free slot", fundedSells)
+	}
+	if len(fundedBuys) != 0 {
+		t.Errorf("got fundedBuys=%+v, want none: the reserved slot plus the sell exhaust the limit", fundedBuys)
+	}
+	if len(unfundedBuys) != 1 {
+		t.Fatalf("got unfundedBuys=%+v, want the buy unfunded", unfundedBuys)
+	}
+}
+
+func TestAllocateWithSellsShrinksTheBuyBudgetByReservedBuyEscrow(t *testing.T) {
+	// The whole stated budget is already escrowed against an open buy order
+	// (spec §13 step 2), so no new buy gets committed capital even with
+	// slots and a positive stated budget.
+	buys := []engine.BuyRecommendation{
+		{TypeID: 1, BuyPrice: 1000, SellPrice: 1100, AverageDailyVolume: 100, ExpectedDailyProfit: 10},
+	}
+	params := engine.AllocationParams{
+		Budget:         100_000,
+		OrderLimit:     5,
+		MinOrder:       1_000,
+		CaptureRate:    0.20,
+		HorizonDays:    3,
+		Broker:         0.018,
+		ReservedBudget: 100_000,
+	}
+
+	fundedSells, pendingSells, fundedBuys, unfundedBuys := engine.AllocateWithSells(nil, buys, params)
+
+	if len(fundedSells) != 0 || len(pendingSells) != 0 {
+		t.Errorf("got fundedSells=%+v pendingSells=%+v, want none", fundedSells, pendingSells)
+	}
+	if len(fundedBuys) != 0 {
+		t.Errorf("got fundedBuys=%+v, want none once the reserved escrow consumed the budget", fundedBuys)
+	}
+	if len(unfundedBuys) != 1 || unfundedBuys[0].Units != 0 {
+		t.Fatalf("got unfundedBuys=%+v, want the buy unfunded with zero units", unfundedBuys)
 	}
 }

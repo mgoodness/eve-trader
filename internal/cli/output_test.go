@@ -349,6 +349,17 @@ func TestBuildResultSurfacesAnUnknownOutcomeAsPending(t *testing.T) {
 	if len(result.SellRecommendations) != 0 {
 		t.Errorf("got sell recommendations %+v, want none for a lot in flight", result.SellRecommendations)
 	}
+	// The unknown-outcome lot is absent from /orders/, so it reserves
+	// neither a slot nor budget (spec §13 step 1; ADR 0003): the run still
+	// has the pilot's full headroom.
+	if result.Summary.OrdersReservedByExisting != 0 || result.Summary.OrdersAvailable != result.Summary.OrderLimit {
+		t.Errorf("got orders reserved=%d available=%d, want 0 reserved and %d available",
+			result.Summary.OrdersReservedByExisting, result.Summary.OrdersAvailable, result.Summary.OrderLimit)
+	}
+	if result.Summary.BudgetReservedByExisting != 0 || result.Summary.BudgetAvailable != float64(cfg.Values.Budget) {
+		t.Errorf("got budget reserved=%v available=%v, want 0 reserved and %d available",
+			result.Summary.BudgetReservedByExisting, result.Summary.BudgetAvailable, cfg.Values.Budget)
+	}
 }
 
 // TestBuildResultMintsOnlyOneAccessTokenPerRun pins decision 6: the ledger
@@ -369,5 +380,109 @@ func TestBuildResultMintsOnlyOneAccessTokenPerRun(t *testing.T) {
 	}
 	if got := tokenHits(); got != 1 {
 		t.Errorf("got %d access-token exchanges, want exactly 1 per run", got)
+	}
+}
+
+// openOrderMap builds one wire-shaped open character order for the fake
+// /characters/{id}/orders/ route.
+func openOrderMap(orderID int64, typeID int32, isBuy bool, price float64, volumeRemain int64) map[string]any {
+	return map[string]any{
+		"order_id":      orderID,
+		"type_id":       typeID,
+		"location_id":   60004588,
+		"volume_total":  volumeRemain,
+		"volume_remain": volumeRemain,
+		"min_volume":    1,
+		"price":         price,
+		"is_buy_order":  isBuy,
+		"range":         "station",
+	}
+}
+
+// TestBuildResultReservesSlotsAndBuyEscrowForPreExistingOpenOrders pins spec
+// §13 steps 1–2: every currently-open order (any origin) reserves one
+// order-limit slot, and every open buy order's current escrow
+// (price × volume_remain) reserves budget. An open sell order carries no
+// escrow, so it reserves a slot but no budget.
+func TestBuildResultReservesSlotsAndBuyEscrowForPreExistingOpenOrders(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	orders := []map[string]any{
+		openOrderMap(9001, 34, true, 200, 50),   // open buy: 10,000 escrow
+		openOrderMap(9002, 35, false, 300, 100), // open sell: no escrow
+		openOrderMap(9003, 36, true, 1000, 5),   // open buy: 5,000 escrow
+	}
+	server, _ := sellFixtureServer(t, rankedFilteredOrders(), history, ledgerFixture{orders: orders})
+	cfg := testConfig(t, server.URL)
+	cfg.Values.Budget = 150_000_000
+
+	result, _, err := cli.BuildResult(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+
+	if result.Summary.OrdersReservedByExisting != 3 {
+		t.Errorf("got OrdersReservedByExisting=%d, want 3 (every open order reserves a slot)", result.Summary.OrdersReservedByExisting)
+	}
+	if result.Summary.OrdersAvailable != result.Summary.OrderLimit-3 {
+		t.Errorf("got OrdersAvailable=%d, want %d", result.Summary.OrdersAvailable, result.Summary.OrderLimit-3)
+	}
+	// Only the two open buys escrow budget: 200×50 + 1000×5 = 15,000.
+	if result.Summary.BudgetReservedByExisting != 15_000 {
+		t.Errorf("got BudgetReservedByExisting=%v, want 15000 (open sells carry no escrow)", result.Summary.BudgetReservedByExisting)
+	}
+	if result.Summary.BudgetAvailable != float64(cfg.Values.Budget)-15_000 {
+		t.Errorf("got BudgetAvailable=%v, want %v", result.Summary.BudgetAvailable, float64(cfg.Values.Budget)-15_000)
+	}
+}
+
+// TestBuildResultMarksASellPendingWhenPreExistingOrdersExhaustTheOrderLimit
+// pins spec §13 step 3 and §11: with every order-limit slot already held by
+// pre-existing open orders, the sell recommendation can't get one and lands
+// in Pending with reason order-limit-exhausted rather than being dropped.
+func TestBuildResultMarksASellPendingWhenPreExistingOrdersExhaustTheOrderLimit(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	// pilotSkills() derives an order limit of 21; 21 open orders leave none.
+	orders := make([]map[string]any, 0, 21)
+	for i := range 21 {
+		orders = append(orders, openOrderMap(int64(9000+i), 34, true, 10, 10))
+	}
+	server, _ := sellFixtureServer(t, rankedFilteredOrders(), history, ledgerFixture{
+		orders: orders,
+		assets: []map[string]any{
+			{"item_id": 1, "type_id": 34, "quantity": 100, "location_id": 60004588, "location_type": "station", "location_flag": "Hangar"},
+		},
+	})
+	cfg := testConfig(t, server.URL)
+	cfg.Values.Budget = 150_000_000
+	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-34", 34, 100, engine.Float64Ptr(50))})
+
+	result, _, err := cli.BuildResult(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+
+	if result.Summary.OrdersAvailable != 0 {
+		t.Errorf("got OrdersAvailable=%d, want 0 with the limit fully reserved", result.Summary.OrdersAvailable)
+	}
+	if len(result.SellRecommendations) != 0 {
+		t.Errorf("got SellRecommendations=%+v, want none once the order limit is exhausted", result.SellRecommendations)
+	}
+	var starved *engine.Pending
+	for i := range result.Pending {
+		if result.Pending[i].TypeID == 34 && result.Pending[i].Reason == engine.PendingOrderLimit {
+			starved = &result.Pending[i]
+		}
+	}
+	if starved == nil {
+		t.Fatalf("got Pending=%+v, want the starved sell marked order-limit-exhausted", result.Pending)
+	}
+	if starved.Quantity != 100 || starved.Detail == "" {
+		t.Errorf("got %+v, want the full 100 held units and a detail", *starved)
 	}
 }

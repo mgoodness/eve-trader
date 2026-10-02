@@ -4,14 +4,17 @@ import "sort"
 
 // NewResult assembles the whole-universe Result (spec §11) from the
 // allocation stage's funded and unfunded buy sets (ticket #22), the filter
-// layer's excluded set (ticket #19, #20), and the sell plan's
+// layer's excluded set (ticket #19, #20), and the sell plan's funded
 // recommendations and pending entries (ticket #47), plus the run's Meta
-// (generated at, region/station, echoed params, live fees) and the pilot's
-// live order limit (ticket #16). It is a pure function: Summary is entirely
-// derived from the funded buy set and meta.Params.Budget, so it is the seam
-// the CLI's table and JSON renderers (ticket #23) both build on. A nil
-// budget never divides by zero: BudgetUsed is 0 when Budget is 0, and every
-// output slice is non-nil so JSON emits [] rather than null.
+// (generated at, region/station, echoed params, live fees) and the
+// AllocationParams the run allocated against (ticket #49). It is a pure
+// function: Summary is entirely derived from the funded buy set, the
+// funded sell set, and params, so it is the seam the CLI's table and JSON
+// renderers (ticket #23) both build on. A nil budget never divides by
+// zero: BudgetUsed is 0 when Budget is 0, and every output slice is
+// non-nil so JSON emits [] rather than null. Available budget and slots
+// never go negative, even when pre-existing orders reserved more than the
+// stated budget or order limit.
 //
 // funded and unfunded arrive from Allocate sorted by capital-efficiency
 // density (spec §10 step 1), not by expected daily profit; the output
@@ -19,7 +22,7 @@ import "sort"
 // so NewResult re-sorts both, descending, before returning them —
 // ensuring the JSON contract's recommendations/unfunded arrays carry the
 // same invariant the table displays.
-func NewResult(funded, unfunded []BuyRecommendation, excluded []Excluded, sells []SellRecommendation, pending []Pending, meta Meta, orderLimit int) Result {
+func NewResult(funded, unfunded []BuyRecommendation, excluded []Excluded, sells []SellRecommendation, pending []Pending, meta Meta, params AllocationParams) Result {
 	funded = sortedByExpectedDailyProfit(funded)
 	unfunded = sortedByExpectedDailyProfit(unfunded)
 	for i := range funded {
@@ -45,22 +48,26 @@ func NewResult(funded, unfunded []BuyRecommendation, excluded []Excluded, sells 
 	}
 
 	var budgetUsed float64
-	if meta.Params.Budget > 0 {
-		budgetUsed = committedCapital / float64(meta.Params.Budget)
+	if params.Budget > 0 {
+		budgetUsed = committedCapital / float64(params.Budget)
 	}
 
 	return Result{
 		Meta: meta,
 		Summary: Summary{
-			Recommendations:     len(funded),
-			CommittedCapital:    committedCapital,
-			Budget:              meta.Params.Budget,
-			BudgetUsed:          budgetUsed,
-			OrdersUsed:          len(funded) * ordersPerCandidate,
-			OrderLimit:          orderLimit,
-			ExpectedDailyProfit: expectedDailyProfit,
-			Excluded:            len(excluded),
-			Unfunded:            len(unfunded),
+			Recommendations:          len(funded),
+			CommittedCapital:         committedCapital,
+			Budget:                   params.Budget,
+			BudgetReservedByExisting: params.ReservedBudget,
+			BudgetAvailable:          max(0, float64(params.Budget)-params.ReservedBudget),
+			BudgetUsed:               budgetUsed,
+			OrdersUsed:               len(funded) + len(sells),
+			OrdersReservedByExisting: params.ReservedSlots,
+			OrdersAvailable:          max(0, params.OrderLimit-params.ReservedSlots),
+			OrderLimit:               params.OrderLimit,
+			ExpectedDailyProfit:      expectedDailyProfit,
+			Excluded:                 len(excluded),
+			Unfunded:                 len(unfunded),
 		},
 		BuyRecommendations:  funded,
 		Unfunded:            unfunded,

@@ -23,7 +23,7 @@ func TestNewResultSummarisesCommittedCapitalBudgetAndExpectedDailyProfitFromFund
 		{TypeID: 2, CommittedCapital: 79_707_210, ExpectedDailyProfit: 6_280_853.33},
 	}
 
-	result := engine.NewResult(funded, nil, nil, nil, nil, meta, 21)
+	result := engine.NewResult(funded, nil, nil, nil, nil, meta, engine.AllocationParams{Budget: 150_000_000, OrderLimit: 21})
 
 	if result.Meta.GeneratedAt != generatedAt {
 		t.Errorf("got GeneratedAt=%v, want %v", result.Meta.GeneratedAt, generatedAt)
@@ -41,8 +41,8 @@ func TestNewResultSummarisesCommittedCapitalBudgetAndExpectedDailyProfitFromFund
 	if result.Summary.BudgetUsed != wantBudgetUsed {
 		t.Errorf("got BudgetUsed=%v, want %v", result.Summary.BudgetUsed, wantBudgetUsed)
 	}
-	if result.Summary.OrdersUsed != 4 {
-		t.Errorf("got OrdersUsed=%d, want 4 (2 candidates \u00d7 2 orders each)", result.Summary.OrdersUsed)
+	if result.Summary.OrdersUsed != 2 {
+		t.Errorf("got OrdersUsed=%d, want 2 (2 candidates \u00d7 1 order each)", result.Summary.OrdersUsed)
 	}
 	if result.Summary.OrderLimit != 21 {
 		t.Errorf("got OrderLimit=%d, want 21", result.Summary.OrderLimit)
@@ -66,7 +66,7 @@ func TestNewResultSortsFundedAndUnfundedByExpectedDailyProfitDescending(t *testi
 		{TypeID: 4, ExpectedDailyProfit: 900},
 	}
 
-	result := engine.NewResult(funded, unfunded, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
+	result := engine.NewResult(funded, unfunded, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, engine.AllocationParams{Budget: 1, OrderLimit: 21})
 
 	if result.BuyRecommendations[0].TypeID != 2 || result.BuyRecommendations[1].TypeID != 1 {
 		t.Fatalf("got funded order %+v, want type 2 (EDP 500) before type 1 (EDP 100)", result.BuyRecommendations)
@@ -80,7 +80,7 @@ func TestNewResultAccountsForUnfundedAndExcludedCounts(t *testing.T) {
 	unfunded := []engine.BuyRecommendation{{TypeID: 9}, {TypeID: 10}}
 	excluded := []engine.Excluded{{TypeID: 34, Name: "Tritanium", Reason: "thin book"}}
 
-	result := engine.NewResult(nil, unfunded, excluded, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
+	result := engine.NewResult(nil, unfunded, excluded, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, engine.AllocationParams{Budget: 1, OrderLimit: 21})
 
 	if result.Summary.Unfunded != 2 {
 		t.Errorf("got Unfunded=%d, want 2", result.Summary.Unfunded)
@@ -100,7 +100,7 @@ func TestNewResultRendersFlagsAsEmptyArraysNotNull(t *testing.T) {
 	result := engine.NewResult(
 		[]engine.BuyRecommendation{{TypeID: 1}},
 		[]engine.BuyRecommendation{{TypeID: 2}},
-		nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21,
+		nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1}}, engine.AllocationParams{Budget: 1, OrderLimit: 21},
 	)
 
 	if result.BuyRecommendations[0].Flags == nil {
@@ -123,7 +123,7 @@ func TestNewResultRendersFlagsAsEmptyArraysNotNull(t *testing.T) {
 }
 
 func TestNewResultRendersEmptyResultCleanlyWithZeroBudgetUsed(t *testing.T) {
-	result := engine.NewResult(nil, nil, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 0}}, 21)
+	result := engine.NewResult(nil, nil, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 0}}, engine.AllocationParams{Budget: 0, OrderLimit: 21})
 
 	if result.Summary.BudgetUsed != 0 {
 		t.Errorf("got BudgetUsed=%v, want 0 (no division by zero with a zero budget)", result.Summary.BudgetUsed)
@@ -137,7 +137,7 @@ func TestNewResultCarriesSellRecommendationsAndPending(t *testing.T) {
 	sells := []engine.SellRecommendation{{TypeID: 34, Quantity: 100}}
 	pending := []engine.Pending{{TypeID: 35, Reason: engine.PendingAwaitingBuyFill, Quantity: 5}}
 
-	result := engine.NewResult(nil, nil, nil, sells, pending, engine.Meta{Params: engine.RunParams{Budget: 1}}, 21)
+	result := engine.NewResult(nil, nil, nil, sells, pending, engine.Meta{Params: engine.RunParams{Budget: 1}}, engine.AllocationParams{Budget: 1, OrderLimit: 21})
 
 	if len(result.SellRecommendations) != 1 || result.SellRecommendations[0].TypeID != 34 {
 		t.Errorf("got SellRecommendations=%+v, want the supplied sell recommendation", result.SellRecommendations)
@@ -152,5 +152,62 @@ func TestNewResultCarriesSellRecommendationsAndPending(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"sell_recommendations"`) || !strings.Contains(string(body), `"buy_recommendations"`) {
 		t.Errorf("got JSON without the buy_recommendations/sell_recommendations keys:\n%s", body)
+	}
+}
+
+func TestNewResultSplitsBudgetAndOrderLimitIntoReservedAndAvailable(t *testing.T) {
+	// The summary reports the run's resource split (spec §13, §14): what
+	// pre-existing open orders already reserved, what was therefore
+	// available to allocate, and what this run actually used. Every
+	// recommendation — buy or sell — costs one order slot (decision 4).
+	funded := []engine.BuyRecommendation{{TypeID: 1, CommittedCapital: 30_000_000, ExpectedDailyProfit: 1}}
+	sells := []engine.SellRecommendation{{TypeID: 34}}
+	params := engine.AllocationParams{
+		Budget:         150_000_000,
+		OrderLimit:     21,
+		ReservedSlots:  3,
+		ReservedBudget: 40_000_000,
+	}
+
+	result := engine.NewResult(funded, nil, nil, sells, nil, engine.Meta{Params: engine.RunParams{Budget: 150_000_000}}, params)
+
+	if result.Summary.BudgetReservedByExisting != 40_000_000 {
+		t.Errorf("got BudgetReservedByExisting=%v, want 40000000", result.Summary.BudgetReservedByExisting)
+	}
+	if result.Summary.BudgetAvailable != 110_000_000 {
+		t.Errorf("got BudgetAvailable=%v, want 110000000", result.Summary.BudgetAvailable)
+	}
+	if result.Summary.OrdersReservedByExisting != 3 {
+		t.Errorf("got OrdersReservedByExisting=%d, want 3", result.Summary.OrdersReservedByExisting)
+	}
+	if result.Summary.OrdersAvailable != 18 {
+		t.Errorf("got OrdersAvailable=%d, want 18", result.Summary.OrdersAvailable)
+	}
+	if result.Summary.OrderLimit != 21 {
+		t.Errorf("got OrderLimit=%d, want 21", result.Summary.OrderLimit)
+	}
+	if result.Summary.OrdersUsed != 2 {
+		t.Errorf("got OrdersUsed=%d, want 2 (one funded buy + one funded sell)", result.Summary.OrdersUsed)
+	}
+}
+
+func TestNewResultNeverReportsNegativeAvailableResources(t *testing.T) {
+	// A pilot whose stated budget is smaller than the escrow already tied
+	// up in open buy orders has nothing left to allocate, not a negative
+	// amount (spec §13, §14).
+	params := engine.AllocationParams{
+		Budget:         1_000_000,
+		OrderLimit:     2,
+		ReservedSlots:  5,
+		ReservedBudget: 3_000_000,
+	}
+
+	result := engine.NewResult(nil, nil, nil, nil, nil, engine.Meta{Params: engine.RunParams{Budget: 1_000_000}}, params)
+
+	if result.Summary.BudgetAvailable != 0 {
+		t.Errorf("got BudgetAvailable=%v, want 0", result.Summary.BudgetAvailable)
+	}
+	if result.Summary.OrdersAvailable != 0 {
+		t.Errorf("got OrdersAvailable=%d, want 0", result.Summary.OrdersAvailable)
 	}
 }

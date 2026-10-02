@@ -271,16 +271,16 @@ func TestAcceptanceAgainstFrozenSnapshot(t *testing.T) {
 		result := runAcceptanceOnce(t, t.Context(), server.URL, acceptanceSlotBindingBudget)
 		t.Logf("slot-binding run: funded=%d, unfunded=%d, excluded=%d, orders=%d/%d",
 			len(result.BuyRecommendations), len(result.Unfunded), len(result.Excluded), result.Summary.OrdersUsed, result.Summary.OrderLimit)
-		// Ten funded candidates (20 of the 21 slots) is the honest way to
-		// exercise the limit: with more budget available than slots, the
-		// limit — not the budget — is what caps the funded set. The same
-		// structural criteria are re-asserted here because this run funds
-		// far more candidates than the default-budget run.
+		// The limit — not the budget — is what caps the funded set: with one
+		// slot per recommendation (decision 3), the honest way to exercise it
+		// is for this run to fill the limit. The same structural criteria are
+		// re-asserted here because this run funds far more candidates than
+		// the default-budget run.
 		assertPostable(t, result, snap.twoSided)
 		assertClearsTargetMargin(t, result)
 		assertBudgetAndOrderLimit(t, result)
 		assertThreeWaySplit(t, result, snap.twoSided)
-		if result.Summary.OrdersUsed+2 <= result.Summary.OrderLimit {
+		if result.Summary.OrdersUsed+1 <= result.Summary.OrderLimit {
 			t.Errorf("got OrdersUsed=%d of limit %d: the slot-binding scenario did not actually bind, so the order-limit check is vacuous",
 				result.Summary.OrdersUsed, result.Summary.OrderLimit)
 		}
@@ -364,17 +364,18 @@ func assertClearsTargetMargin(t *testing.T, result engine.Result) {
 
 // assertBudgetAndOrderLimit checks the third acceptance criterion (spec
 // §14): committed capital never exceeds the budget, and the funded set's
-// active-order cost (two slots per candidate, spec §10) never exceeds the
-// pilot's skill-derived order limit.
+// active-order cost (one slot per recommendation, buy or sell, spec §13)
+// never exceeds the pilot's skill-derived order limit.
 func assertBudgetAndOrderLimit(t *testing.T, result engine.Result) {
 	t.Helper()
 
 	if result.Summary.OrderLimit != 21 {
 		t.Errorf("got order limit %d, want the pilot's frozen 21", result.Summary.OrderLimit)
 	}
-	if result.Summary.OrdersUsed != 2*len(result.BuyRecommendations) {
-		t.Errorf("got OrdersUsed=%d for %d funded recommendations, want %d (two slots each)",
-			result.Summary.OrdersUsed, len(result.BuyRecommendations), 2*len(result.BuyRecommendations))
+	wantOrders := len(result.BuyRecommendations) + len(result.SellRecommendations)
+	if result.Summary.OrdersUsed != wantOrders {
+		t.Errorf("got OrdersUsed=%d for %d funded buys and %d funded sells, want %d (one slot each)",
+			result.Summary.OrdersUsed, len(result.BuyRecommendations), len(result.SellRecommendations), wantOrders)
 	}
 	if result.Summary.OrdersUsed > result.Summary.OrderLimit {
 		t.Errorf("got OrdersUsed=%d, exceeding the order limit %d", result.Summary.OrdersUsed, result.Summary.OrderLimit)
