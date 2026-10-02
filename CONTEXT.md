@@ -178,10 +178,11 @@ flagged, not excluded, when its realised margin falls under target.
 _Avoid_: round trip
 
 **Pending**:
-A lot or order awaiting an outcome this run cannot act on: an open-buy lot not
-yet filled, an open sell order already covering stock (not re-recommended), or
-an unknown-outcome lot. Never counted toward funded, unfunded, excluded, or
-sell recommendations.
+A lot, order, or recommendation awaiting an outcome this run cannot act on: an
+open-buy lot not yet filled, an open sell order already covering stock (not
+re-recommended), an unknown-outcome lot, or a sell recommendation that lost
+out on a scarce order-limit slot. Never counted toward funded, unfunded,
+excluded, or sell recommendations.
 _Avoid_: in-flight, outstanding
 
 **Allocation**:
