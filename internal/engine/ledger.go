@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -55,6 +56,13 @@ type Lot struct {
 	// reconciliation bookkeeping that distinguishes a partial fill from a
 	// full fill and records the unfilled remainder on a terminal order.
 	LastSeenVolumeRemain int64 `json:"last_seen_volume_remain"`
+	// ReservedOrderID is the sell order currently reserving this lot's
+	// unreserved-nonzero stock (spec §7, §11): zero when the lot is not
+	// reserved. A lot fully covered by its reservation is
+	// reserved-for-sale with QuantityAvailable zero; a partly covered one
+	// stays held-unlisted with only its unreserved remainder available. It
+	// is reconciliation bookkeeping, not part of the output contract.
+	ReservedOrderID int64 `json:"reserved_order_id,omitempty"`
 }
 
 // CharacterOrder is one row of GET /characters/{id}/orders/ or
@@ -97,12 +105,14 @@ type ReconcileNoteKind string
 
 // The reconciliation outcomes (spec §7, research esi-assets-and-orders.md
 // §2.3): a partial fill, a cancelled/expired terminal state, a confirmed
-// full fill, an unresolvable disappearance, and an asset drift clamp.
+// full fill, an unresolvable disappearance, a completed sale, and an asset
+// drift clamp.
 const (
 	NotePartialFill ReconcileNoteKind = "partial-fill"
 	NoteTerminal    ReconcileNoteKind = "terminal"
 	NoteFullFill    ReconcileNoteKind = "full-fill"
 	NoteUnknown     ReconcileNoteKind = "unknown-outcome"
+	NoteSold        ReconcileNoteKind = "sold"
 	NoteDriftClamp  ReconcileNoteKind = "drift-clamp"
 )
 
@@ -123,18 +133,35 @@ type ReconcileNote struct {
 // /characters/{id}/orders/), history (.../orders/history/), and assets
 // (.../assets/), then calls this. The input slice is never mutated.
 //
-// Outcomes, each an inference over an ESI gap (research §2.3):
-//   - a still-listed order whose volume_remain dropped is an authoritative
-//     partial fill (`partial-fill`);
-//   - a gone order found in history as cancelled/expired is authoritative:
-//     its last-seen remainder never arrives (`terminal`);
-//   - a gone order absent from history with last-seen volume_remain 0 is a
-//     confirmed full fill (`full-fill`);
-//   - a gone order absent from history with a non-zero last-seen remainder
-//     is an `unknown-outcome`, never guessed either way;
-//   - held-unlisted stock is clamped down to live Hangar assets at the
-//     trade station (`drift-clamp`); assets showing more is untracked
-//     clutter and is never pulled in.
+// Buy side, each an inference over an ESI gap (research §2.3):
+//   - every still-open character buy order at the trade station that no
+//     stored lot represents yet becomes a new open-buy lot (`order-<id>`),
+//     so a fill is detected on the next run rather than the order being
+//     invisible forever;
+//   - a still-listed buy order whose volume_remain dropped is an
+//     authoritative partial fill (`partial-fill`);
+//   - a gone buy order found in history as cancelled/expired is
+//     authoritative: its last-seen remainder never arrives (`terminal`);
+//   - a gone buy order absent from history with last-seen volume_remain 0
+//     is a confirmed full fill (`full-fill`);
+//   - a gone buy order absent from history with a non-zero last-seen
+//     remainder is an `unknown-outcome`, never guessed either way.
+//
+// Sell side (spec §7: a sell order reserves FIFO, cancelling releases, and
+// filling finalizes to `sold`):
+//   - a lot reserved by a still-open sell order keeps its reservation;
+//   - a reservation whose order history says cancelled/expired is released
+//     back to held-unlisted (`terminal`);
+//   - a reservation whose order vanished with last-seen volume_remain 0 is
+//     a completed sale: the lot is `sold` and kept (`sold`);
+//   - a reservation that vanished with a non-zero last-seen remainder is an
+//     `unknown-outcome`, kept reserved rather than guessed;
+//   - open station sell orders then reserve held stock FIFO, fully covered
+//     lots becoming reserved-for-sale.
+//
+// Finally, held-unlisted stock is clamped down to live Hangar assets at the
+// trade station (`drift-clamp`); assets showing more is untracked clutter
+// and is never pulled in.
 func Reconcile(lots []Lot, orders []CharacterOrder, history []CharacterOrder, assets []Asset, tradeStationID int64) ([]Lot, []ReconcileNote) {
 	updated := make([]Lot, len(lots))
 	copy(updated, lots)
@@ -158,6 +185,15 @@ func Reconcile(lots []Lot, orders []CharacterOrder, history []CharacterOrder, as
 		historyByOrderID[h.OrderID] = h
 	}
 
+	// Ingest every still-open character buy order at the trade station that
+	// no stored lot represents yet (spec §7: one lot per buy order that has
+	// delivered or is delivering stock). Without this an order placed since
+	// the last run is invisible, so its later fill can never be detected.
+	updated = ingestOpenBuyLots(updated, orders, tradeStationID)
+	for len(alreadyHeld) < len(updated) {
+		alreadyHeld = append(alreadyHeld, false)
+	}
+
 	var notes []ReconcileNote
 	for i := range updated {
 		lot := &updated[i]
@@ -177,8 +213,58 @@ func Reconcile(lots []Lot, orders []CharacterOrder, history []CharacterOrder, as
 		}
 	}
 
+	// Resolve existing reservations before re-establishing this run's, so a
+	// cancelled order releases its lots and a filled one finalizes to sold
+	// rather than being silently resurrected as available stock.
+	sticky := make(map[string]bool)
+	notes = append(notes, resolveReservations(updated, activeByOrderID, historyByOrderID, sticky)...)
+
+	reserveOpenSellOrders(updated, orders, tradeStationID, sticky)
+
 	notes = append(notes, clampHeldUnlistedToAssets(updated, alreadyHeld, assets, tradeStationID)...)
 	return updated, notes
+}
+
+// ingestOpenBuyLots returns lots with a new open-buy lot appended for every
+// active character buy order at tradeStationID that no stored lot's
+// SourceOrderID represents (spec §7). Corporation orders and orders at
+// other locations are ignored — they are not the pilot's personal station
+// trading stock. The appended lots are ordered by ascending order id so the
+// ledger stays deterministic.
+func ingestOpenBuyLots(lots []Lot, orders []CharacterOrder, tradeStationID int64) []Lot {
+	known := make(map[string]bool, len(lots))
+	for _, lot := range lots {
+		known[lot.SourceOrderID] = true
+	}
+
+	var newOrders []CharacterOrder
+	for _, o := range orders {
+		if !o.IsBuyOrder || o.IsCorporation || o.LocationID != tradeStationID {
+			continue
+		}
+		id := strconv.FormatInt(o.OrderID, 10)
+		if known[id] {
+			continue
+		}
+		newOrders = append(newOrders, o)
+	}
+	sort.Slice(newOrders, func(i, j int) bool { return newOrders[i].OrderID < newOrders[j].OrderID })
+
+	for _, o := range newOrders {
+		price := o.Price
+		lots = append(lots, Lot{
+			LotID:                fmt.Sprintf("order-%d", o.OrderID),
+			TypeID:               o.TypeID,
+			SourceOrderID:        strconv.FormatInt(o.OrderID, 10),
+			QuantityTotal:        o.VolumeTotal,
+			QuantityAvailable:    o.VolumeTotal - o.VolumeRemain,
+			AcquisitionPrice:     &price,
+			AcquiredAt:           o.Issued,
+			Status:               LotOpenBuy,
+			LastSeenVolumeRemain: o.VolumeRemain,
+		})
+	}
+	return lots
 }
 
 // reconcileOpenBuyLot applies one of the order-outcome branches to an
@@ -259,6 +345,170 @@ func reconcileOpenBuyLot(lot *Lot, orderID int64, active map[int64]CharacterOrde
 	}, true
 }
 
+// resolveReservations finalizes every stored reservation against this run's
+// snapshots (spec §7): a reservation whose order is still open is refreshed,
+// one whose order history says cancelled/expired is released back to
+// held-unlisted, one whose order vanished with a zero last-seen remainder is
+// a completed sale, and one that vanished with stock still owing is unknown
+// (kept reserved, never guessed). LotIDs that stay unknown are recorded in
+// sticky so the reserve pass leaves them alone. The input slice is mutated.
+func resolveReservations(lots []Lot, active, history map[int64]CharacterOrder, sticky map[string]bool) []ReconcileNote {
+	var notes []ReconcileNote
+	for i := range lots {
+		lot := &lots[i]
+		if lot.Status == LotSold || lot.ReservedOrderID == 0 {
+			continue
+		}
+		orderID := lot.ReservedOrderID
+		reserved := reservedUnits(*lot)
+
+		if order, ok := active[orderID]; ok {
+			// Still reserved: refresh the last-seen remainder so a later
+			// disappearance can be classified.
+			lot.LastSeenVolumeRemain = order.VolumeRemain
+			continue
+		}
+
+		if h, ok := history[orderID]; ok && (h.State == "cancelled" || h.State == "expired") {
+			lot.Status = LotHeldUnlisted
+			lot.QuantityAvailable = lot.QuantityTotal
+			lot.ReservedOrderID = 0
+			notes = append(notes, ReconcileNote{
+				LotID:   lot.LotID,
+				TypeID:  lot.TypeID,
+				OrderID: orderID,
+				Kind:    NoteTerminal,
+				Detail:  fmt.Sprintf("sell order %d %s: %d reserved units released", orderID, h.State, reserved),
+			})
+			continue
+		}
+
+		if lot.LastSeenVolumeRemain == 0 {
+			if reserved >= lot.QuantityTotal {
+				lot.Status = LotSold
+				lot.QuantityAvailable = 0
+			} else {
+				// Only the reserved part sold; the lot keeps the rest.
+				lot.QuantityTotal -= reserved
+				lot.QuantityAvailable = lot.QuantityTotal
+				lot.Status = LotHeldUnlisted
+			}
+			lot.ReservedOrderID = 0
+			notes = append(notes, ReconcileNote{
+				LotID:   lot.LotID,
+				TypeID:  lot.TypeID,
+				OrderID: orderID,
+				Kind:    NoteSold,
+				Detail:  fmt.Sprintf("sell order %d filled: %d units sold", orderID, reserved),
+			})
+			continue
+		}
+
+		// Vanished, absent from history, reservation unaccounted for: keep
+		// it reserved and surfaced (spec §7; ADR 0003).
+		sticky[lot.LotID] = true
+		notes = append(notes, ReconcileNote{
+			LotID:   lot.LotID,
+			TypeID:  lot.TypeID,
+			OrderID: orderID,
+			Kind:    NoteUnknown,
+			Detail:  fmt.Sprintf("sell order %d vanished with %d reserved units unaccounted for", orderID, reserved),
+		})
+	}
+	return notes
+}
+
+// reserveOpenSellOrders re-establishes held stock's reservations from the
+// run's open station sell orders (spec §7, §11; ADR 0005). It recomputes
+// from each lot's physical stock, so it is idempotent: every non-sticky held
+// lot is first reset to unreserved, then orders reserve held stock FIFO
+// (oldest lot first). A lot covered in full becomes reserved-for-sale with
+// its ReservedOrderID set; a partly covered one stays held-unlisted with only
+// its unreserved remainder available, its ReservedOrderID still recorded so
+// a later cancellation can release it. Corporation orders and orders at
+// other stations do not reserve station stock. The input slice is mutated.
+func reserveOpenSellOrders(lots []Lot, orders []CharacterOrder, tradeStationID int64, sticky map[string]bool) {
+	for i := range lots {
+		lot := &lots[i]
+		if sticky[lot.LotID] {
+			continue
+		}
+		if lot.Status == LotHeldUnlisted || lot.Status == LotReservedForSale {
+			lot.Status = LotHeldUnlisted
+			lot.QuantityAvailable = lot.QuantityTotal
+			lot.ReservedOrderID = 0
+		}
+	}
+
+	open := make(map[int32][]CharacterOrder)
+	for _, o := range orders {
+		if o.IsBuyOrder || o.IsCorporation || o.LocationID != tradeStationID {
+			continue
+		}
+		open[o.TypeID] = append(open[o.TypeID], o)
+	}
+	typeIDs := make([]int32, 0, len(open))
+	for typeID := range open {
+		typeIDs = append(typeIDs, typeID)
+	}
+	sort.Slice(typeIDs, func(i, j int) bool { return typeIDs[i] < typeIDs[j] })
+
+	for _, typeID := range typeIDs {
+		sellOrders := open[typeID]
+		sort.Slice(sellOrders, func(i, j int) bool { return sellOrders[i].OrderID < sellOrders[j].OrderID })
+
+		oi := 0
+		remaining := sellOrders[0].VolumeRemain
+		for i := range lots {
+			lot := &lots[i]
+			if lot.TypeID != typeID || sticky[lot.LotID] || lot.Status != LotHeldUnlisted {
+				continue
+			}
+			for remaining <= 0 && oi+1 < len(sellOrders) {
+				oi++
+				remaining = sellOrders[oi].VolumeRemain
+			}
+			if remaining <= 0 {
+				break
+			}
+
+			take := remaining
+			if take > lot.QuantityAvailable {
+				take = lot.QuantityAvailable
+			}
+			lot.QuantityAvailable -= take
+			lot.ReservedOrderID = sellOrders[oi].OrderID
+			remaining -= take
+			if lot.QuantityAvailable == 0 {
+				lot.Status = LotReservedForSale
+			}
+		}
+	}
+}
+
+// isStationHangarAsset reports whether an asset is Hangar stock at the trade
+// station (spec §7 step 3, §7 Bootstrap): the only inventory the ledger
+// treats as trading stock. Reconciliation and bootstrap share this one
+// filter so their definitions of "held stock" cannot drift apart.
+func isStationHangarAsset(a Asset, tradeStationID int64) bool {
+	return a.LocationType == "station" && a.LocationID == tradeStationID && a.LocationFlag == "Hangar"
+}
+
+// reservedUnits is how many of a held lot's units an open sell order
+// reserves: the whole lot when it is fully covered (reserved-for-sale and no
+// available stock), otherwise the difference between its size and its
+// unreserved remainder.
+func reservedUnits(lot Lot) int64 {
+	if lot.Status == LotReservedForSale {
+		return lot.QuantityTotal
+	}
+	reserved := lot.QuantityTotal - lot.QuantityAvailable
+	if reserved < 0 {
+		return 0
+	}
+	return reserved
+}
+
 // clampHeldUnlistedToAssets clamps each type's held-unlisted quantity down
 // to the Hangar assets at tradeStationID, taking any deficit from the
 // oldest lots first (FIFO) and emitting a drift-clamp note per lot touched
@@ -276,7 +526,7 @@ func clampHeldUnlistedToAssets(lots []Lot, alreadyHeld []bool, assets []Asset, t
 
 	confirmed := make(map[int32]int64)
 	for _, a := range assets {
-		if a.LocationType == "station" && a.LocationID == tradeStationID && a.LocationFlag == "Hangar" {
+		if isStationHangarAsset(a, tradeStationID) {
 			confirmed[a.TypeID] += a.Quantity
 		}
 	}
@@ -304,6 +554,14 @@ func clampHeldUnlistedToAssets(lots []Lot, alreadyHeld []bool, assets []Asset, t
 			clamped = remaining
 		}
 		lot.QuantityAvailable -= clamped
+		// Shrink the lot's size too: drift means the ledger's recorded
+		// quantity was wrong, and keeping total and available in step
+		// preserves the reservation invariant (total − available =
+		// reserved).
+		lot.QuantityTotal -= clamped
+		if lot.QuantityTotal < 0 {
+			lot.QuantityTotal = 0
+		}
 		deficit[lot.TypeID] -= clamped
 
 		notes = append(notes, ReconcileNote{

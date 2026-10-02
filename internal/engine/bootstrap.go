@@ -41,7 +41,7 @@ func UntrackedHoldings(lots []Lot, assets []Asset, tradeStationID int64) []Untra
 
 	confirmed := make(map[int32]int64)
 	for _, a := range assets {
-		if a.LocationType == "station" && a.LocationID == tradeStationID && a.LocationFlag == "Hangar" {
+		if isStationHangarAsset(a, tradeStationID) {
 			confirmed[a.TypeID] += a.Quantity
 		}
 	}

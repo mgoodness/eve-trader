@@ -329,3 +329,257 @@ func assertNote(t *testing.T, notes []engine.ReconcileNote, kind engine.Reconcil
 		t.Fatalf("got notes %+v, want exactly one %q for %s/order %d", notes, kind, lotID, orderID)
 	}
 }
+
+// activeBuyOrder builds one active character buy order at the trade station.
+func activeBuyOrder(orderID int64, typeID int32, total, remain int64) engine.CharacterOrder {
+	return engine.CharacterOrder{
+		OrderID:      orderID,
+		TypeID:       typeID,
+		LocationID:   testStationID,
+		IsBuyOrder:   true,
+		Price:        12.5,
+		VolumeTotal:  total,
+		VolumeRemain: remain,
+	}
+}
+
+// activeSellOrder builds one active character sell order at the trade station.
+func activeSellOrder(orderID int64, typeID int32, remain int64) engine.CharacterOrder {
+	return engine.CharacterOrder{
+		OrderID:      orderID,
+		TypeID:       typeID,
+		LocationID:   testStationID,
+		IsBuyOrder:   false,
+		Price:        20,
+		VolumeRemain: remain,
+	}
+}
+
+// reservedForSaleLot builds a lot completely reserved by an open sell order.
+func reservedForSaleLot(lotID string, typeID int32, qty, orderID, lastSeenRemain int64) engine.Lot {
+	return engine.Lot{
+		LotID:                lotID,
+		TypeID:               typeID,
+		SourceOrderID:        "seeded",
+		QuantityTotal:        qty,
+		QuantityAvailable:    0,
+		AcquiredAt:           ledgerTime,
+		Status:               engine.LotReservedForSale,
+		LastSeenVolumeRemain: lastSeenRemain,
+		ReservedOrderID:      orderID,
+	}
+}
+
+// TestReconcileCreatesAnOpenBuyLotForANewActiveBuyOrder proves the ledger
+// sees an order placed since the last run (spec §7: one lot per buy order
+// that has delivered or is delivering stock). Without it awaiting-buy-fill
+// is unreachable and a later fill can never be detected.
+func TestReconcileCreatesAnOpenBuyLotForANewActiveBuyOrder(t *testing.T) {
+	issued := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	order := activeBuyOrder(1001, 34, 100, 40)
+	order.Issued = issued
+	order.Price = 12.5
+
+	got, notes := engine.Reconcile(nil, []engine.CharacterOrder{order}, nil, nil, testStationID)
+
+	if len(notes) != 0 {
+		t.Errorf("got notes %+v, want none for a newly ingested order", notes)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d lots, want 1 created from the active buy order", len(got))
+	}
+	lot := got[0]
+	if lot.LotID != "order-1001" || lot.SourceOrderID != "1001" {
+		t.Errorf("got lot id/source %q/%q, want order-1001/1001", lot.LotID, lot.SourceOrderID)
+	}
+	if lot.TypeID != 34 || lot.QuantityTotal != 100 || lot.QuantityAvailable != 60 {
+		t.Errorf("got type/total/available %d/%d/%d, want 34/100/60 (delivered so far)", lot.TypeID, lot.QuantityTotal, lot.QuantityAvailable)
+	}
+	if lot.Status != engine.LotOpenBuy || lot.LastSeenVolumeRemain != 40 {
+		t.Errorf("got status/last-seen %q/%d, want open-buy/40", lot.Status, lot.LastSeenVolumeRemain)
+	}
+	if lot.AcquisitionPrice == nil || *lot.AcquisitionPrice != 12.5 {
+		t.Errorf("got acquisition price %v, want 12.5", lot.AcquisitionPrice)
+	}
+	if !lot.AcquiredAt.Equal(issued) {
+		t.Errorf("got acquired_at %v, want the order's issued time %v", lot.AcquiredAt, issued)
+	}
+}
+
+// TestReconcileIgnoresCorporationAndOffStationBuyOrders proves the ingestion
+// only claims the pilot's own station trading stock (spec §7): corporation
+// orders and orders at other locations become no lot.
+func TestReconcileIgnoresCorporationAndOffStationBuyOrders(t *testing.T) {
+	corp := activeBuyOrder(1, 34, 100, 50)
+	corp.IsCorporation = true
+	offStation := activeBuyOrder(2, 34, 100, 50)
+	offStation.LocationID = 60004589
+	mine := activeBuyOrder(3, 34, 100, 50)
+	sellNoStock := activeSellOrder(4, 34, 50)
+
+	got, _ := engine.Reconcile(nil, []engine.CharacterOrder{corp, offStation, mine, sellNoStock}, nil, nil, testStationID)
+
+	if len(got) != 1 || got[0].SourceOrderID != "3" {
+		t.Fatalf("got %+v, want exactly the pilot's own trade-station buy order", got)
+	}
+}
+
+// TestReconcileDetectsAPartialFillOfAnIngestedOrderAcrossRuns proves the
+// fill-detection algorithm fires on the run after an order is first seen:
+// the volume_remain drop is an authoritative partial fill (spec §7 step 1).
+func TestReconcileDetectsAPartialFillOfAnIngestedOrderAcrossRuns(t *testing.T) {
+	first, _ := engine.Reconcile(nil, []engine.CharacterOrder{activeBuyOrder(1001, 34, 100, 100)}, nil, nil, testStationID)
+
+	got, notes := engine.Reconcile(first, []engine.CharacterOrder{activeBuyOrder(1001, 34, 100, 60)}, nil, nil, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotOpenBuy {
+		t.Fatalf("got %+v, want the still-open lot", got)
+	}
+	if got[0].QuantityAvailable != 40 || got[0].LastSeenVolumeRemain != 60 {
+		t.Errorf("got available/last-seen %d/%d, want 40/60", got[0].QuantityAvailable, got[0].LastSeenVolumeRemain)
+	}
+	assertNote(t, notes, engine.NotePartialFill, "order-1001", 1001)
+}
+
+// TestReconcileConfirmsAFullFillOfAnIngestedOrderThatVanishes proves a
+// first-seen-then-gone order with no last-seen remainder is a confirmed full
+// fill (spec §7 step 2).
+func TestReconcileConfirmsAFullFillOfAnIngestedOrderThatVanishes(t *testing.T) {
+	first, _ := engine.Reconcile(nil, []engine.CharacterOrder{activeBuyOrder(1001, 34, 100, 0)}, nil, nil, testStationID)
+
+	got, notes := engine.Reconcile(first, nil, nil, nil, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotHeldUnlisted {
+		t.Fatalf("got %+v, want the lot held-unlisted after the confirmed fill", got)
+	}
+	if got[0].QuantityAvailable != 100 || got[0].QuantityTotal != 100 {
+		t.Errorf("got available/total %d/%d, want 100/100", got[0].QuantityAvailable, got[0].QuantityTotal)
+	}
+	assertNote(t, notes, engine.NoteFullFill, "order-1001", 1001)
+}
+
+// TestReconcileClassifiesATerminalCancellationOfAnIngestedOrder proves a
+// first-seen order that vanishes into history as cancelled keeps only the
+// units that actually arrived (spec §7 step 2).
+func TestReconcileClassifiesATerminalCancellationOfAnIngestedOrder(t *testing.T) {
+	first, _ := engine.Reconcile(nil, []engine.CharacterOrder{activeBuyOrder(1001, 34, 100, 40)}, nil, nil, testStationID)
+	history := []engine.CharacterOrder{{OrderID: 1001, TypeID: 34, State: "cancelled"}}
+
+	got, notes := engine.Reconcile(first, nil, history, nil, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotHeldUnlisted {
+		t.Fatalf("got %+v, want the terminal lot held-unlisted", got)
+	}
+	if got[0].QuantityTotal != 60 || got[0].QuantityAvailable != 60 {
+		t.Errorf("got total/available %d/%d, want 60/60 (the unfilled 40 never arrives)", got[0].QuantityTotal, got[0].QuantityAvailable)
+	}
+	assertNote(t, notes, engine.NoteTerminal, "order-1001", 1001)
+}
+
+// TestReconcileSurfacesAnUnknownOutcomeOfAnIngestedOrder proves a gone order
+// absent from history with stock still owing is never guessed (spec §7 step
+// 2; research §2.3.4).
+func TestReconcileSurfacesAnUnknownOutcomeOfAnIngestedOrder(t *testing.T) {
+	first, _ := engine.Reconcile(nil, []engine.CharacterOrder{activeBuyOrder(1001, 34, 100, 40)}, nil, nil, testStationID)
+
+	got, notes := engine.Reconcile(first, nil, nil, nil, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotOpenBuy {
+		t.Fatalf("got %+v, want the unresolved lot left open-buy", got)
+	}
+	if got[0].QuantityAvailable != 60 || got[0].LastSeenVolumeRemain != 40 {
+		t.Errorf("got available/last-seen %d/%d, want 60/40", got[0].QuantityAvailable, got[0].LastSeenVolumeRemain)
+	}
+	assertNote(t, notes, engine.NoteUnknown, "order-1001", 1001)
+}
+
+// TestReconcileReservesHeldStockCoveredByAnOpenSellOrder proves an open
+// station sell order reserves held stock and persists it (spec §7, §11).
+func TestReconcileReservesHeldStockCoveredByAnOpenSellOrder(t *testing.T) {
+	lots := []engine.Lot{heldUnlistedLot("lot-1", 34, 100)}
+
+	got, notes := engine.Reconcile(lots, []engine.CharacterOrder{activeSellOrder(5000, 34, 100)}, nil, nil, testStationID)
+
+	if len(notes) != 0 {
+		t.Errorf("got notes %+v, want none for a fresh reservation", notes)
+	}
+	if len(got) != 1 || got[0].Status != engine.LotReservedForSale {
+		t.Fatalf("got %+v, want the lot reserved-for-sale", got)
+	}
+	if got[0].QuantityAvailable != 0 || got[0].ReservedOrderID != 5000 {
+		t.Errorf("got available/reserved-order %d/%d, want 0/5000", got[0].QuantityAvailable, got[0].ReservedOrderID)
+	}
+}
+
+// TestReconcileReservesOnlyTheUnitsAnOpenOrderCovers proves a partly covered
+// lot keeps its held-unlisted status with only its reserved units removed, so
+// the unreserved remainder stays recommendable.
+func TestReconcileReservesOnlyTheUnitsAnOpenOrderCovers(t *testing.T) {
+	lots := []engine.Lot{heldUnlistedLot("lot-1", 34, 100)}
+
+	got, _ := engine.Reconcile(lots, []engine.CharacterOrder{activeSellOrder(5000, 34, 60)}, nil, []engine.Asset{hangarAsset(34, 100)}, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotHeldUnlisted {
+		t.Fatalf("got %+v, want the lot held-unlisted with a partial reservation", got)
+	}
+	if got[0].QuantityAvailable != 40 || got[0].ReservedOrderID != 5000 {
+		t.Errorf("got available/reserved-order %d/%d, want 40/5000", got[0].QuantityAvailable, got[0].ReservedOrderID)
+	}
+}
+
+// TestReconcileReleasesAReservationWhenTheSellOrderIsCancelled proves a
+// cancelled sell order releases its reservation rather than losing the stock
+// (spec §7).
+func TestReconcileReleasesAReservationWhenTheSellOrderIsCancelled(t *testing.T) {
+	lots := []engine.Lot{reservedForSaleLot("lot-1", 34, 100, 5000, 100)}
+	history := []engine.CharacterOrder{{OrderID: 5000, TypeID: 34, State: "cancelled"}}
+
+	got, notes := engine.Reconcile(lots, nil, history, nil, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotHeldUnlisted {
+		t.Fatalf("got %+v, want the released lot held-unlisted", got)
+	}
+	if got[0].QuantityAvailable != 100 || got[0].ReservedOrderID != 0 {
+		t.Errorf("got available/reserved-order %d/%d, want 100/0", got[0].QuantityAvailable, got[0].ReservedOrderID)
+	}
+	assertNote(t, notes, engine.NoteTerminal, "lot-1", 5000)
+}
+
+// TestReconcileFinalizesAFilledSellOrderToSoldAndKeepsItSold proves a filled
+// sell order's stock is sold and kept sold across another run, never
+// resurrected as held-unlisted (spec §7).
+func TestReconcileFinalizesAFilledSellOrderToSoldAndKeepsItSold(t *testing.T) {
+	lots := []engine.Lot{reservedForSaleLot("lot-1", 34, 100, 5000, 0)}
+
+	got, notes := engine.Reconcile(lots, nil, nil, nil, testStationID)
+	if len(got) != 1 || got[0].Status != engine.LotSold {
+		t.Fatalf("got %+v, want the lot sold", got)
+	}
+	if got[0].QuantityAvailable != 0 {
+		t.Errorf("got available %d, want 0 for a sold lot", got[0].QuantityAvailable)
+	}
+	assertNote(t, notes, engine.NoteSold, "lot-1", 5000)
+
+	// Another run with no fresh orders must leave the sold lot alone.
+	again, againNotes := engine.Reconcile(got, nil, nil, nil, testStationID)
+	if len(again) != 1 || again[0].Status != engine.LotSold {
+		t.Fatalf("got %+v, want the sold lot to stay sold", again)
+	}
+	if len(againNotes) != 0 {
+		t.Errorf("got notes %+v, want none for an already-sold lot", againNotes)
+	}
+}
+
+// TestReconcileLeavesAnUnknownSellOutcomeUnresolved proves a reservation
+// whose order vanished with stock still owing is kept reserved and surfaced,
+// never guessed filled or cancelled (spec §7 step 2).
+func TestReconcileLeavesAnUnknownSellOutcomeUnresolved(t *testing.T) {
+	lots := []engine.Lot{reservedForSaleLot("lot-1", 34, 100, 5000, 40)}
+
+	got, notes := engine.Reconcile(lots, nil, nil, nil, testStationID)
+
+	if len(got) != 1 || got[0].Status != engine.LotReservedForSale || got[0].ReservedOrderID != 5000 {
+		t.Fatalf("got %+v, want the unknown reservation left reserved-for-sale", got)
+	}
+	assertNote(t, notes, engine.NoteUnknown, "lot-1", 5000)
+}
