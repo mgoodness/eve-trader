@@ -216,6 +216,10 @@ func sellFixtureServer(t *testing.T, orders []map[string]any, history map[int32]
 	return server, func() int { return int(tokenHits.Load()) }
 }
 
+// float64Ptr returns a pointer to v, for building acquisition prices in
+// test literals.
+func float64Ptr(v float64) *float64 { return &v }
+
 // cliHeldLot builds a held-unlisted ledger lot for the CLI-level tests.
 func cliHeldLot(lotID string, typeID int32, qty int64, price *float64) engine.Lot {
 	return engine.Lot{
@@ -250,8 +254,8 @@ func TestBuildResultBuildsSellRecommendationsFromTheLedgerForEveryHeldType(t *te
 	cfg.Values.Budget = 150_000_000
 
 	writeLedgerFile(t, cfg, []engine.Lot{
-		cliHeldLot("lot-morphite", 11399, 100, engine.Float64Ptr(10000)),
-		cliHeldLot("lot-tritanium", 34, 250, engine.Float64Ptr(50)),
+		cliHeldLot("lot-morphite", 11399, 100, float64Ptr(10000)),
+		cliHeldLot("lot-tritanium", 34, 250, float64Ptr(50)),
 	})
 
 	result, _, err := cli.BuildResult(t.Context(), cfg)
@@ -460,7 +464,7 @@ func TestBuildResultMarksASellPendingWhenPreExistingOrdersExhaustTheOrderLimit(t
 	})
 	cfg := testConfig(t, server.URL)
 	cfg.Values.Budget = 150_000_000
-	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-34", 34, 100, engine.Float64Ptr(50))})
+	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-34", 34, 100, float64Ptr(50))})
 
 	result, _, err := cli.BuildResult(t.Context(), cfg)
 	if err != nil {
@@ -475,7 +479,7 @@ func TestBuildResultMarksASellPendingWhenPreExistingOrdersExhaustTheOrderLimit(t
 	}
 	var starved *engine.Pending
 	for i := range result.Pending {
-		if result.Pending[i].TypeID == 34 && result.Pending[i].Reason == engine.PendingOrderLimit {
+		if result.Pending[i].TypeID == 34 && result.Pending[i].Reason == engine.PendingOrderLimitExhausted {
 			starved = &result.Pending[i]
 		}
 	}
@@ -485,4 +489,108 @@ func TestBuildResultMarksASellPendingWhenPreExistingOrdersExhaustTheOrderLimit(t
 	if starved.Quantity != 100 || starved.Detail == "" {
 		t.Errorf("got %+v, want the full 100 held units and a detail", *starved)
 	}
+}
+
+// TestBuildResultSurfacesReconcileWarnings proves the recommend path carries
+// the reconciliation outcomes worth a pilot's attention (spec §7; ADR 0003):
+// a drift clamp reaches AllocatedUniverse's warnings so `recommend` can print
+// it to stderr, rather than being visible only to the `ledger` command.
+func TestBuildResultSurfacesReconcileWarnings(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	// The ledger claims 100 held units; the hangar confirms only 70.
+	server, _ := sellFixtureServer(t, rankedFilteredOrders(), history, ledgerFixture{
+		assets: []map[string]any{
+			{"item_id": 1, "type_id": 34, "quantity": 70, "location_id": 60004588, "location_type": "station", "location_flag": "Hangar"},
+		},
+	})
+	cfg := testConfig(t, server.URL)
+	cfg.Values.Budget = 150_000_000
+	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-34", 34, 100, float64Ptr(50))})
+
+	_, warnings, err := cli.BuildResult(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+
+	if !anyContains(warnings, "clamp") {
+		t.Errorf("got warnings %v, want a drift-clamp warning", warnings)
+	}
+}
+
+// TestBuildResultWarnsWhenAHeldTypeHasNoStationAsk proves a held type the
+// sell plan cannot price is surfaced rather than silently dropped (spec §7
+// decision 7): it has no recommendation, but a warning names it.
+func TestBuildResultWarnsWhenAHeldTypeHasNoStationAsk(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	// Type 999 is not in the region feed, so there is no station best ask.
+	server, _ := sellFixtureServer(t, rankedFilteredOrders(), history, ledgerFixture{
+		assets: []map[string]any{
+			{"item_id": 9, "type_id": 999, "quantity": 100, "location_id": 60004588, "location_type": "station", "location_flag": "Hangar"},
+		},
+	})
+	cfg := testConfig(t, server.URL)
+	cfg.Values.Budget = 150_000_000
+	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-999", 999, 100, float64Ptr(5))})
+
+	result, warnings, err := cli.BuildResult(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+	if !anyContains(warnings, "999") {
+		t.Errorf("got warnings %v, want one naming held type 999", warnings)
+	}
+	for _, rec := range result.SellRecommendations {
+		if rec.TypeID == 999 {
+			t.Errorf("got a sell recommendation for type 999 despite no station best ask: %+v", rec)
+		}
+	}
+}
+
+// TestRecommendCommandPrintsReconcileWarningsToStderr proves the warnings
+// AllocatedUniverse threads through reach the command's stderr, not the JSON
+// contract (spec §11 has no warnings field).
+func TestRecommendCommandPrintsReconcileWarningsToStderr(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	server, _ := sellFixtureServer(t, rankedFilteredOrders(), history, ledgerFixture{
+		assets: []map[string]any{
+			{"item_id": 1, "type_id": 34, "quantity": 70, "location_id": 60004588, "location_type": "station", "location_flag": "Hangar"},
+		},
+	})
+	cfg := testConfig(t, server.URL)
+	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-34", 34, 100, float64Ptr(50))})
+
+	root := cli.NewRootCmd(cfg)
+	var out, errOut strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"recommend", "--json"})
+
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("recommend: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "warning") || !strings.Contains(errOut.String(), "clamp") {
+		t.Errorf("stderr %q missing the drift-clamp warning", errOut.String())
+	}
+	if strings.Contains(out.String(), "warning") {
+		t.Errorf("stdout JSON %q must not carry warnings", out.String())
+	}
+}
+
+// anyContains reports whether any string in ss contains substr.
+func anyContains(ss []string, substr string) bool {
+	for _, s := range ss {
+		if strings.Contains(s, substr) {
+			return true
+		}
+	}
+	return false
 }

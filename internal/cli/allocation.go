@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/mgoodness/eve-trader/internal/cache"
 	"github.com/mgoodness/eve-trader/internal/engine"
@@ -12,7 +13,8 @@ import (
 // the sell plan's funded recommendations and reason-tagged pending entries,
 // the AllocationParams the sell-first allocation ran against, and the live
 // PilotFacts the run's fees and order limit were derived from. Warnings
-// carries the pipeline's route-lookup warnings.
+// carries the route-lookup warnings plus the reconciliation outcomes and
+// sell-plan skips worth a pilot's attention.
 type Allocation struct {
 	FundedBuys   []engine.BuyRecommendation
 	UnfundedBuys []engine.BuyRecommendation
@@ -57,18 +59,19 @@ func AllocatedUniverse(ctx context.Context, cfg Config) (Allocation, error) {
 		return Allocation{}, err
 	}
 
-	sells, pending, _ := engine.RecommendSells(engine.SellInputs{
-		Lots:           reconciledLots,
-		OpenOrders:     openOrders,
-		Notes:          notes,
-		Universe:       universe,
-		TradeStationID: cfg.TradeStationID,
-		Fees:           facts.Fees,
-		Delta:          cfg.Values.Delta,
-		TargetMargin:   cfg.Values.TargetMargin,
+	// The reconciled ledger already carries this run's reservations and sell
+	// finalizations (engine.Reconcile persisted them via
+	// reconcileLedgerWithPilotFacts), so RecommendSells only reads them.
+	sells, pending, sellWarnings := engine.RecommendSells(engine.SellInputs{
+		Lots:         reconciledLots,
+		Notes:        notes,
+		Universe:     universe,
+		Fees:         facts.Fees,
+		Delta:        cfg.Values.Delta,
+		TargetMargin: cfg.Values.TargetMargin,
 	})
 
-	reservedSlots, reservedBudget := reservedResources(openOrders)
+	reservedSlots, reservedBudget := engine.ReservedResources(openOrders)
 	params := engine.AllocationParams{
 		Budget:         cfg.Values.Budget,
 		OrderLimit:     facts.OrderLimit,
@@ -83,6 +86,12 @@ func AllocatedUniverse(ctx context.Context, cfg Config) (Allocation, error) {
 	fundedSells, pendingSells, fundedBuys, unfundedBuys := engine.AllocateWithSells(sells, ranked, params)
 	pending = append(pending, pendingSells...)
 
+	// Reconciliation outcomes worth a pilot's attention on every run (spec §7;
+	// ADR 0003), plus held types the sell plan had to skip, go to stderr via
+	// the returned warnings.
+	warnings = append(warnings, reconcileWarnings(notes)...)
+	warnings = append(warnings, sellWarnings...)
+
 	return Allocation{
 		FundedBuys:   fundedBuys,
 		UnfundedBuys: unfundedBuys,
@@ -95,20 +104,17 @@ func AllocatedUniverse(ctx context.Context, cfg Config) (Allocation, error) {
 	}, nil
 }
 
-// reservedResources computes the resources the pilot's currently-open
-// orders already commit, before this run allocates anything (spec §13
-// steps 1–2; ticket #49): every open order — buy or sell, any origin —
-// costs one order-limit slot, and only open buy orders cost budget, at their
-// current escrow price × volume_remain (already-paid broker fees are sunk,
-// open sells carry no escrow). An unknown-outcome lot is absent from the
-// orders snapshot, so it reserves nothing; its unresolved fate surfaces as
-// Pending instead (ADR 0003).
-func reservedResources(orders []engine.CharacterOrder) (slots int, budget float64) {
-	slots = len(orders)
-	for _, o := range orders {
-		if o.IsBuyOrder {
-			budget += o.Price * float64(o.VolumeRemain)
+// reconcileWarnings renders the reconciliation outcomes worth surfacing on
+// the recommend path (spec §7; ADR 0003): a drift clamp, a released
+// reservation, an unresolvable outcome, or a completed sale. Routine buy-side
+// partial and full fills are not warnings.
+func reconcileWarnings(notes []engine.ReconcileNote) []string {
+	var warnings []string
+	for _, n := range notes {
+		switch n.Kind {
+		case engine.NoteDriftClamp, engine.NoteTerminal, engine.NoteUnknown, engine.NoteSold:
+			warnings = append(warnings, fmt.Sprintf("warning: %s", n.Detail))
 		}
 	}
-	return slots, budget
+	return warnings
 }

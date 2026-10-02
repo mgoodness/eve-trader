@@ -252,7 +252,7 @@ func TestNewResultJSONContractKeepsRoiPerDayAndPerLotSellDetail(t *testing.T) {
 		[]engine.SellRecommendation{{
 			TypeID: 34, Name: "Tritanium", Quantity: 980, SellPrice: 812, NetMargin: 0.42,
 			PricedQuantity: 630, UnpricedQuantity: 350, NetProceeds: 1,
-			Lots: []engine.SellLot{{LotID: "lot-1", Quantity: 630, AcquisitionPrice: engine.Float64Ptr(660)}},
+			Lots: []engine.SellLot{{LotID: "lot-1", Quantity: 630, AcquisitionPrice: pricePtr(660)}},
 		}}, nil,
 		engine.Meta{Params: engine.RunParams{Budget: 1}},
 		engine.AllocationParams{Budget: 1, OrderLimit: 21})

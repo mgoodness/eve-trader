@@ -128,11 +128,11 @@ func renderExcluded(b *strings.Builder, result engine.Result, explain bool) {
 }
 
 // pendingReasons is the render order for the pending summary (spec §11).
-var pendingReasons = []string{
+var pendingReasons = []engine.PendingReason{
 	engine.PendingAwaitingBuyFill,
 	engine.PendingAwaitingSellFill,
 	engine.PendingUnknownOutcome,
-	engine.PendingOrderLimit,
+	engine.PendingOrderLimitExhausted,
 }
 
 // columnAlignment is a table column's horizontal alignment: left for text,

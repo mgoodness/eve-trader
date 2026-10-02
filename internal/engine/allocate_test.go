@@ -396,8 +396,8 @@ func TestAllocateWithSellsMarksExcessSellRecommendationsPendingWithTheOrderLimit
 	if got.TypeID != 3 || got.Quantity != 30 {
 		t.Errorf("got pending %+v, want type 3 with its 30 held units", got)
 	}
-	if got.Reason != engine.PendingOrderLimit {
-		t.Errorf("got Reason=%q, want %q", got.Reason, engine.PendingOrderLimit)
+	if got.Reason != engine.PendingOrderLimitExhausted {
+		t.Errorf("got Reason=%q, want %q", got.Reason, engine.PendingOrderLimitExhausted)
 	}
 	if got.Detail == "" {
 		t.Errorf("got empty Detail, want a human-readable reason the slot was withheld")
@@ -462,5 +462,26 @@ func TestAllocateWithSellsShrinksTheBuyBudgetByReservedBuyEscrow(t *testing.T) {
 	}
 	if len(unfundedBuys) != 1 || unfundedBuys[0].Units != 0 {
 		t.Fatalf("got unfundedBuys=%+v, want the buy unfunded with zero units", unfundedBuys)
+	}
+}
+
+// TestReservedResourcesCountsEveryOpenOrderAndOnlyBuyEscrow pins spec §13
+// steps 1–2: every open order reserves an order-limit slot, and only open buy
+// orders reserve budget, at price × volume_remain.
+func TestReservedResourcesCountsEveryOpenOrderAndOnlyBuyEscrow(t *testing.T) {
+	orders := []engine.CharacterOrder{
+		{OrderID: 1, IsBuyOrder: true, Price: 200, VolumeRemain: 50},
+		{OrderID: 2, IsBuyOrder: false, Price: 300, VolumeRemain: 100},
+		{OrderID: 3, IsBuyOrder: true, Price: 1000, VolumeRemain: 5},
+	}
+
+	slots, budget := engine.ReservedResources(orders)
+
+	if slots != 3 {
+		t.Errorf("got slots=%d, want 3 (every open order reserves one)", slots)
+	}
+	want := 200.0*50 + 1000.0*5
+	if budget != want {
+		t.Errorf("got budget=%v, want %v (only open buys escrow, open sells do not)", budget, want)
 	}
 }

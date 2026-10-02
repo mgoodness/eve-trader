@@ -33,6 +33,24 @@ type AllocationParams struct {
 	ReservedBudget float64
 }
 
+// ReservedResources computes the resources the pilot's currently-open orders
+// already commit, before this run allocates anything (spec §13 steps 1–2;
+// ticket #49): every open order — buy or sell, any origin — costs one
+// order-limit slot, and only open buy orders cost budget, at their current
+// escrow price × volume_remain (already-paid broker fees are sunk, open
+// sells carry no escrow). An unknown-outcome lot is absent from the orders
+// snapshot, so it reserves nothing; its unresolved fate surfaces as Pending
+// instead (ADR 0003).
+func ReservedResources(orders []CharacterOrder) (slots int, budget float64) {
+	slots = len(orders)
+	for _, o := range orders {
+		if o.IsBuyOrder {
+			budget += o.Price * float64(o.VolumeRemain)
+		}
+	}
+	return slots, budget
+}
+
 // AllocateWithSells allocates sell recommendations first, then new buy
 // recommendations, against the resources left after ReservedSlots and
 // ReservedBudget (spec §13; ADR 0007). Sells cost one order slot each and no
@@ -53,7 +71,7 @@ func AllocateWithSells(sells []SellRecommendation, buys []BuyRecommendation, par
 			pendingSells = append(pendingSells, Pending{
 				TypeID:   sell.TypeID,
 				Name:     sell.Name,
-				Reason:   PendingOrderLimit,
+				Reason:   PendingOrderLimitExhausted,
 				Quantity: sell.Quantity,
 				Detail: fmt.Sprintf("no free order-limit slot: %d of %d slots reserved before this sell (orders already open plus higher-priority sells)",
 					params.ReservedSlots+len(fundedSells), params.OrderLimit),

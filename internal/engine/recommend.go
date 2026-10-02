@@ -3,7 +3,7 @@ package engine
 import "time"
 
 // Fees are the pilot's fee rates, read live from ESI skills and standings
-// (spec §4; ticket #16). Broker is charged on both legs of a round trip;
+// (spec §4; ticket #16). Broker is charged on each order leg, buy and sell;
 // SalesTax on the sell leg only (spec §4).
 type Fees struct {
 	Broker   float64 `json:"broker"`

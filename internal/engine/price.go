@@ -66,8 +66,8 @@ func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, sales
 	// spreads. Allocate applies the same floor to the real order value.
 	brokerBuy := math.Max(brokerRate*buyPrice, MinBrokerFee)
 	brokerSell := math.Max(brokerRate*sellPrice, MinBrokerFee)
-	profitPerUnit := sellPrice - buyPrice - brokerBuy - brokerSell - salesTaxRate*sellPrice
-	netMargin := profitPerUnit / sellPrice
+	netMargin := netMarginFromCost(buyPrice, sellPrice, brokerBuy, brokerSell, salesTaxRate)
+	profitPerUnit := netMargin * sellPrice
 
 	return BuyRecommendation{
 		TypeID:        typeID,
@@ -81,4 +81,18 @@ func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, sales
 		ProfitPerUnit: profitPerUnit,
 		Flags:         []string{},
 	}, true
+}
+
+// netMarginFromCost is the spec §9/§12 net-margin arithmetic in one place:
+// given the cost basis B (a front-of-queue buy price for a buy
+// recommendation, a lot's acquisition price for a sell recommendation) and
+// the front-of-queue sell price S*, it returns
+// (S* − B − brokerBuy − brokerSell − tax·S*)/S*, where brokerBuy and
+// brokerSell are the broker charges on the two legs. A zero sell price yields
+// zero rather than dividing by zero.
+func netMarginFromCost(cost, sellPrice, brokerBuy, brokerSell, salesTax float64) float64 {
+	if sellPrice == 0 {
+		return 0
+	}
+	return (sellPrice - cost - brokerBuy - brokerSell - salesTax*sellPrice) / sellPrice
 }
