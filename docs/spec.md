@@ -46,10 +46,14 @@ The vocabulary is `CONTEXT.md`; it is normative for this spec. The load-bearing
 distinction is the two books:
 
 - **Effective buy book** — every buy order whose range covers the trade station,
-  wherever it sits in Heimatar. These are the competing bids, and also the prices
-  at which held stock can be sold immediately.
-- **Effective sell book** — the sell orders located at the trade station. Sellers
-  elsewhere do not compete for the trade station's buyers.
+  wherever it sits in Heimatar, **excluding the pilot's own open orders**
+  ([Exclude the pilot's own open orders from best bid/ask
+  pricing](https://github.com/mgoodness/eve-trader/issues/51)). These are the
+  competing bids, and also the prices at which held stock can be sold
+  immediately.
+- **Effective sell book** — the sell orders located at the trade station,
+  **excluding the pilot's own open orders**. Sellers elsewhere do not compete
+  for the trade station's buyers, and neither does the pilot themselves.
 
 **(v1.1)** A second load-bearing distinction: the **ledger** versus raw ESI
 assets. The pilot's hangar at the trade station holds trading stock *and*
@@ -104,7 +108,14 @@ the universe from it. `/markets/{region}/types/` is **not** used — it is pagin
   `station`/`solarsystem`/`region` by match, numeric by
   `jumpDistance(system, 30002510) ≤ range`;
 - **NPC-station locations only**; structure-located orders are excluded (~20% of
-  buys).
+  buys);
+- **(v1.1)** the pilot's own open orders (personal or corp-wallet, matched
+  exactly by `OrderID` against the character's open-orders feed) are excluded
+  from both books before either is built, so a type's best bid/ask is never
+  the pilot's own order — re-pricing `B*`/`S*` against it would bid or ask
+  against no real competitor (ticket #51). A side left empty by this
+  exclusion drops the type from the candidate universe the same way any
+  other one-sided type already does.
 
 **Jump distances.** From `GET /route/{system}/30002510/` (cached 86,400 s), computed
 once per run for systems not yet cached. A failed lookup means the order does
@@ -508,6 +519,7 @@ markets, and hauling.
 | 13 Allocation | [Decide the allocation model](https://github.com/mgoodness/eve-trader/issues/5), [allocation granularity](https://github.com/mgoodness/eve-trader/issues/12), [allocation of pre-existing orders](https://github.com/mgoodness/eve-trader/issues/41) |
 | 14 Output | [Prototype: CLI output contract](https://github.com/mgoodness/eve-trader/issues/6), [Prototype: inventory-aware CLI output contract](https://github.com/mgoodness/eve-trader/issues/42) |
 | 6 Data pipeline | [Decide the ESI data sync](https://github.com/mgoodness/eve-trader/issues/3), [range coverage model](https://github.com/mgoodness/eve-trader/issues/10) |
+| 3 Domain model, 6 Data pipeline | [Exclude the pilot's own open orders from best bid/ask pricing](https://github.com/mgoodness/eve-trader/issues/51) |
 | 17 Acceptance | [Decide ex-post validation](https://github.com/mgoodness/eve-trader/issues/11) |
 | 16 Config & state | [Decide the CLI config and state surface](https://github.com/mgoodness/eve-trader/issues/13) |
 

@@ -13,14 +13,27 @@ type CandidateType struct {
 
 // Universe groups a region-orders feed by type and computes each type's
 // effective sell and buy books (spec §3, §6). Every type with at least one
-// region order gets an entry, in ascending type_id order, even if one side
-// of its book is empty. jumpDistances is forwarded to EffectiveBuyBook
-// unchanged for numeric-range coverage (ticket #18); pass nil if the
-// caller has none (no numeric-range order will cover).
-func Universe(orders []Order, tradeStationID int64, tradeSystemID int32, jumpDistances map[int32]int) []CandidateType {
+// region order (after the ownOrderIDs exclusion below) gets an entry, in
+// ascending type_id order, even if one side of its book is empty.
+// jumpDistances is forwarded to EffectiveBuyBook unchanged for
+// numeric-range coverage (ticket #18); pass nil if the caller has none (no
+// numeric-range order will cover).
+//
+// ownOrderIDs excludes the pilot's own open orders, by OrderID, before
+// either book is built (ticket #51): the effective buy and sell books are
+// the *competing* bids and asks, so an order the pilot placed themselves is
+// never a candidate for the best bid/ask a type's own order gets priced
+// against. Pass nil if the caller has none to exclude. A type whose only
+// order on a side is excluded this way ends up with an empty book on that
+// side, the same as if no one had an order there at all -- it is not
+// special-cased.
+func Universe(orders []Order, tradeStationID int64, tradeSystemID int32, jumpDistances map[int32]int, ownOrderIDs map[int64]bool) []CandidateType {
 	byType := make(map[int32][]Order)
 	var typeIDs []int32
 	for _, o := range orders {
+		if ownOrderIDs[o.OrderID] {
+			continue
+		}
 		if _, ok := byType[o.TypeID]; !ok {
 			typeIDs = append(typeIDs, o.TypeID)
 		}

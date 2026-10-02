@@ -178,6 +178,37 @@ func reconcileLedgerWithPilotFacts(ctx context.Context, cfg Config, store *cache
 	return updated, notes, orders, nil
 }
 
+// ownOrderIDSet fetches the pilot's currently open orders
+// (cachedCharacterOrders) and returns their OrderIDs as a set (ticket #51):
+// engine.Universe excludes any region or station order whose id is in this
+// set from the effective books it builds, so a type never gets priced
+// against the pilot's own order. Personal and corp-wallet orders
+// (CharacterOrder.IsCorporation) are both included -- v1 has no
+// multi-character/corp distinction to make excluding only one of them
+// meaningful. A caller that already minted this run's access token (any
+// PilotFacts) passes it here rather than triggering a second refresh-token
+// exchange; the result is a live ESI call only the first time in a run --
+// every later call within the route's 1,200s TTL (characterOrdersTTL) hits
+// the warm disk cache instead.
+func ownOrderIDSet(ctx context.Context, cfg Config, store *cache.Store, facts PilotFacts) (map[int64]bool, error) {
+	client := esi.NewClient(esi.ClientOptions{
+		BaseURL:    cfg.ESIBaseURL,
+		UserAgent:  cfg.UserAgent,
+		CompatDate: cfg.CompatDate,
+	})
+
+	orders, err := cachedCharacterOrders(ctx, store, client, facts.CharacterID, facts.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make(map[int64]bool, len(orders))
+	for _, o := range orders {
+		ids[o.OrderID] = true
+	}
+	return ids, nil
+}
+
 func cachedCharacterOrders(ctx context.Context, store *cache.Store, client *esi.Client, characterID int32, accessToken string) ([]engine.CharacterOrder, error) {
 	key := fmt.Sprintf("character-orders:%d", characterID)
 	if body, fresh, err := store.Get(key); err == nil && fresh {

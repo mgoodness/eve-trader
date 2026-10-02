@@ -46,13 +46,15 @@ _Avoid_: route length, distance
 
 **Effective buy book**:
 Every buy order whose range covers the trade station, wherever it sits in the
-region. These are the competing bids, and also the prices at which held stock
-can be sold immediately without hauling.
+region, **excluding the pilot's own open orders**. These are the competing
+bids, and also the prices at which held stock can be sold immediately without
+hauling.
 _Avoid_: buy orders (unqualified)
 
 **Effective sell book**:
-The sell orders located at the trade station. Sellers at other stations are not
-competitors for the trade station's buyers.
+The sell orders located at the trade station, **excluding the pilot's own open
+orders**. Sellers at other stations are not competitors for the trade
+station's buyers, and neither is the pilot themselves.
 _Avoid_: sell orders (unqualified)
 
 **Best bid**:

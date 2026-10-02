@@ -17,8 +17,10 @@ import (
 // fail a filter. Numeric-range buy orders are evaluated against an exact
 // jump distance, resolved and cached by JumpDistances (ticket #18); any
 // warnings it records (failed route lookups) are returned alongside the
-// universe.
-func CandidateUniverse(ctx context.Context, cfg Config) ([]engine.CandidateType, []string, error) {
+// universe. ownOrderIDs excludes the pilot's own open orders from both
+// effective books (ticket #51; engine.Universe); pass nil if the caller has
+// none to exclude.
+func CandidateUniverse(ctx context.Context, cfg Config, ownOrderIDs map[int64]bool) ([]engine.CandidateType, []string, error) {
 	orders, err := RegionFeed(ctx, cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetching region feed: %w", err)
@@ -30,7 +32,7 @@ func CandidateUniverse(ctx context.Context, cfg Config) ([]engine.CandidateType,
 	}
 	jumpDistances, warnings := JumpDistances(ctx, cfg, store, orders)
 
-	universe := engine.Universe(orders, cfg.TradeStationID, cfg.TradeSystemID, jumpDistances)
+	universe := engine.Universe(orders, cfg.TradeStationID, cfg.TradeSystemID, jumpDistances, ownOrderIDs)
 	return universe, warnings, nil
 }
 
@@ -42,9 +44,10 @@ func CandidateUniverse(ctx context.Context, cfg Config) ([]engine.CandidateType,
 // by JumpDistances (ticket #18); any warnings it records (failed route
 // lookups) are returned alongside the universe. It is the foundation later
 // tickets build on: the book-only/history-dependent filter funnel (#19,
-// #20) starts from this set.
-func TwoSidedUniverse(ctx context.Context, cfg Config) ([]engine.CandidateType, []string, error) {
-	universe, warnings, err := CandidateUniverse(ctx, cfg)
+// #20) starts from this set. ownOrderIDs is forwarded to CandidateUniverse
+// unchanged (ticket #51); pass nil if the caller has none to exclude.
+func TwoSidedUniverse(ctx context.Context, cfg Config, ownOrderIDs map[int64]bool) ([]engine.CandidateType, []string, error) {
+	universe, warnings, err := CandidateUniverse(ctx, cfg, ownOrderIDs)
 	if err != nil {
 		return nil, nil, err
 	}

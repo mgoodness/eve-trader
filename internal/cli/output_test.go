@@ -529,6 +529,54 @@ func TestBuildResultSurfacesReconcileWarnings(t *testing.T) {
 // TestBuildResultWarnsWhenAHeldTypeHasNoStationAsk proves a held type the
 // sell plan cannot price is surfaced rather than silently dropped (spec §7
 // decision 7): it has no recommendation, but a warning names it.
+// TestBuildResultExcludesThePilotsOwnStationSellOrderFromSellPricing pins
+// ticket #51's sell-side half: the pilot's own open sell order is excluded
+// from the effective sell book CandidateUniverse builds (spec \u00a73, \u00a76),
+// so the remaining held-unlisted stock a new sell recommendation covers is
+// priced against a competing station ask, not the pilot's own order.
+func TestBuildResultExcludesThePilotsOwnStationSellOrderFromSellPricing(t *testing.T) {
+	history := map[int32][]map[string]any{
+		11399: historyDays(30, 100, 30000, 15000),
+		40:    historyDays(30, 1000, 3000, 500),
+	}
+	// Type 50: two station sell orders -- the pilot's own (20, the cheaper
+	// price) covering 100 of the held 300 units, and a stranger's (21).
+	orders := append(rankedFilteredOrders(),
+		map[string]any{"order_id": 20, "type_id": 50, "location_id": 60004588, "system_id": 30002510, "volume_total": 100, "volume_remain": 100, "min_volume": 1, "price": 100.0, "is_buy_order": false, "range": "region"},
+		map[string]any{"order_id": 21, "type_id": 50, "location_id": 60004588, "system_id": 30002510, "volume_total": 50, "volume_remain": 50, "min_volume": 1, "price": 150.0, "is_buy_order": false, "range": "region"},
+	)
+	server, _ := sellFixtureServer(t, orders, history, ledgerFixture{
+		orders: []map[string]any{openOrderMap(20, 50, false, 100, 100)},
+		assets: []map[string]any{
+			{"item_id": 5, "type_id": 50, "quantity": 300, "location_id": 60004588, "location_type": "station", "location_flag": "Hangar"},
+		},
+	})
+	cfg := testConfig(t, server.URL)
+	cfg.Values.Budget = 150_000_000
+	writeLedgerFile(t, cfg, []engine.Lot{cliHeldLot("lot-50", 50, 300, float64Ptr(10))})
+
+	result, _, err := cli.BuildResult(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("BuildResult: %v", err)
+	}
+
+	var rec *engine.SellRecommendation
+	for i := range result.SellRecommendations {
+		if result.SellRecommendations[i].TypeID == 50 {
+			rec = &result.SellRecommendations[i]
+		}
+	}
+	if rec == nil {
+		t.Fatalf("got no sell recommendation for type 50, want one for the 200 units the pilot's own order (20) doesn't already reserve")
+	}
+	if rec.Quantity != 200 {
+		t.Errorf("got Quantity=%d, want 200 (300 held - 100 reserved by the pilot's own order 20)", rec.Quantity)
+	}
+	if rec.SellPrice != 150-cfg.Values.Delta {
+		t.Errorf("got SellPrice=%v, want the stranger's station ask 150 - delta %v, not the pilot's own order's price (100)", rec.SellPrice, cfg.Values.Delta)
+	}
+}
+
 func TestBuildResultWarnsWhenAHeldTypeHasNoStationAsk(t *testing.T) {
 	history := map[int32][]map[string]any{
 		11399: historyDays(30, 100, 30000, 15000),

@@ -110,7 +110,9 @@ func loadAcceptanceSnapshot(t *testing.T) *acceptanceSnapshot {
 		jumpDistances[id] = len(route) - 1
 	}
 
-	snap.twoSided = engine.TwoSided(engine.Universe(orders, cfg.TradeStationID, cfg.TradeSystemID, jumpDistances))
+	// The frozen snapshot carries no open character orders (acceptanceServer
+	// serves an empty list below), so nothing is excluded here (ticket #51).
+	snap.twoSided = engine.TwoSided(engine.Universe(orders, cfg.TradeStationID, cfg.TradeSystemID, jumpDistances, nil))
 	if len(snap.twoSided) == 0 {
 		t.Fatal("frozen snapshot has no two-sided types; it is empty or corrupt")
 	}

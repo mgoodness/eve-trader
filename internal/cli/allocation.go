@@ -45,16 +45,33 @@ func AllocatedUniverse(ctx context.Context, cfg Config) (Allocation, error) {
 	if err != nil {
 		return Allocation{}, err
 	}
+
+	// The pilot's own open orders, read early here rather than only inside
+	// reconcileLedgerWithPilotFacts below (spec §3, §6; ticket #51): the
+	// second CandidateUniverse call below (sell pricing) needs their order
+	// ids excluded from the effective books, the same way RankedUniverse's
+	// funnel already excluded them for buy pricing (BookFilteredUniverse).
+	// This reuses facts' access token rather than minting a second one, and
+	// reconcileLedgerWithPilotFacts's own fetch just below hits the warm
+	// cache this call populates.
+	ownOrderIDs, err := ownOrderIDSet(ctx, cfg, store, facts)
+	if err != nil {
+		return Allocation{}, err
+	}
+
 	reconciledLots, notes, openOrders, err := reconcileLedgerWithPilotFacts(ctx, cfg, store, facts)
 	if err != nil {
 		return Allocation{}, err
 	}
 
 	// Sell recommendations price against the station best ask in the full
-	// candidate universe (spec §7 step 1). Its route-lookup warnings are the
-	// same ones RankedUniverse already surfaced from the cached feed, so
-	// they are dropped here rather than reported twice.
-	universe, _, err := CandidateUniverse(ctx, cfg)
+	// candidate universe (spec §7 step 1), with the pilot's own open orders
+	// excluded from it (ticket #51) so a held type's station sell order is
+	// never priced -- or margin-gated (spec §12) -- against itself. Its
+	// route-lookup warnings are the same ones RankedUniverse already
+	// surfaced from the cached feed, so they are dropped here rather than
+	// reported twice.
+	universe, _, err := CandidateUniverse(ctx, cfg, ownOrderIDs)
 	if err != nil {
 		return Allocation{}, err
 	}

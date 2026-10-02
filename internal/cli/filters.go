@@ -20,12 +20,15 @@ import (
 // survivors this returns. It also returns the pilot's live facts (fees,
 // order limit) read to do so, so later stages (allocation, ticket #22)
 // don't trigger a second live ESI call for the same run.
+//
+// The pilot's own open orders are read here too, before TwoSidedUniverse
+// builds the effective books (ticket #51; engine.Universe), so a type whose
+// only competing bid or ask is the pilot's own order is never priced
+// against itself. AllocatedUniverse's own direct CandidateUniverse call
+// (sell pricing) rebuilds the same set separately -- it hits the warm
+// 1,200s-TTL disk cache this fetch just populated rather than a second
+// live ESI call.
 func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.BuyRecommendation, []engine.Excluded, PilotFacts, []string, error) {
-	twoSided, warnings, err := TwoSidedUniverse(ctx, cfg)
-	if err != nil {
-		return nil, nil, PilotFacts{}, nil, err
-	}
-
 	store, err := cache.Open(cfg.CacheDir)
 	if err != nil {
 		return nil, nil, PilotFacts{}, nil, err
@@ -33,6 +36,15 @@ func BookFilteredUniverse(ctx context.Context, cfg Config) ([]engine.BuyRecommen
 	facts, err := pilotFacts(ctx, cfg, store)
 	if err != nil {
 		return nil, nil, PilotFacts{}, nil, fmt.Errorf("reading live pilot facts: %w", err)
+	}
+	ownOrderIDs, err := ownOrderIDSet(ctx, cfg, store, facts)
+	if err != nil {
+		return nil, nil, PilotFacts{}, nil, err
+	}
+
+	twoSided, warnings, err := TwoSidedUniverse(ctx, cfg, ownOrderIDs)
+	if err != nil {
+		return nil, nil, PilotFacts{}, nil, err
 	}
 
 	params := engine.Params{

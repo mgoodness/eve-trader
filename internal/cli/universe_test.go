@@ -71,7 +71,7 @@ func TestTwoSidedUniverseCoversANumericRangeBuyOrderByExactJumpDistance(t *testi
 	server := universeAndRouteFixtureServer(t, orders)
 	cfg := testConfig(t, server.URL)
 
-	twoSided, warnings, err := cli.TwoSidedUniverse(t.Context(), cfg)
+	twoSided, warnings, err := cli.TwoSidedUniverse(t.Context(), cfg, nil)
 	if err != nil {
 		t.Fatalf("TwoSidedUniverse: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestTwoSidedUniverseWarnsAndExcludesOnAFailedRouteLookup(t *testing.T) {
 	server := universeAndRouteFixtureServer(t, orders)
 	cfg := testConfig(t, server.URL)
 
-	twoSided, warnings, err := cli.TwoSidedUniverse(t.Context(), cfg)
+	twoSided, warnings, err := cli.TwoSidedUniverse(t.Context(), cfg, nil)
 	if err != nil {
 		t.Fatalf("TwoSidedUniverse: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestTwoSidedUniverseFetchesTheWholeFeedAndReportsTwoSidedTypesOnly(t *testi
 	server := universeFixtureServer(t)
 	cfg := testConfig(t, server.URL)
 
-	twoSided, warnings, err := cli.TwoSidedUniverse(t.Context(), cfg)
+	twoSided, warnings, err := cli.TwoSidedUniverse(t.Context(), cfg, nil)
 	if err != nil {
 		t.Fatalf("TwoSidedUniverse: %v", err)
 	}
