@@ -163,7 +163,7 @@ func TestBootstrapSeededLotIsVisibleViaTheLedgerCommand(t *testing.T) {
 		t.Fatalf("ledger command: %v", err)
 	}
 
-	for _, want := range []string{lots[0].LotID, "34", "held-unlisted", "100"} {
+	for _, want := range []string{lots[0].LotID, "Tritanium", "held-unlisted", "100"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("ledger output %q missing %q", out.String(), want)
 		}

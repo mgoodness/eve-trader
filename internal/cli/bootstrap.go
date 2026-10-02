@@ -86,8 +86,9 @@ func RunBootstrap(ctx context.Context, cfg Config, in io.Reader, out io.Writer) 
 		return err
 	}
 
+	names, _ := cachedTypeNames(ctx, store, client, lotTypeIDs(seeded))
 	fmt.Fprintln(out, "Seeded:")
-	return renderLots(out, seeded)
+	return renderLots(out, seeded, names)
 }
 
 // confirmUntracked prints the untracked holdings and asks the pilot to

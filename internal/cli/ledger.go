@@ -255,24 +255,36 @@ func newLedgerCmd(cfg Config) *cobra.Command {
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s\n", n.Kind, n.Detail)
 			}
-			return renderLots(cmd.OutOrStdout(), lots)
+			names, nameWarnings, err := populateLotNames(cmd.Context(), cfg, lots)
+			if err != nil {
+				return err
+			}
+			for _, w := range nameWarnings {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+			}
+			return renderLots(cmd.OutOrStdout(), lots, names)
 		},
 	}
 }
 
-// renderLots prints the ledger as a dense table: id, type, status, total
-// and available quantity, and acquisition price ("-" for a seeded lot with
-// no known cost, ADR 0004).
-func renderLots(w io.Writer, lots []engine.Lot) error {
+// renderLots prints the ledger as a dense table: id, item, status, total
+// and available quantity, when it was acquired, and acquisition price ("-"
+// for a seeded lot with no known cost, ADR 0004). names resolves TypeID to
+// a display name (internal/cli/names.go); displayName's "type <id>"
+// placeholder covers an id the lookup genuinely couldn't resolve. The lot
+// id itself stays as the opaque, exact identifier — ACQUIRED is the
+// human-scannable way to tell same-item lots apart.
+func renderLots(w io.Writer, lots []engine.Lot, names map[int32]string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "LOT ID\tTYPE ID\tSTATUS\tTOTAL\tAVAILABLE\tACQUISITION PRICE")
+	fmt.Fprintln(tw, "LOT ID\tITEM\tSTATUS\tTOTAL\tAVAILABLE\tACQUIRED\tACQUISITION PRICE")
 	for _, lot := range lots {
 		price := "-"
 		if lot.AcquisitionPrice != nil {
 			price = strconv.FormatFloat(*lot.AcquisitionPrice, 'f', 2, 64)
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%d\t%d\t%s\n",
-			lot.LotID, lot.TypeID, lot.Status, lot.QuantityTotal, lot.QuantityAvailable, price)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+			lot.LotID, displayName(lot.TypeID, names[lot.TypeID]), lot.Status, lot.QuantityTotal, lot.QuantityAvailable,
+			lot.AcquiredAt.Format("2006-01-02"), price)
 	}
 	return tw.Flush()
 }

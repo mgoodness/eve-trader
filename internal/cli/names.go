@@ -150,3 +150,46 @@ func applyTypeNames(names map[int32]string, funded, unfunded []engine.BuyRecomme
 func typeNameKey(typeID int32) string {
 	return fmt.Sprintf("type-name:%d", typeID)
 }
+
+// populateLotNames resolves every distinct type id across lots to a
+// display name via the same batched, disk-cached POST /universe/names/
+// lookup populateNames uses (spec §7's ledger). A Lot carries no Name field
+// of its own — ledger.json is persisted state, not a display contract — so
+// the resolved names live only in this call's returned map, for renderLots
+// to look up at render time. The lookup is best-effort, matching
+// populateNames: a failed batch becomes a warning, and displayName's
+// "type <id>" placeholder covers whatever stays unresolved.
+func populateLotNames(ctx context.Context, cfg Config, lots []engine.Lot) (map[int32]string, []string, error) {
+	ids := lotTypeIDs(lots)
+	if len(ids) == 0 {
+		return nil, nil, nil
+	}
+
+	store, err := cache.Open(cfg.CacheDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	client := esi.NewClient(esi.ClientOptions{
+		BaseURL:    cfg.ESIBaseURL,
+		UserAgent:  cfg.UserAgent,
+		CompatDate: cfg.CompatDate,
+	})
+
+	names, warnings := cachedTypeNames(ctx, store, client, ids)
+	return names, warnings, nil
+}
+
+// lotTypeIDs returns the distinct type ids across lots, in first-seen
+// order.
+func lotTypeIDs(lots []engine.Lot) []int32 {
+	seen := make(map[int32]struct{}, len(lots))
+	ids := make([]int32, 0, len(lots))
+	for _, lot := range lots {
+		if _, ok := seen[lot.TypeID]; ok {
+			continue
+		}
+		seen[lot.TypeID] = struct{}{}
+		ids = append(ids, lot.TypeID)
+	}
+	return ids
+}

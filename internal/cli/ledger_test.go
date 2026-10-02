@@ -59,6 +59,18 @@ func ledgerFixtureServer(t *testing.T, fx ledgerFixture) (*httptest.Server, func
 			json.NewEncoder(w).Encode(map[string]any{"skills": pilotSkills()})
 		case strings.HasSuffix(r.URL.Path, "/standings/"):
 			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.URL.Path == "/universe/names/":
+			var ids []int32
+			if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+				t.Errorf("decoding /universe/names/ request: %v", err)
+			}
+			resolved := make([]map[string]any, 0, len(ids))
+			for _, id := range ids {
+				if name, ok := fixtureTypeNames[id]; ok {
+					resolved = append(resolved, map[string]any{"id": id, "name": name, "category": "inventory_type"})
+				}
+			}
+			json.NewEncoder(w).Encode(resolved)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -259,7 +271,11 @@ func TestLedgerCommandPrintsLotsWithoutARecommendRun(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"seeded-34", "34", "held-unlisted", "100"} {
+	// The ITEM column shows Tritanium's resolved name, not its bare type id
+	// (the batched /universe/names/ lookup, internal/cli/names.go), and
+	// ACQUIRED shows the lot's acquisition date — a human-scannable way to
+	// tell lots apart that the opaque LOT ID column isn't meant for.
+	for _, want := range []string{"seeded-34", "Tritanium", "held-unlisted", "100", "2024-01-01"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ledger output %q missing %q", out, want)
 		}
