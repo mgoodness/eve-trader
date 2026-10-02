@@ -211,6 +211,13 @@ flagging a sale that clears less than the target net margin. Distinct from
 committed capital, which also counts escrow and fees.
 _Avoid_: cost basis
 
+**Seeded lot**:
+A lot entered directly at held-unlisted, via an explicit pilot action rather
+than a tracked buy order, for stock that was already in the hangar before the
+ledger existed. Carries no acquisition price, so it never triggers the
+margin-gate flag.
+_Avoid_: imported lot, legacy stock
+
 **Ledger drift**:
 A mismatch between the ledger's held-stock quantity for a lot and what ESI's
 live assets actually show at the trade station; resolved by clamping the
