@@ -223,3 +223,194 @@ func TestRenderTableWithExplainListsPendingItemsAndDetails(t *testing.T) {
 		t.Errorf("got table %q, want the pending detail under --explain", out)
 	}
 }
+
+// TestRenderTableRendersSellsInTheirWorstShortfallFirstOrder proves the
+// renderer presents the sell table in the order RecommendSells established
+// (spec §11): worst margin shortfall first. The renderer does not re-sort —
+// the order is the data's invariant — so this guards against a future
+// renderer reordering the rows.
+func TestRenderTableRendersSellsInTheirWorstShortfallFirstOrder(t *testing.T) {
+	result := engine.Result{
+		SellRecommendations: []engine.SellRecommendation{
+			{TypeID: 34, Name: "WorstFirst", Quantity: 1, NetMargin: 0.01, PricedQuantity: 1, BelowTarget: true},
+			{TypeID: 35, Name: "LessBad", Quantity: 1, NetMargin: 0.09, PricedQuantity: 1, BelowTarget: true},
+		},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	first := strings.Index(out, "WorstFirst")
+	second := strings.Index(out, "LessBad")
+	if first == -1 || second == -1 {
+		t.Fatalf("got table %q, want both sell rows", out)
+	}
+	if first > second {
+		t.Errorf("got LessBad before WorstFirst, want the worst margin shortfall first (spec §11)")
+	}
+}
+
+// TestRenderTableShowsSellLotCount proves the sell table's last column
+// carries how many ledger lots the recommendation draws from (spec §14).
+func TestRenderTableShowsSellLotCount(t *testing.T) {
+	result := engine.Result{
+		SellRecommendations: []engine.SellRecommendation{{
+			TypeID: 34, Name: "Tritanium", Quantity: 980, SellPrice: 812,
+			NetMargin: 0.42, PricedQuantity: 980, NetProceeds: 1,
+			Lots: []engine.SellLot{{LotID: "a"}, {LotID: "b"}, {LotID: "c"}},
+		}},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if !strings.Contains(line, "Tritanium") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if last := fields[len(fields)-1]; last != "3" {
+			t.Errorf("got row %q ending in %q, want the lot count 3", line, last)
+		}
+		return
+	}
+	t.Fatalf("got table %q, want a Tritanium sell row", out)
+}
+
+// TestRenderTableSplitsBudgetAndOrderLimitIntoReservedAvailableAndUsed pins
+// spec §14's summary: a second run shouldn't feel like it arbitrarily has
+// less room, so both resources are shown split into what pre-existing open
+// orders reserved, what was therefore available, and what this run used.
+func TestRenderTableSplitsBudgetAndOrderLimitIntoReservedAvailableAndUsed(t *testing.T) {
+	result := engine.Result{
+		Summary: engine.Summary{
+			Budget:                   150_000_000,
+			BudgetReservedByExisting: 12_400_000,
+			BudgetAvailable:          137_600_000,
+			CommittedCapital:         118_300_000,
+			OrderLimit:               21,
+			OrdersReservedByExisting: 5,
+			OrdersAvailable:          16,
+			OrdersUsed:               9,
+		},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	if !strings.Contains(out, "SUMMARY") {
+		t.Fatalf("got table %q, want a summary section", out)
+	}
+	for _, want := range []string{
+		"reserved by existing orders: 12,400,000",
+		"available: 137,600,000",
+		"used this run: 118,300,000",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("got table %q, want the budget split %q", out, want)
+		}
+	}
+	for _, want := range []string{
+		"reserved by existing orders: 5",
+		"available: 16",
+		"used this run: 9",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("got table %q, want the order-limit split %q", out, want)
+		}
+	}
+}
+
+// TestRenderTableSizesSellColumnsFromTheLongestRowCell pins the prototype's
+// hard-won lesson (spec §14): the partial-pricing notation ("X% on Y/Zu") is
+// longer than its "net margin" header, so a renderer that sized the margin
+// column from the header would shove every column after it out of line. The
+// widths must come from the row data, and the row must still carry its lot
+// count in a column of its own.
+func TestRenderTableSizesSellColumnsFromTheLongestRowCell(t *testing.T) {
+	result := engine.Result{
+		SellRecommendations: []engine.SellRecommendation{
+			{
+				TypeID: 34, Name: "Tritanium", Quantity: 980, SellPrice: 812,
+				NetMargin: 0.4228, PricedQuantity: 630, UnpricedQuantity: 350,
+				BelowTarget: true, NetProceeds: 790_000,
+				Lots: []engine.SellLot{{LotID: "a"}, {LotID: "b"}},
+			},
+			{
+				TypeID: 35, Name: "Morphite", Quantity: 100, SellPrice: 24_080,
+				NetMargin: 0.183, PricedQuantity: 100, NetProceeds: 2_300_000,
+				Lots: []engine.SellLot{{LotID: "c"}},
+			},
+		},
+	}
+
+	out := cli.RenderTable(result, false)
+	lines := strings.Split(out, "\n")
+
+	headerIdx, longRowIdx := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "net margin") {
+			headerIdx = i
+		}
+		if strings.Contains(line, "42.3% on 630/980u") {
+			longRowIdx = i
+		}
+	}
+	if headerIdx == -1 || longRowIdx == -1 {
+		t.Fatalf("got table %q, want a sell-table header and a partially priced row", out)
+	}
+
+	// If widths were hardcoded to the header, the partial-pricing cell's
+	// extra 7 characters would push the row's flag column 7 columns later.
+	headerFlag := strings.Index(lines[headerIdx], "flag")
+	rowFlag := strings.Index(lines[longRowIdx], "below target")
+	if headerFlag != rowFlag {
+		t.Errorf("got flag column at offset %d in the header but %d in the partial-priced row; want the column sized from the longest cell",
+			headerFlag, rowFlag)
+	}
+
+	// The row still ends with its lot count.
+	fields := strings.Fields(lines[longRowIdx])
+	if len(fields) == 0 || fields[0] != "Tritanium" {
+		t.Fatalf("got row fields %q, want the Tritanium row first", fields)
+	}
+	if last := fields[len(fields)-1]; last != "2" {
+		t.Errorf("got row %q ending in %q, want the lot count 2", lines[longRowIdx], last)
+	}
+}
+
+// TestRenderTableSizesBuyColumnsFromTheLongestRowCell pins the same
+// data-driven discipline for the buy table: an item name longer than any
+// fixed guess must widen the name column for the header too, not shove the
+// row's later columns out of line.
+func TestRenderTableSizesBuyColumnsFromTheLongestRowCell(t *testing.T) {
+	longName := "A Very Long Item Name That Overflows Any Fixed Column"
+	result := engine.Result{
+		BuyRecommendations: []engine.BuyRecommendation{{
+			TypeID: 11399, Name: longName, BuyPrice: 1_720_100, SellPrice: 3_697_900,
+			NetMargin: 0.4791, Units: 17, CommittedCapital: 30_623_290,
+			ExpectedDailyProfit: 10_039_780,
+		}},
+	}
+
+	out := cli.RenderTable(result, false)
+	lines := strings.Split(out, "\n")
+
+	headerIdx, rowIdx := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "ITEM") {
+			headerIdx = i
+		}
+		if strings.Contains(line, longName) {
+			rowIdx = i
+		}
+	}
+	if headerIdx == -1 || rowIdx == -1 {
+		t.Fatalf("got table %q, want a buy-table header and the long-name row", out)
+	}
+	// The last column is right-aligned with no trailing padding, so a table
+	// sized from the row data has header and row of equal length; a hardcoded
+	// name width would let the row run long.
+	if len(lines[headerIdx]) != len(lines[rowIdx]) {
+		t.Errorf("got header %q (len %d) and row %q (len %d); want equal widths from the row data",
+			lines[headerIdx], len(lines[headerIdx]), lines[rowIdx], len(lines[rowIdx]))
+	}
+}

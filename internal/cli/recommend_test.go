@@ -122,6 +122,37 @@ func TestRecommendCommandRendersAnEmptyUniverseCleanlyWithoutCrashing(t *testing
 	}
 }
 
+// TestRecommendJSONCommandEmitsEmptyArraysNotNullForAnEmptyUniverse pins the
+// machine contract's []-not-null guarantee on the command's own output (spec
+// §14): an adapter consuming --json from a zero-candidate run still gets an
+// array for every list, ready to index.
+func TestRecommendJSONCommandEmitsEmptyArraysNotNullForAnEmptyUniverse(t *testing.T) {
+	server, _ := historyFilteredFixtureServer(t, nil, nil)
+	root := cli.NewRootCmd(testConfig(t, server.URL))
+	var out strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"recommend", "--json"})
+
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var result engine.Result
+	if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, out.String())
+	}
+	// Unmarshalling null yields a nil slice, [] an empty non-nil one, so
+	// this distinguishes the contract's arrays from a null placeholder.
+	if result.BuyRecommendations == nil || result.Unfunded == nil || result.Excluded == nil ||
+		result.SellRecommendations == nil || result.Pending == nil {
+		t.Errorf("got a nil list in %+v, want [] not null:\n%s", result, out.String())
+	}
+	if strings.Contains(out.String(), ": null") {
+		t.Errorf("got JSON containing a null list, want []:\n%s", out.String())
+	}
+}
+
 func TestRecommendJSONCommandEmitsTheJSONResult(t *testing.T) {
 	history := map[int32][]map[string]any{11399: historyDays(30, 100, 30000, 15000)}
 	server, _ := historyFilteredFixtureServer(t, historyFilteredOrders(), history)

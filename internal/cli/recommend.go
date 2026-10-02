@@ -228,7 +228,7 @@ func newRecommendCmd(cfg Config) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "emit the JSON result instead of the default table")
-	cmd.Flags().BoolVar(&explain, "explain", false, "list excluded items and their reasons in the table")
+	cmd.Flags().BoolVar(&explain, "explain", false, "list excluded and pending items and their reasons in the table")
 	cmd.Flags().Int64Var(&values.Budget, "budget", values.Budget, "trading budget, self-reported ISK")
 	cmd.Flags().Float64Var(&values.TargetMargin, "target-margin", values.TargetMargin, "minimum net margin a candidate must clear to be recommended")
 	cmd.Flags().Float64Var(&values.Delta, "delta", values.Delta, "aggression tick (\u03b4), in ISK, for front-of-queue prices")
