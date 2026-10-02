@@ -29,7 +29,7 @@ type HistoryRecord struct {
 // (BuyRecommendation.BestBid/BestAsk) and the trade record together.
 type CandidateHistory struct {
 	BuyRecommendation BuyRecommendation
-	History        []HistoryRecord
+	History           []HistoryRecord
 }
 
 // historyLayout is the date format ESI market history uses (research

@@ -12,7 +12,7 @@ import (
 func historyCandidate(typeID int32, bestBid, bestAsk float64, history []engine.HistoryRecord) engine.CandidateHistory {
 	return engine.CandidateHistory{
 		BuyRecommendation: engine.BuyRecommendation{TypeID: typeID, BestBid: bestBid, BestAsk: bestAsk},
-		History:        history,
+		History:           history,
 	}
 }
 
