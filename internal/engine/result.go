@@ -11,8 +11,9 @@ import "sort"
 // function: Summary is entirely derived from the funded buy set, the
 // funded sell set, and params, so it is the seam the CLI's table and JSON
 // renderers (ticket #23) both build on. A nil budget never divides by
-// zero: BudgetUsed is 0 when Budget is 0, and every output slice is
-// non-nil so JSON emits [] rather than null. Available budget and slots
+// zero: BudgetUsed is 0 when Budget is 0, and every output slice — the
+// top-level arrays and each sell recommendation's lots — is non-nil so
+// JSON emits [] rather than null. Available budget and slots
 // never go negative, even when pre-existing orders reserved more than the
 // stated budget or order limit.
 //
@@ -36,6 +37,11 @@ func NewResult(funded, unfunded []BuyRecommendation, excluded []Excluded, sells 
 	}
 	if sells == nil {
 		sells = []SellRecommendation{}
+	}
+	for i := range sells {
+		if sells[i].Lots == nil {
+			sells[i].Lots = []SellLot{}
+		}
 	}
 	if pending == nil {
 		pending = []Pending{}

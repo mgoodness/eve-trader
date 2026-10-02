@@ -211,3 +211,82 @@ func TestNewResultNeverReportsNegativeAvailableResources(t *testing.T) {
 		t.Errorf("got OrdersAvailable=%d, want 0", result.Summary.OrdersAvailable)
 	}
 }
+
+// TestNewResultJSONContractEmitsEmptyArraysNotNull confirms the stable
+// machine contract (spec §14): every list is present and marshals as []
+// rather than null on a zero-recommendation run, so an adapter can index it
+// without a nil guard.
+func TestNewResultJSONContractEmitsEmptyArraysNotNull(t *testing.T) {
+	result := engine.NewResult(nil, nil, nil, nil, nil,
+		engine.Meta{Params: engine.RunParams{Budget: 1}},
+		engine.AllocationParams{Budget: 1, OrderLimit: 21})
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	for _, key := range []string{
+		`"buy_recommendations":[]`,
+		`"unfunded":[]`,
+		`"excluded":[]`,
+		`"sell_recommendations":[]`,
+		`"pending":[]`,
+	} {
+		if !strings.Contains(string(body), key) {
+			t.Errorf("got JSON without %s:\n%s", key, body)
+		}
+	}
+	if strings.Contains(string(body), `:null`) {
+		t.Errorf("got JSON containing a null list, want []:\n%s", body)
+	}
+}
+
+// TestNewResultJSONContractKeepsRoiPerDayAndPerLotSellDetail confirms the
+// two pieces of the contract the default table deliberately omits: the buy
+// side keeps roi_per_day for adapters, and each sell recommendation carries
+// its per-lot detail (lot id, quantity, acquisition price).
+func TestNewResultJSONContractKeepsRoiPerDayAndPerLotSellDetail(t *testing.T) {
+	result := engine.NewResult(
+		[]engine.BuyRecommendation{{TypeID: 11399, Name: "Morphite", RoiPerDay: 0.2}},
+		nil, nil,
+		[]engine.SellRecommendation{{
+			TypeID: 34, Name: "Tritanium", Quantity: 980, SellPrice: 812, NetMargin: 0.42,
+			PricedQuantity: 630, UnpricedQuantity: 350, NetProceeds: 1,
+			Lots: []engine.SellLot{{LotID: "lot-1", Quantity: 630, AcquisitionPrice: engine.Float64Ptr(660)}},
+		}}, nil,
+		engine.Meta{Params: engine.RunParams{Budget: 1}},
+		engine.AllocationParams{Budget: 1, OrderLimit: 21})
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(body), `"roi_per_day":0.2`) {
+		t.Errorf("got JSON without roi_per_day, want it kept for adapters:\n%s", body)
+	}
+	wantLots := `"lots":[{"lot_id":"lot-1","quantity":630,"acquisition_price":660}]`
+	if !strings.Contains(string(body), wantLots) {
+		t.Errorf("got JSON without per-lot sell detail %s:\n%s", wantLots, body)
+	}
+}
+
+// TestNewResultRendersEmptySellLotsAsEmptyArraysNotNull pins the same []-not-
+// null contract one level down: a sell recommendation with no lots still
+// marshals its lots array as [], not null (spec §14).
+func TestNewResultRendersEmptySellLotsAsEmptyArraysNotNull(t *testing.T) {
+	result := engine.NewResult(nil, nil, nil,
+		[]engine.SellRecommendation{{TypeID: 34, Name: "Tritanium"}}, nil,
+		engine.Meta{Params: engine.RunParams{Budget: 1}},
+		engine.AllocationParams{Budget: 1, OrderLimit: 21})
+
+	if result.SellRecommendations[0].Lots == nil {
+		t.Errorf("got nil Lots, want a non-nil slice so JSON emits [] not null")
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(body), `"lots":null`) {
+		t.Errorf("got JSON containing \"lots\":null, want []:\n%s", body)
+	}
+}
