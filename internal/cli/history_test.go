@@ -51,6 +51,14 @@ func historyFilteredFixtureServer(t *testing.T, orders []map[string]any, history
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/orders/history/"):
+			// Ledger reconciliation routes: no open orders, no history, no
+			// assets in this fixture, so the sell plan has nothing to build.
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/orders/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case strings.HasPrefix(r.URL.Path, "/characters/") && strings.HasSuffix(r.URL.Path, "/assets/"):
+			json.NewEncoder(w).Encode([]map[string]any{})
 		case strings.Contains(r.URL.Path, "/history"):
 			typeID, _ := strconv.Atoi(r.URL.Query().Get("type_id"))
 			mu.Lock()

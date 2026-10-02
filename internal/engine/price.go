@@ -2,10 +2,10 @@ package engine
 
 import "math"
 
-// Recommendation is a candidate paired with the front-of-queue prices, the
+// BuyRecommendation is a candidate paired with the front-of-queue prices, the
 // resulting net margin, and (in later tickets) a unit quantity. Field names
 // match the JSON output contract (spec §11).
-type Recommendation struct {
+type BuyRecommendation struct {
 	TypeID        int32   `json:"type_id"`
 	Name          string  `json:"name"`
 	BestBid       float64 `json:"best_bid"`
@@ -51,10 +51,10 @@ const FlagPartialFill = "partial_fill"
 // candidate: B* = best bid + δ, S* = best ask − δ, and the net margin at the
 // given broker and sales-tax rates. It reports ok=false when the tick would
 // cross the book (2δ ≥ spread, so B* ≥ S*) — no recommendation is possible.
-func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, salesTaxRate float64) (Recommendation, bool) {
+func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, salesTaxRate float64) (BuyRecommendation, bool) {
 	spread := bestAsk - bestBid
 	if 2*delta >= spread {
-		return Recommendation{}, false
+		return BuyRecommendation{}, false
 	}
 
 	buyPrice := bestBid + delta
@@ -69,7 +69,7 @@ func Price(typeID int32, name string, bestBid, bestAsk, delta, brokerRate, sales
 	profitPerUnit := sellPrice - buyPrice - brokerBuy - brokerSell - salesTaxRate*sellPrice
 	netMargin := profitPerUnit / sellPrice
 
-	return Recommendation{
+	return BuyRecommendation{
 		TypeID:        typeID,
 		Name:          name,
 		BestBid:       bestBid,

@@ -83,9 +83,9 @@ func ThinBook(universe []CandidateType, minOrders int, bandPct float64) (passed 
 // (2δ ≥ spread, Price's ok=false) and a net margin below targetMargin
 // (spec §7 step 8). universe must already be two-sided; a candidate missing
 // either side is skipped rather than crashing. Candidate names aren't known
-// at this layer (Excluded/Recommendation get an empty Name; the caller
+// at this layer (Excluded/BuyRecommendation get an empty Name; the caller
 // resolves it).
-func PricingRule(universe []CandidateType, delta, brokerRate, salesTaxRate, targetMargin float64) (recommendations []Recommendation, excluded []Excluded) {
+func PricingRule(universe []CandidateType, delta, brokerRate, salesTaxRate, targetMargin float64) (recommendations []BuyRecommendation, excluded []Excluded) {
 	for _, c := range universe {
 		bestBid, haveBid := bestPrice(c.BuyBook)
 		bestAsk, haveAsk := bestPrice(c.SellBook)
@@ -141,7 +141,7 @@ type FilterThresholds struct {
 // later filters never see it. params.Delta and params.Fees drive the
 // pricing rule; params.TargetMargin and params.Filters are this stage's
 // thresholds (spec §13).
-func FilterBookOnly(universe []CandidateType, params Params) (recommendations []Recommendation, excluded []Excluded) {
+func FilterBookOnly(universe []CandidateType, params Params) (recommendations []BuyRecommendation, excluded []Excluded) {
 	afterCeiling, ceilingExcluded := GrossMarginCeiling(universe, params.Filters.GrossMarginCeiling)
 	excluded = append(excluded, ceilingExcluded...)
 

@@ -3,13 +3,15 @@ package engine
 import "sort"
 
 // NewResult assembles the whole-universe Result (spec §11) from the
-// allocation stage's funded and unfunded sets (ticket #22) and the filter
-// layer's excluded set (ticket #19, #20), plus the run's Meta (generated
-// at, region/station, echoed params, live fees) and the pilot's live
-// order limit (ticket #16). It is a pure function: Summary is entirely
-// derived from funded/unfunded/excluded and meta.Params.Budget, so it is
-// the seam the CLI's table and JSON renderers (ticket #23) both build on.
-// A nil budget never divides by zero: BudgetUsed is 0 when Budget is 0.
+// allocation stage's funded and unfunded buy sets (ticket #22), the filter
+// layer's excluded set (ticket #19, #20), and the sell plan's
+// recommendations and pending entries (ticket #47), plus the run's Meta
+// (generated at, region/station, echoed params, live fees) and the pilot's
+// live order limit (ticket #16). It is a pure function: Summary is entirely
+// derived from the funded buy set and meta.Params.Budget, so it is the seam
+// the CLI's table and JSON renderers (ticket #23) both build on. A nil
+// budget never divides by zero: BudgetUsed is 0 when Budget is 0, and every
+// output slice is non-nil so JSON emits [] rather than null.
 //
 // funded and unfunded arrive from Allocate sorted by capital-efficiency
 // density (spec §10 step 1), not by expected daily profit; the output
@@ -17,7 +19,7 @@ import "sort"
 // so NewResult re-sorts both, descending, before returning them —
 // ensuring the JSON contract's recommendations/unfunded arrays carry the
 // same invariant the table displays.
-func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta, orderLimit int) Result {
+func NewResult(funded, unfunded []BuyRecommendation, excluded []Excluded, sells []SellRecommendation, pending []Pending, meta Meta, orderLimit int) Result {
 	funded = sortedByExpectedDailyProfit(funded)
 	unfunded = sortedByExpectedDailyProfit(unfunded)
 	for i := range funded {
@@ -28,6 +30,12 @@ func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta
 	}
 	if excluded == nil {
 		excluded = []Excluded{}
+	}
+	if sells == nil {
+		sells = []SellRecommendation{}
+	}
+	if pending == nil {
+		pending = []Pending{}
 	}
 
 	var committedCapital, expectedDailyProfit float64
@@ -54,16 +62,18 @@ func NewResult(funded, unfunded []Recommendation, excluded []Excluded, meta Meta
 			Excluded:            len(excluded),
 			Unfunded:            len(unfunded),
 		},
-		Recommendations: funded,
-		Unfunded:        unfunded,
-		Excluded:        excluded,
+		BuyRecommendations:  funded,
+		Unfunded:            unfunded,
+		Excluded:            excluded,
+		SellRecommendations: sells,
+		Pending:             pending,
 	}
 }
 
 // sortedByExpectedDailyProfit returns a copy of recs sorted by expected
 // daily profit, descending, never nil (so JSON emits [] rather than null).
-func sortedByExpectedDailyProfit(recs []Recommendation) []Recommendation {
-	sorted := make([]Recommendation, len(recs))
+func sortedByExpectedDailyProfit(recs []BuyRecommendation) []BuyRecommendation {
+	sorted := make([]BuyRecommendation, len(recs))
 	copy(sorted, recs)
 	sortByExpectedDailyProfitDescending(sorted)
 	return sorted
@@ -73,7 +83,7 @@ func sortedByExpectedDailyProfit(recs []Recommendation) []Recommendation {
 // expected daily profit, stably. Rank and NewResult share this one
 // comparator so the JSON contract's ordering invariant (spec §11) lives in
 // exactly one place.
-func sortByExpectedDailyProfitDescending(recs []Recommendation) {
+func sortByExpectedDailyProfitDescending(recs []BuyRecommendation) {
 	sort.SliceStable(recs, func(i, j int) bool {
 		return recs[i].ExpectedDailyProfit > recs[j].ExpectedDailyProfit
 	})

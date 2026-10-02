@@ -26,10 +26,10 @@ type HistoryRecord struct {
 // CandidateHistory pairs a book-only survivor (already priced by
 // FilterBookOnly) with its market history, so the history-dependent filters
 // (spec §7 steps 3, 4, 7) can read both the front-of-queue prices
-// (Recommendation.BestBid/BestAsk) and the trade record together.
+// (BuyRecommendation.BestBid/BestAsk) and the trade record together.
 type CandidateHistory struct {
-	Recommendation Recommendation
-	History        []HistoryRecord
+	BuyRecommendation BuyRecommendation
+	History           []HistoryRecord
 }
 
 // historyLayout is the date format ESI market history uses (research
@@ -107,7 +107,7 @@ func MinHistory(candidates []CandidateHistory, minDays int) (passed []CandidateH
 	for _, c := range candidates {
 		if distinctHistoryDays(historyWindow(c.History)) < minDays {
 			excluded = append(excluded, Excluded{
-				TypeID: c.Recommendation.TypeID,
+				TypeID: c.BuyRecommendation.TypeID,
 				Reason: "history too short: fewer than the required days of recent trade history",
 			})
 			continue
@@ -126,7 +126,7 @@ func MinHistory(candidates []CandidateHistory, minDays int) (passed []CandidateH
 // fetches history only for those survivors (spec \u00a76). Each dropped
 // candidate carries exactly one exclusion reason: the first filter it fails,
 // in order, wins, and later filters never see it.
-func FilterByHistory(candidates []CandidateHistory, thresholds FilterThresholds) (recommendations []Recommendation, excluded []Excluded) {
+func FilterByHistory(candidates []CandidateHistory, thresholds FilterThresholds) (recommendations []BuyRecommendation, excluded []Excluded) {
 	afterMinHistory, minHistoryExcluded := MinHistory(candidates, thresholds.MinHistoryDays)
 	excluded = append(excluded, minHistoryExcluded...)
 
@@ -137,7 +137,7 @@ func FilterByHistory(candidates []CandidateHistory, thresholds FilterThresholds)
 	excluded = append(excluded, priceBandExcluded...)
 
 	for _, c := range afterPriceBand {
-		rec := c.Recommendation
+		rec := c.BuyRecommendation
 		rec.AverageDailyVolume = AverageDailyVolume(c.History)
 		recommendations = append(recommendations, rec)
 	}
@@ -158,7 +158,7 @@ func AverageDailyVolume(history []HistoryRecord) float64 {
 }
 
 // PriceBand reports the subset of candidates whose front-of-queue prices
-// (Recommendation.BestBid/BestAsk) sit within the 30-day low/high band
+// (BuyRecommendation.BestBid/BestAsk) sit within the 30-day low/high band
 // (spec \u00a77 step 7): best bid must not fall below lowMult times the
 // trailing 30-day low (historyWindow's minimum Lowest), and best ask must
 // not rise above highMult times the trailing 30-day high (historyWindow's
@@ -182,16 +182,16 @@ func PriceBand(candidates []CandidateHistory, lowMult, highMult float64) (passed
 			}
 		}
 
-		if c.Recommendation.BestBid < lowMult*low {
+		if c.BuyRecommendation.BestBid < lowMult*low {
 			excluded = append(excluded, Excluded{
-				TypeID: c.Recommendation.TypeID,
+				TypeID: c.BuyRecommendation.TypeID,
 				Reason: "price band: best bid is below the configured multiple of the 30-day low",
 			})
 			continue
 		}
-		if c.Recommendation.BestAsk > highMult*high {
+		if c.BuyRecommendation.BestAsk > highMult*high {
 			excluded = append(excluded, Excluded{
-				TypeID: c.Recommendation.TypeID,
+				TypeID: c.BuyRecommendation.TypeID,
 				Reason: "price band: best ask is above the configured multiple of the 30-day high",
 			})
 			continue
@@ -213,7 +213,7 @@ func MinLiquidity(candidates []CandidateHistory, minADV float64) (passed []Candi
 		adv := AverageDailyVolume(c.History)
 		if adv < minADV {
 			excluded = append(excluded, Excluded{
-				TypeID: c.Recommendation.TypeID,
+				TypeID: c.BuyRecommendation.TypeID,
 				Reason: "liquidity too low: 30-day average daily volume is below the configured minimum",
 			})
 			continue

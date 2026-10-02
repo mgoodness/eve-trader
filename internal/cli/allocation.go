@@ -14,7 +14,7 @@ import (
 // order limit were derived from, so a caller building the output
 // contract's Meta (ticket #23) doesn't trigger a second live ESI call for
 // the same run. This is the seam the output contract (#23) builds on.
-func AllocatedUniverse(ctx context.Context, cfg Config) (funded, unfunded []engine.Recommendation, excluded []engine.Excluded, facts PilotFacts, warnings []string, err error) {
+func AllocatedUniverse(ctx context.Context, cfg Config) (funded, unfunded []engine.BuyRecommendation, excluded []engine.Excluded, facts PilotFacts, warnings []string, err error) {
 	ranked, excluded, facts, warnings, err := RankedUniverse(ctx, cfg)
 	if err != nil {
 		return nil, nil, nil, PilotFacts{}, nil, err

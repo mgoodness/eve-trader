@@ -36,7 +36,7 @@ func TestPriceComputesFrontOfQueuePricesAndNetMargin(t *testing.T) {
 		t.Fatalf("Price reported not-recommendable for a wide, uncrossed spread")
 	}
 
-	want := engine.Recommendation{
+	want := engine.BuyRecommendation{
 		TypeID:        11399,
 		Name:          "Morphite",
 		BestBid:       18220,

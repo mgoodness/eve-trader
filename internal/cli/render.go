@@ -10,13 +10,14 @@ import (
 
 // RenderTable renders a Result as the default dense table (spec §11): exact
 // ISK, sorted by expected daily profit (NewResult's invariant — this
-// function performs no sorting of its own), with the three
+// function performs no sorting of its own), with the buy side's three
 // always-distinguishable groups — funded recommendations, not funded by
-// budget, and excluded by filters — accounting for every two-sided type. A
+// budget, and excluded by filters — accounting for every two-sided type,
+// followed by the sell recommendations and the pending bucket (spec §14). A
 // zero-value Result (no candidates at all) renders cleanly: every section
 // still prints its (0) count rather than panicking or omitting itself.
-// explain expands the excluded section from a bare count to each item and
-// its reason (spec §11 point 3, --explain).
+// explain expands the excluded and pending sections from bare counts to
+// each item and its reason (spec §11 point 3, --explain).
 func RenderTable(result engine.Result, explain bool) string {
 	var b strings.Builder
 
@@ -29,27 +30,29 @@ func RenderTable(result engine.Result, explain bool) string {
 	renderFunded(&b, result)
 	renderUnfunded(&b, result)
 	renderExcluded(&b, result, explain)
+	renderSells(&b, result)
+	renderPending(&b, result, explain)
 
 	return b.String()
 }
 
 func renderFunded(b *strings.Builder, result engine.Result) {
-	fmt.Fprintf(b, "FUNDED RECOMMENDATIONS (%d)\n", len(result.Recommendations))
-	if len(result.Recommendations) == 0 {
+	fmt.Fprintf(b, "FUNDED RECOMMENDATIONS (%d)\n", len(result.BuyRecommendations))
+	if len(result.BuyRecommendations) == 0 {
 		b.WriteString("  none\n\n")
 		return
 	}
 
 	fmt.Fprintf(b, "  %3s  %-30s%14s%14s%9s%9s%16s%15s\n",
 		"#", "ITEM", "BUY", "SELL", "MARGIN", "UNITS", "COMMITTED", "EDP/DAY")
-	for i, rec := range result.Recommendations {
+	for i, rec := range result.BuyRecommendations {
 		fmt.Fprintf(b, "  %3d  %-30s%14s%14s%9s%9s%16s%15s\n",
 			i+1, displayName(rec.TypeID, rec.Name), formatISK(rec.BuyPrice), formatISK(rec.SellPrice),
 			formatPercent(rec.NetMargin, 1), formatISK(float64(rec.Units)),
 			formatISK(rec.CommittedCapital), formatISK(rec.ExpectedDailyProfit))
 	}
 	fmt.Fprintf(b, "\n  %d flip(s) \u00b7 committed %s / %s ISK (%s of budget) \u00b7 total EDP/day %s\n\n",
-		len(result.Recommendations), formatISK(result.Summary.CommittedCapital), formatISK(float64(result.Summary.Budget)),
+		len(result.BuyRecommendations), formatISK(result.Summary.CommittedCapital), formatISK(float64(result.Summary.Budget)),
 		formatPercent(result.Summary.BudgetUsed, 1), formatISK(result.Summary.ExpectedDailyProfit))
 }
 
@@ -70,17 +73,88 @@ func renderUnfunded(b *strings.Builder, result engine.Result) {
 
 func renderExcluded(b *strings.Builder, result engine.Result, explain bool) {
 	if !explain {
-		fmt.Fprintf(b, "EXCLUDED BY FILTERS (%d) \u2014 pass --explain for the item list and reasons\n", len(result.Excluded))
+		fmt.Fprintf(b, "EXCLUDED BY FILTERS (%d) \u2014 pass --explain for the item list and reasons\n\n", len(result.Excluded))
 		return
 	}
 
 	fmt.Fprintf(b, "EXCLUDED BY FILTERS (%d)\n", len(result.Excluded))
 	if len(result.Excluded) == 0 {
-		b.WriteString("  none\n")
+		b.WriteString("  none\n\n")
 		return
 	}
 	for _, e := range result.Excluded {
 		fmt.Fprintf(b, "  %-34s %s\n", displayName(e.TypeID, e.Name), e.Reason)
+	}
+	b.WriteString("\n")
+}
+
+// pendingReasons is the render order for the pending summary (spec §11).
+var pendingReasons = []string{
+	engine.PendingAwaitingBuyFill,
+	engine.PendingAwaitingSellFill,
+	engine.PendingUnknownOutcome,
+	engine.PendingOrderLimit,
+}
+
+// renderSells prints the sell recommendations (spec §11, §14): item, the
+// full held quantity, the front-of-queue sell price, the §12 net margin
+// (annotated "X% on Y/Zu" when only part of the quantity is priced), net
+// proceeds, and a below-target flag. A zero-value Result prints a (0) count
+// cleanly. This is a deliberately basic layout; #50 restyles it to the
+// prototype's variant A and computes column widths from the rows.
+func renderSells(b *strings.Builder, result engine.Result) {
+	fmt.Fprintf(b, "SELL RECOMMENDATIONS (%d)\n", len(result.SellRecommendations))
+	if len(result.SellRecommendations) == 0 {
+		b.WriteString("  none\n\n")
+		return
+	}
+
+	fmt.Fprintf(b, "  %3s  %-30s%10s%14s%15s%16s  %s\n",
+		"#", "ITEM", "UNITS", "SELL", "MARGIN", "NET PROCEEDS", "FLAG")
+	for i, rec := range result.SellRecommendations {
+		margin := formatPercent(rec.NetMargin, 1)
+		if rec.UnpricedQuantity > 0 {
+			margin = fmt.Sprintf("%s on %d/%du", margin, rec.PricedQuantity, rec.Quantity)
+		}
+		flag := ""
+		if rec.BelowTarget {
+			flag = "below target"
+		}
+		fmt.Fprintf(b, "  %3d  %-30s%10s%14s%15s%16s  %s\n",
+			i+1, displayName(rec.TypeID, rec.Name), formatISK(float64(rec.Quantity)),
+			formatISK(rec.SellPrice), margin, formatISK(rec.NetProceeds), flag)
+	}
+	fmt.Fprintf(b, "\n  %d held type(s) to list\n\n", len(result.SellRecommendations))
+}
+
+// renderPending prints the pending bucket (spec §11, §14): a count by reason
+// by default, expanded to each entry's item, reason, and detail under
+// --explain (decision 10 — the same convention as the excluded bucket).
+func renderPending(b *strings.Builder, result engine.Result, explain bool) {
+	if !explain {
+		fmt.Fprintf(b, "PENDING (%d)", len(result.Pending))
+		for _, reason := range pendingReasons {
+			count := 0
+			for _, p := range result.Pending {
+				if p.Reason == reason {
+					count++
+				}
+			}
+			if count > 0 {
+				fmt.Fprintf(b, " \u00b7 %s %d", reason, count)
+			}
+		}
+		b.WriteString(" — pass --explain for the item list and reasons\n")
+		return
+	}
+
+	fmt.Fprintf(b, "PENDING (%d)\n", len(result.Pending))
+	if len(result.Pending) == 0 {
+		b.WriteString("  none\n")
+		return
+	}
+	for _, p := range result.Pending {
+		fmt.Fprintf(b, "  %-34s %-18s %s\n", displayName(p.TypeID, p.Name), p.Reason, p.Detail)
 	}
 }
 

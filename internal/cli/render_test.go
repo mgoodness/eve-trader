@@ -8,9 +8,9 @@ import (
 	"github.com/mgoodness/eve-trader/internal/engine"
 )
 
-func TestRenderTableListsFundedRecommendationsInExactISKSortedByExpectedDailyProfit(t *testing.T) {
+func TestRenderTableListsFundedBuyRecommendationsInExactISKSortedByExpectedDailyProfit(t *testing.T) {
 	result := engine.Result{
-		Recommendations: []engine.Recommendation{
+		BuyRecommendations: []engine.BuyRecommendation{
 			{Name: "1600mm Steel Plates II", BuyPrice: 1720100, SellPrice: 3697900, NetMargin: 0.4791, Units: 17, CommittedCapital: 30623290, ExpectedDailyProfit: 10039780},
 			{Name: "Gyrostabilizer II", BuyPrice: 700200, SellPrice: 927200, NetMargin: 0.1847, Units: 110, CommittedCapital: 79707210, ExpectedDailyProfit: 6280853},
 		},
@@ -40,7 +40,7 @@ func TestRenderTableShowsNotFundedByBudgetSectionWithMarginEDPAndCapitalNeeded(t
 			Fees:   engine.Fees{Broker: 0.018},
 			Params: engine.RunParams{CaptureRate: 0.20, HorizonDays: 3},
 		},
-		Unfunded: []engine.Recommendation{
+		Unfunded: []engine.BuyRecommendation{
 			{Name: "Multispectrum Shield Hardener II", BuyPrice: 1415100, SellPrice: 1994900, NetMargin: 0.2313, ExpectedDailyProfit: 11379279, AverageDailyVolume: 124.9},
 		},
 	}
@@ -105,8 +105,8 @@ func TestRenderTableFallsBackToTheTypeIDWhenNameIsNotYetResolved(t *testing.T) {
 	// whole-universe pipeline yet; the table must still identify every
 	// item rather than rendering a blank column.
 	result := engine.Result{
-		Recommendations: []engine.Recommendation{{TypeID: 11399, ExpectedDailyProfit: 1}},
-		Excluded:        []engine.Excluded{{TypeID: 34, Reason: "thin book"}},
+		BuyRecommendations: []engine.BuyRecommendation{{TypeID: 11399, ExpectedDailyProfit: 1}},
+		Excluded:           []engine.Excluded{{TypeID: 34, Reason: "thin book"}},
 	}
 
 	out := cli.RenderTable(result, true)
@@ -127,5 +127,99 @@ func TestRenderTableRendersAnEmptyResultCleanly(t *testing.T) {
 	}
 	if strings.Contains(out, "NaN") || strings.Contains(out, "Inf") {
 		t.Errorf("got table %q, want no NaN/Inf from dividing by a zero budget", out)
+	}
+}
+
+func TestRenderTableShowsSellRecommendationsWithMarginAndProceeds(t *testing.T) {
+	result := engine.Result{
+		SellRecommendations: []engine.SellRecommendation{{
+			TypeID: 34, Name: "Tritanium", Quantity: 250, SellPrice: 100,
+			NetMargin: 0.42275, PricedQuantity: 250, NetProceeds: 23_100,
+		}},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	if !strings.Contains(out, "SELL RECOMMENDATIONS") {
+		t.Fatalf("got table %q, want a sell recommendations section", out)
+	}
+	if !strings.Contains(out, "Tritanium") {
+		t.Errorf("got table %q, want the held item named", out)
+	}
+	if !strings.Contains(out, "42.3%") {
+		t.Errorf("got table %q, want the net margin (42.3%%)", out)
+	}
+	if !strings.Contains(out, "23,100") {
+		t.Errorf("got table %q, want the net proceeds", out)
+	}
+}
+
+func TestRenderTableAnnotatesPartiallyPricedSellRecommendations(t *testing.T) {
+	result := engine.Result{
+		SellRecommendations: []engine.SellRecommendation{{
+			TypeID: 34, Name: "Tritanium", Quantity: 980, SellPrice: 100,
+			NetMargin: 0.42, PricedQuantity: 630, UnpricedQuantity: 350, NetProceeds: 1,
+		}},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	if !strings.Contains(out, "630/980u") {
+		t.Errorf("got table %q, want the partial-pricing \"X%% on 630/980u\" notation", out)
+	}
+}
+
+func TestRenderTableFlagsABelowTargetSellRecommendation(t *testing.T) {
+	result := engine.Result{
+		SellRecommendations: []engine.SellRecommendation{{
+			TypeID: 34, Name: "Tritanium", Quantity: 100, SellPrice: 100,
+			NetMargin: 0.01, PricedQuantity: 100, BelowTarget: true, NetProceeds: 1,
+		}},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	if !strings.Contains(out, "below target") {
+		t.Errorf("got table %q, want the below-target flag shown without hiding the row", out)
+	}
+}
+
+func TestRenderTableShowsPendingCountsByReasonByDefault(t *testing.T) {
+	result := engine.Result{
+		Pending: []engine.Pending{
+			{TypeID: 1, Name: "A", Reason: engine.PendingAwaitingBuyFill, Detail: "detail one"},
+			{TypeID: 2, Name: "B", Reason: engine.PendingAwaitingBuyFill, Detail: "detail two"},
+			{TypeID: 3, Name: "C", Reason: engine.PendingUnknownOutcome, Detail: "detail three"},
+		},
+	}
+
+	out := cli.RenderTable(result, false)
+
+	if !strings.Contains(out, "PENDING (3)") {
+		t.Fatalf("got table %q, want a pending count of 3", out)
+	}
+	if !strings.Contains(out, "awaiting-buy-fill 2") || !strings.Contains(out, "unknown-outcome 1") {
+		t.Errorf("got table %q, want pending counts by reason", out)
+	}
+	if strings.Contains(out, "detail one") {
+		t.Errorf("got table %q, want pending details hidden without --explain", out)
+	}
+}
+
+func TestRenderTableWithExplainListsPendingItemsAndDetails(t *testing.T) {
+	result := engine.Result{
+		Pending: []engine.Pending{{
+			TypeID: 3, Name: "Tritanium", Reason: engine.PendingUnknownOutcome,
+			Quantity: 40, OrderID: 1002, Detail: "order 1002 vanished with 40 units unaccounted for",
+		}},
+	}
+
+	out := cli.RenderTable(result, true)
+
+	if !strings.Contains(out, "Tritanium") || !strings.Contains(out, "unknown-outcome") {
+		t.Errorf("got table %q, want the pending item and reason listed under --explain", out)
+	}
+	if !strings.Contains(out, "order 1002 vanished") {
+		t.Errorf("got table %q, want the pending detail under --explain", out)
 	}
 }

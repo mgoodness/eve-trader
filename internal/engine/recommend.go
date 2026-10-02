@@ -62,13 +62,18 @@ type Excluded struct {
 }
 
 // Result is the engine's entire public surface: the stable JSON contract
-// every adapter renders (spec §11, §5).
+// every adapter renders (spec §11, §14; ADR 0005). BuyRecommendations,
+// Unfunded, and Excluded are the buy side's three groups;
+// SellRecommendations and Pending are the sell side's output. Each slice is
+// never nil so JSON emits [] rather than null.
 type Result struct {
-	Meta            Meta             `json:"meta"`
-	Summary         Summary          `json:"summary"`
-	Recommendations []Recommendation `json:"recommendations"`
-	Unfunded        []Recommendation `json:"unfunded"`
-	Excluded        []Excluded       `json:"excluded"`
+	Meta                Meta                 `json:"meta"`
+	Summary             Summary              `json:"summary"`
+	BuyRecommendations  []BuyRecommendation  `json:"buy_recommendations"`
+	Unfunded            []BuyRecommendation  `json:"unfunded"`
+	Excluded            []Excluded           `json:"excluded"`
+	SellRecommendations []SellRecommendation `json:"sell_recommendations"`
+	Pending             []Pending            `json:"pending"`
 }
 
 // Params are the run's configurable inputs (spec §13); allocation

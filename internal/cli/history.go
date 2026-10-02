@@ -27,7 +27,7 @@ const (
 // order. No history is ever requested for a candidate the book-only stage
 // already excluded, and a book-only exclusion is never overwritten with a
 // second, history-stage reason.
-func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommendation, []engine.Excluded, PilotFacts, []string, error) {
+func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.BuyRecommendation, []engine.Excluded, PilotFacts, []string, error) {
 	recs, excluded, facts, warnings, err := BookFilteredUniverse(ctx, cfg)
 	if err != nil {
 		return nil, nil, PilotFacts{}, nil, err
@@ -49,7 +49,7 @@ func HistoryFilteredUniverse(ctx context.Context, cfg Config) ([]engine.Recommen
 		if err != nil {
 			return nil, nil, PilotFacts{}, nil, fmt.Errorf("fetching history for type %d: %w", rec.TypeID, err)
 		}
-		candidates = append(candidates, engine.CandidateHistory{Recommendation: rec, History: history})
+		candidates = append(candidates, engine.CandidateHistory{BuyRecommendation: rec, History: history})
 	}
 
 	thresholds := engine.FilterThresholds{
